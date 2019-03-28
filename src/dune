@@ -1,0 +1,11 @@
+(executable
+ (name ocamlfdo)
+ (modules ocamlfdo elf_locations)
+ (libraries
+        owee
+        core
+        compiler-libs.common
+        compiler-libs.bytecomp
+        compiler-libs.optcomp)
+ (preprocess (pps ppx_jane)))
+
