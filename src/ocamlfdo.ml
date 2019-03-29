@@ -2,23 +2,35 @@ open Core
 
 let verbose = ref false
 
+let _test elf_locations name =
+  let (start,size) = Elf_locations.resolve_function elf_locations ~name in
+  printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
+
 let main perf_profile_filename binary_filename args =
   printf "Reading perf profile from %s\n" perf_profile_filename;
   printf "Optimizing %s\n" binary_filename;
   begin match args with
   | None | Some [] -> printf "Missing compilation command\n"
   | Some args ->
-    printf "Built with";
+    printf "ocamlopt ";
     List.iter ~f:(fun s -> printf " %s" s) args;
     printf "\n"
   end;
-  let open Elf_locations in
-  let elf_locations = create ~elf_executable:binary_filename in
-  print_dwarf elf_locations;
-  let name = "camlTest2__foo_10" in
-  let (start,size) = resolve_function elf_locations ~name in
-  printf "Found %s at 0x%Lx size 0x%Lx\n" name start size;
-  ()
+  let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
+  if !verbose then Elf_locations.print_dwarf elf_locations;
+  (* set command line to args to call ocamlopt *)
+  let args = (Array.of_list (Option.value args ~default:[])) in
+  let len = Array.length args in
+  let argc = Array.length Sys.argv in
+  assert (len < argc);
+  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:1 ~len;
+  (* Can't resize args array. Fake missing arguments. *)
+  Array.fill Sys.argv ~pos:(len+1) ~len:(argc-len-1) "-inlining-report";
+  try
+    Optmain.main ()
+  with _ ->
+    printf "Exception from ocamlopt!\n";
+    exit 1
 
 let command =
   Command.basic
@@ -48,6 +60,5 @@ match the build of ocamlopt used above.
       in
       if v then verbose := true;
       fun () -> main perf_profile_filename binary_filename args)
-
 
 let () = Command.run command
