@@ -59,7 +59,7 @@ let print ~filename (state : Owee_debug_line.state) _ =
     match filename with
     | None -> ()
     | Some filename ->
-      Printf.printf "%s\t%d\t0x%x\n" filename state.line state.address
+      Printf.printf "%s\t%d\t0x%Lx\n" filename state.line state.address
 
 let print_dwarf t =
   resolve_from_dwarf t ~f:print
@@ -70,7 +70,7 @@ exception FinishedFunc
 
 let find_range t ~start ~finish
       ~filename (state : Owee_debug_line.state) _ =
-  let state_address = Int64.of_int state.address in
+  let state_address = state.address in
   if start >= state_address && finish < state_address then
     let result = match filename with
       | None -> state.filename, state.line
@@ -130,15 +130,13 @@ let find ~program_counter
 
 let resolve_pc t ~program_counter =
   (* CR-soon mshinwell: owee should use Int64.t *)
-  let program_counter' = program_counter in
-  let program_counter = Int64.to_int program_counter in
   try
     resolve_from_dwarf t ~f:(find ~program_counter);
-    Hashtbl.add t.resolved program_counter' None;
+    Hashtbl.add t.resolved program_counter None;
     None
   with (FoundLoc (filename, line)) ->
     let result = Some (filename, line) in
-    Hashtbl.add t.resolved program_counter' result;
+    Hashtbl.add t.resolved program_counter result;
     result
 
 let resolve t ~program_counter =
