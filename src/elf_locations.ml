@@ -28,25 +28,6 @@ let create ~elf_executable =
   | _, None -> failwith "Can't find string table in elf binary"
   | Some symtab, Some strtab -> { map; sections; strtab; symtab; resolved; }
 
-
-(* CR-soon mshinwell: fix owee .mli to note that [state] is
-   mutable!  It should have a copy function or something too. *)
-let copy_state (state : Owee_debug_line.state)
-  : Owee_debug_line.state =
-  { address = state.address;
-    filename = state.filename;
-    file = state.file;
-    line = state.line;
-    col = state.col;
-    is_statement = state.is_statement;
-    basic_block = state.basic_block;
-    end_sequence = state.end_sequence;
-    prologue_end = state.prologue_end;
-    epilogue_begin = state.epilogue_begin;
-    isa = state.isa;
-    discriminator = state.discriminator;
-  }
-
 (* CR mshinwell: tidy all this up.  Also, the pinpointing of which row
    is the correct one isn't great. *)
 
@@ -67,7 +48,7 @@ let resolve_from_dwarf t ~f =
             in (f ~filename state prev_state)
           end;
            (* N.B. [state] is mutable! *)
-          Some (copy_state state)
+          Some (Owee_debug_line.copy state)
         in
         ignore (Owee_debug_line.fold_rows (header, chunk) check None);
         aux ()
