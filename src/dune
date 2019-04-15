@@ -4,8 +4,11 @@
  (libraries
         owee
         core
+        csvfields
         compiler-libs.common
         compiler-libs.bytecomp
         compiler-libs.optcomp)
- (preprocess (pps ppx_jane)))
+ (preprocess (pps ppx_jane ppx_csv_conv)))
 
+
+(alias (name DEFAULT) (deps ocamlfdo.ml.pp))
