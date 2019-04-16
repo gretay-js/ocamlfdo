@@ -30,54 +30,94 @@ let read_perf_data ~perf_profile_filename =
     printf "Reading perf profile from %s\n" filename
 
 (* CR gyorsh: it has to be named t for csv  fields ppx to work. move to separate
- module. *)
+   module. *)
+(* We don't need all the fields, but redundancy is used for validating
+   the input. *)
 type t = {
-  address : int64;
-  position : int;
-  new_position : int;
+  address : int64; (* start of function *)
+  offset : int; (* offset from address *)
+  index : int; (* index in the original layout *)
+  position : int; (* new position in the permutation *)
 } [@@deriving fields, csv, compare, sexp]
 
-type layout = t list [@@deriving sexp]
+type permutation = t list [@@deriving sexp]
 
-let print_layout_item i =
-  Printf.printf "0x%Lx:%d:%d\n" i.address i.position i.new_position
+(* Contains a permutation of the original linear ids. *)
+type fun_layout = int array
+(* Maps functions to layout of the function. Spares, i.e., only contains
+functions whose layout changed. *)
+type layout = (string, fun_layout) Hashtbl.t
 
-let print_layout l =
-  (* List.iter l ~f:print_layout_item; *)
-  Printf.printf !"%{sexp:layout}\n" l
+let print_t i =
+  Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
 
-let read_layout ~layout_filename =
+let print_permutation l =
+  (* List.iter l ~f:print_t; *)
+  Printf.printf !"%{sexp:permutation}\n" l
+
+let read_permutation ~layout_filename =
   match layout_filename with
   | None -> []
   | Some filename -> begin
       printf "Reading layout from %s\n" filename;
-      let layout = csv_load ~separator:':' filename in
-      if !verbose then print_layout layout;
-      layout
+      let p = csv_load ~separator:':' filename in
+      if !verbose then print_permutation p;
+      p
     end
 
-let decode_layout layout locations =
-  List.iter layout ~f:(fun l ->
+let to_func file =
+  let name = String.chop_suffix_exn file ~suffix:".linear" in
+  let symbol_prefix =
+    if X86_proc.system = X86_proc.S_macosx then "_" else ""
+  in
+  X86_proc.string_of_symbol symbol_prefix name
+
+(* Use addresses from permutation locations to linear id layout *)
+(* Linear ids that are not locations....  *)
+let decode_layout permutation locations =
+  let layout = Hashtbl.create (module String) in
+  let decode_item l =
     let func =
       Elf_locations.function_at_pc locations ~program_counter:l.address in
     begin
       match func with
       | None -> Printf.printf "NOT FOUND\n"
-      | Some func -> Printf.printf "Function %s\n" func;
-    end;
-    let loc =
-      Elf_locations.resolve locations ~program_counter:l.address in
-    print_layout_item l;
-    match loc with
-    | None -> Printf.printf "NOT FOUND\n"
-    | Some (file,line) -> Printf.printf "%s:%d\n" file line)
+      | Some func -> begin
+          Printf.printf "Function %s\n" func;
+          print_t l;
+          let fun_layout =
+            Hashtbl.find_or_add layout func ~default:(fun () -> [||]) in
+          let program_counter =
+            Int64.(
+              l.address + (Int64.of_int l.offset)) in
+          let loc = Elf_locations.resolve locations ~program_counter in
+          match loc with
+          | None -> Printf.printf "Elf location NOT FOUND at 0x%Lx\n"
+                      program_counter
+          | Some (file,line) ->
+            Printf.printf "%s:%d\n" file line;
+            (* Check that the func symbol name from the binary where
+               permutation comes from matches the function name encoded
+               as filename into our special dwarf info. *)
+            let func_name_dwarf = to_func file in
+            assert (func_name_dwarf = func);
+            fun_layout.(l.position) <- line;
+            (* Do we need the following line or is it already referencing
+               the right object *)
+            Hashtbl.set layout ~key:func ~data:fun_layout
+        end
+    end
+  in
+  List.iter permutation ~f:decode_item;
+  layout
 
 let main ~binary_filename ~perf_profile_filename ~layout_filename args =
   printf "Optimizing %s\n" binary_filename;
   let locations = load_locations ~binary_filename in
   read_perf_data ~perf_profile_filename;
-  let layout = read_layout ~layout_filename in
-  decode_layout layout locations;
+  let permutation = read_permutation ~layout_filename in
+  let _layout = decode_layout permutation locations in
+  (* Reorder.layout := Some layout *)
   begin match args with
   | None | Some [] -> printf "Missing compilation command\n"
   | Some args ->
