@@ -2,33 +2,6 @@ open Core
 
 let verbose = ref false
 
-(* let _register_passes () =
- *   let dump_linear_if = mk_pass_dump_if "dump_linear" Printlinear.fundecl in
- *   let blockreorder = mk_pass "blcok_reorder" Reorder.fundecl in
- *   let linear_invariants = mk_pass "linear_invariants" Linear_invariants.check
- *   in
- *   PassManager.register_before "scheduling" [ linear_invariants ];
- *   PassManager.register_before "emit"
- *     [ blockreorder;
- *       dump_linear_if dump_reorder "After block reordering";
- *       linear_invariants;
- *     ] *)
-
-let _test elf_locations name =
-  let (start,size) = Elf_locations.resolve_function elf_locations ~name in
-  printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
-
-let load_locations ~binary_filename =
-  let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
-  if !verbose then Elf_locations.print_dwarf elf_locations;
-  elf_locations
-
-let read_perf_data ~perf_profile_filename =
-  match perf_profile_filename with
-  | None -> ()
-  | Some filename ->
-    printf "Reading perf profile from %s\n" filename
-
 (* CR gyorsh: it has to be named t for csv  fields ppx to work. move to separate
    module. *)
 (* We don't need all the fields, but redundancy is used for validating
@@ -42,11 +15,20 @@ type t = {
 
 type permutation = t list [@@deriving sexp]
 
-(* Contains a permutation of the original linear ids. *)
-type fun_layout = int array
-(* Maps functions to layout of the function. Spares, i.e., only contains
-functions whose layout changed. *)
-type layout = (string, fun_layout) Hashtbl.t
+let _test elf_locations name =
+  let (start,size) = Elf_locations.resolve_function elf_locations ~name in
+  Printf.printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
+
+let load_locations binary_filename =
+  let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
+  if !verbose then Elf_locations.print_dwarf elf_locations;
+  elf_locations
+
+let read_perf_data ~perf_profile_filename =
+  match perf_profile_filename with
+  | None -> ()
+  | Some filename ->
+    printf "Reading perf profile from %s\n" filename
 
 let print_t i =
   Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
@@ -65,17 +47,43 @@ let read_permutation ~layout_filename =
       p
     end
 
-let to_func file =
-  let name = String.chop_suffix_exn file ~suffix:".linear" in
-  let symbol_prefix =
-    if X86_proc.system = X86_proc.S_macosx then "_" else ""
+let print_fun_layout_item (key, data) =
+  Printf.printf "position=%d linear_id=%d\n" key data
+
+let print_fun_layout ~key:name ~data:(fun_layout : (int,int) Hashtbl.t) =
+  Printf.printf "%s (%d)\n" name (Hashtbl.length fun_layout);
+  let sorted_fun_layout =
+    List.sort (Hashtbl.to_alist fun_layout)
+      ~compare:(fun (k1, _) (k2,_) -> Int.compare k1 k2)
   in
-  X86_proc.string_of_symbol symbol_prefix name
+  List.iter sorted_fun_layout ~f:print_fun_layout_item
+
+let print_layout layout =
+  Hashtbl.iteri layout ~f:print_fun_layout
+
+let to_func file =
+  match String.chop_suffix file ~suffix:".linear" with
+  | None -> None
+  | Some name ->
+    let symbol_prefix =
+      if X86_proc.system = X86_proc.S_macosx then "_" else ""
+    in
+    Some (X86_proc.string_of_symbol symbol_prefix name)
 
 (* Use addresses from permutation locations to linear id layout *)
 (* Linear ids that are not locations....  *)
 let decode_layout permutation locations =
   let layout = Hashtbl.create (module String) in
+  let add func pos id =
+    let fun_layout =
+      Hashtbl.find_or_add layout func
+        ~default:(fun () -> Hashtbl.create (module Int)) in
+    match Hashtbl.add fun_layout ~key:pos ~data:id with
+    | `Duplicate -> Misc.fatal_errorf
+                      "Cannot add linear_id %d at position %d in function %s"
+                      id pos func
+    | `Ok -> ()
+  in
   let decode_item l =
     let func =
       Elf_locations.function_at_pc locations ~program_counter:l.address in
@@ -85,8 +93,6 @@ let decode_layout permutation locations =
       | Some func -> begin
           Printf.printf "Function %s\n" func;
           print_t l;
-          let fun_layout =
-            Hashtbl.find_or_add layout func ~default:(fun () -> [||]) in
           let program_counter =
             Int64.(
               l.address + (Int64.of_int l.offset)) in
@@ -99,25 +105,51 @@ let decode_layout permutation locations =
             (* Check that the func symbol name from the binary where
                permutation comes from matches the function name encoded
                as filename into our special dwarf info. *)
-            let func_name_dwarf = to_func file in
-            assert (func_name_dwarf = func);
-            fun_layout.(l.position) <- line;
-            (* Do we need the following line or is it already referencing
-               the right object *)
-            Hashtbl.set layout ~key:func ~data:fun_layout
+            match to_func file with
+            | None -> ()
+            | Some func_name_dwarf -> begin
+                assert (func_name_dwarf = func);
+                add func l.position line
+              end
         end
     end
   in
   List.iter permutation ~f:decode_item;
+  if !verbose then print_layout layout;
   layout
 
-let main ~binary_filename ~perf_profile_filename ~layout_filename args =
+(* let _register_passes () =
+ *   let dump_linear_if = mk_pass_dump_if "dump_linear" Printlinear.fundecl in
+ *   let blockreorder = mk_pass "blcok_reorder" Reorder.fundecl in
+ *   let linear_invariants = mk_pass "linear_invariants" Linear_invariants.check
+ *   in
+ *   PassManager.register_before "scheduling" [ linear_invariants ];
+ *   PassManager.register_before "emit"
+ *     [ blockreorder;
+ *       dump_linear_if dump_reorder "After block reordering";
+ *       linear_invariants;
+ *     ] *)
+
+let main ~binary_filename
+      ~perf_profile_filename
+      ~layout_filename
+      ~random_order
+      args =
   printf "Optimizing %s\n" binary_filename;
-  let locations = load_locations ~binary_filename in
+  let locations = load_locations binary_filename in
   read_perf_data ~perf_profile_filename;
   let permutation = read_permutation ~layout_filename in
-  let _layout = decode_layout permutation locations in
-  (* Reorder.layout := Some layout *)
+  if permutation <> [] then begin
+    let layout = decode_layout permutation locations in
+    Reoptimize.set_transform
+      (fun cfg ->
+         Reorder.reorder (Reorder.External layout) cfg
+         (* If we eliminate dead blocks before a transformation
+            then some algorithms might not apply because they rely
+            on perf data based on original instructions. *)
+         |> Cfg.eliminate_dead_blocks cfg
+      );
+  end;
   begin match args with
   | None | Some [] -> printf "Missing compilation command\n"
   | Some args ->
@@ -157,6 +189,7 @@ match the build of ocamlopt used above.
     Command.Let_syntax.(
       let%map_open
         v = flag "-v" no_arg ~doc:" verbose"
+      and random_order = flag "-random-order" no_arg ~doc:" reorder blocks at random"
       and binary_filename = flag "-binary" (required Filename.arg_type)
                               ~doc:"filename elf binary to optimize"
       and perf_profile_filename = flag "-perf-profile" (optional Filename.arg_type)
@@ -167,10 +200,19 @@ match the build of ocamlopt used above.
                    ~doc:"ocamlopt_args standard options passed to opcamlopt"
       in
       if v then verbose := true;
+      if random_order then begin
+        if pref_profile_file <> None then
+          Printf.printf
+            "Warning: Ignoring -perf-profile. Incompatible with -random-order\n";
+        if layout_filename <> None then
+          Printf.printf
+            "Warning: Ignoring -layout. Incompatible with -random-order\n";
+      end;
       fun () -> main
                   ~binary_filename
                   ~perf_profile_filename
                   ~layout_filename
+                  ~random_order
                   args)
 
 let () = Command.run command

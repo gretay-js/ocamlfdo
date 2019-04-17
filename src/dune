@@ -1,6 +1,6 @@
 (executable
  (name ocamlfdo)
- (modules ocamlfdo elf_locations)
+ (modules ocamlfdo elf_locations reorder)
  (libraries
         owee
         core
