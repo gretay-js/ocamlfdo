@@ -136,7 +136,7 @@ let decode_layout permutation locations =
  *       linear_invariants;
  *     ] *)
 
-let setup_reoptimize ~binary_filename
+let setup_reorder ~binary_filename
       ~perf_profile_filename
       ~layout_filename
       ~random_order =
@@ -145,12 +145,12 @@ let setup_reoptimize ~binary_filename
       printf "Warning: missing -binary <filename>. Not running FDO\n";
       printf "Creating a binary for initial profiling.\n";
       (* Identity transformer, just generate linear ids and debug info. *)
-      Reoptimize.set_transform ~f:(fun cfg -> cfg);
+      Reorder.Identity
     end
   | Some binary_filename -> begin
       printf "Optimizing %s\n" binary_filename;
       if random_order then
-        Reoptimize.set_transform ~f:(Reorder.reorder Reorder.Random)
+        Reorder.Random
       else begin
         let locations = load_locations binary_filename in
         let permutation = read_permutation ~layout_filename in
@@ -158,24 +158,17 @@ let setup_reoptimize ~binary_filename
           let layout = decode_layout permutation locations in
           if Hashtbl.is_empty layout then
             Misc.fatal_error "Cannot decode layout\n";
-          Reoptimize.set_transform
-            ~f:(fun cfg ->
-               let cfg = Reorder.reorder (Reorder.External layout) cfg in
-               (* If we eliminate dead blocks before a transformation
-                  then some algorithms might not apply because they rely
-                  on perf data based on original instructions. *)
-               (* Cfg.eliminate_dead_blocks cfg; *)
-               cfg
-            );
+          Reorder.External layout
         end
         else begin
           read_perf_data ~perf_profile_filename;
-          Reoptimize.set_transform ~f:(Reorder.reorder Reorder.CachePlus)
-        end;
-      end;
+          Reorder.CachePlus
+        end
+      end
     end
 
 let call_ocamlopt args =
+  (* Set debug "-g" to emit dwarf locations. *)
   Clflags.debug := true;
   (* set command line to args to call ocamlopt *)
   begin match args with
@@ -199,8 +192,19 @@ let main ~binary_filename
       ~layout_filename
       ~random_order
       args =
-  setup_reoptimize ~binary_filename
-    ~perf_profile_filename ~layout_filename ~random_order;
+
+  let algo = setup_reorder ~binary_filename
+               ~perf_profile_filename ~layout_filename ~random_order
+  in
+  (*
+   *            (* If we eliminate dead blocks before a transformation
+   *               then some algorithms might not apply because they rely
+   *               on perf data based on original instructions. *)
+   *            Cfg.eliminate_dead_blocks cfg;
+   **)
+  let transform = Reorder.reorder algo in
+  let validate = Reorder.validate algo in
+  Reoptimize.setup ~f:(Wrapper.fundecl ~transform ~validate);
   call_ocamlopt args
 
 let command =

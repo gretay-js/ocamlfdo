@@ -99,3 +99,7 @@ let reorder algo cfg =
   | Random -> reorder_random cfg
   | CachePlus -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
   | External layout -> reorder_layout cfg layout
+
+let validate = function
+  | Identity -> true
+  | _ -> false

@@ -12,5 +12,5 @@ type reorder_algo =
   | External of layout
   | CachePlus
 
-
 val reorder : reorder_algo -> Cfg.t -> Cfg.t
+val validate : reorder_algo -> bool
