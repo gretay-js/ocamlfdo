@@ -34,6 +34,7 @@ let reorder_layout cfg layout =
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some fun_layout -> begin
+      if !verbose then Cfg.print cfg;
       (* get linear ids in the new order *)
       let sorted_fun_layout =
         List.sort (Hashtbl.to_alist fun_layout)
