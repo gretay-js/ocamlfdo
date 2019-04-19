@@ -139,36 +139,7 @@ let set_layout t new_layout =
   t.layout <- new_layout;
   t
 
-let print t =
-  Printf.printf "%s\n" t.fun_name;
-  Printf.printf "layout.length=%d\n" (List.length t.layout);
-  Printf.printf "blocks.length=%d\n" (Hashtbl.length t.blocks);
-  let print_block label block =
-      Printf.printf "%d:\n" label;
-      List.iter (fun i->
-        Printf.printf "\t%d\n" i.id)
-        block.body;
-      Printf.printf "\t%d\n" block.terminator.id
-  in
-  List.iter (fun label ->
-    let block = Hashtbl.find t.blocks label
-    in print_block label block)
-    t.layout;
-  Printf.printf "id_to_label map: \n";
-  Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
-    t.id_to_label;
-  Printf.printf "\n"
-
 let get_name t = t.fun_name
-
-let id_to_label t id =
-  match Numbers.Int.Map.find_opt id t.id_to_label with
-  | None ->
-    print t;
-    Misc.fatal_errorf "Cannot find label for id %d in map\n" id
-  | Some lbl ->
-    Printf.printf "Found label %d for id %d in map\n" lbl id;
-    Some lbl
 
 let no_label = (-1)
 type labelled_insn =
@@ -764,3 +735,38 @@ let to_linear t =
     next := { label; insn; }
   done;
   !next.insn
+
+let print t =
+  let print_instr i =
+    Format.kasprintf print_endline "@;%a"
+      Printlinear.instr (basic_to_linear i end_instr);
+  in
+  Printf.printf "%s\n" t.fun_name;
+  Printf.printf "layout.length=%d\n" (List.length t.layout);
+  Printf.printf "blocks.length=%d\n" (Hashtbl.length t.blocks);
+  let print_block label block =
+      Printf.printf "%d:\n" label;
+      List.iter (fun i->
+        Printf.printf "\t%d\n" i.id;
+        print_instr i)
+        block.body;
+      Printf.printf "\t%d\n" block.terminator.id
+  in
+  List.iter (fun label ->
+    let block = Hashtbl.find t.blocks label
+    in print_block label block)
+    t.layout;
+  Printf.printf "id_to_label map: \n";
+  Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
+    t.id_to_label;
+  Printf.printf "\n"
+
+
+let id_to_label t id =
+  match Numbers.Int.Map.find_opt id t.id_to_label with
+  | None ->
+    print t;
+    Misc.fatal_errorf "Cannot find label for id %d in map\n" id
+  | Some lbl ->
+    Printf.printf "Found label %d for id %d in map\n" lbl id;
+    Some lbl
