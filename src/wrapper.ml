@@ -10,28 +10,6 @@ open Linearize
 
 let verbose = ref false
 
-let rec equal i1 i2 =
-  (* Format.kasprintf prerr_endline "@;%a" Printlinear.instr i1;
-   * Format.kasprintf prerr_endline "@;%a" Printlinear.instr i2; *)
-  if i1 == i2 then true
-  else
-  if i1.desc = i2.desc &&
-     i1.id = i2.id &&
-     Reg.array_equal i1.arg i2.arg &&
-     Reg.array_equal i1.res i2.res &&
-     Reg.Set.equal i1.live i2.live &&
-     (Debuginfo.compare i1.dbg i2.dbg) = 0
-  then begin
-    if i1.desc = Lend then true
-    else equal i1.next i2.next
-  end
-  else begin
-    Format.kasprintf prerr_endline "Equality failed on:@;%a@;%a"
-      Printlinear.instr i1
-      Printlinear.instr i2;
-    false
-  end
-
 (* all labels have id 0 because cfg operations can create new labels,
    whereas ids*)
 let label_id = 0
@@ -80,16 +58,39 @@ let add_linear_discriminators f =
            fun_body = add_linear_discriminator f.fun_body file entry_id
   }
 
+
+let rec equal i1 i2 =
+  (* Format.kasprintf prerr_endline "@;%a" Printlinear.instr i1;
+   * Format.kasprintf prerr_endline "@;%a" Printlinear.instr i2; *)
+  if i1.desc = i2.desc &&
+     i1.id = i2.id &&
+     Reg.array_equal i1.arg i2.arg &&
+     Reg.array_equal i1.res i2.res &&
+     Reg.Set.equal i1.live i2.live &&
+     (Debuginfo.compare i1.dbg i2.dbg) = 0
+  then begin
+    if i1.desc = Lend then true
+    else equal i1.next i2.next
+  end
+  else begin
+    Format.kasprintf prerr_endline "Equality failed on:@;%a@;%a"
+      Printlinear.instr i1
+      Printlinear.instr i2;
+    false
+  end
+
 let check_equal f ~new_body =
-  if (equal f.fun_body new_body) then begin
-    Format.kasprintf prerr_endline "Before:@;%a" Printlinear.fundecl f;
+  if not (equal f.fun_body new_body) then begin
+    Format.kasprintf prerr_endline "Before:@;%a"
+      Printlinear.fundecl f;
     Format.kasprintf prerr_endline "\nAfter:@;%a"
       Printlinear.fundecl {f with fun_body = new_body};
     Misc.fatal_errorf "Conversion from linear to cfg and back to linear \
-                       is not an indentity function.\n"
+                       is not an identity function.\n"
   end
 
-let fundecl f ~transform ~validate =
+
+let fundecl f ~transform ~validate ~gen_rel_layout =
   if f.fun_fast then begin
     if !verbose then begin
       Printf.printf "Processing %s\n" f.fun_name;
@@ -103,8 +104,7 @@ let fundecl f ~transform ~validate =
     if !verbose then
       Format.kasprintf prerr_endline "\nAfter:@;%a"
         Printlinear.fundecl {f with fun_body = new_body};
-    if validate then
-      check_equal f ~new_body;
+    if validate then check_equal f ~new_body;
     {f with fun_body = new_body}
   end
   else

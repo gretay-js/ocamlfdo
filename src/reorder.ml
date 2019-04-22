@@ -91,16 +91,40 @@ let reorder_layout cfg layout =
       assert (List.length new_cfg_layout = List.length orig_cfg_layout);
       assert ((List.sort new_cfg_layout ~compare:Int.compare) =
               (List.sort orig_cfg_layout ~compare:Int.compare));
+      Cfg.set_layout cfg new_cfg_layout;
+    end
+
+let reorder_rel_layout cfg layout =
+  let fun_name = Cfg.get_name cfg in
+  match Hashtbl.find layout fun_name with
+  | None -> cfg
+  | Some new_cfg_layout -> begin
+      if !verbose then Cfg.print cfg;
+      let orig_cfg_layout = Cfg.get_layout cfg in
+      print_list "orig" orig_cfg_layout;
+      print_list "new" new_cfg_layout;
+      (* Make sure the new layout is just a permutation.
+         CR gyorsh: do we need to handle block duplication here? *)
+      assert (List.length new_cfg_layout = List.length orig_cfg_layout);
+      assert ((List.sort new_cfg_layout ~compare:Int.compare) =
+              (List.sort orig_cfg_layout ~compare:Int.compare));
       Cfg.set_layout cfg new_cfg_layout
     end
 
-let reorder algo cfg =
-  match algo with
-  | Identity -> cfg
-  | Random -> reorder_random cfg
-  | CachePlus -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
-  | External layout -> reorder_layout cfg layout
+let reorder ~algo cfg ~write_rel_layout =
+  let new_cfg =
+    match algo with
+    | Identity -> cfg
+    | Random -> reorder_random cfg
+    | CachePlus _ -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
+    | Raw layout -> reorder_layout cfg layout
+    | Rel layout -> reorder_rel_layout cfg layout
+  in
+  let new_layout = Cfg.get_layout cfg in
+  write_rel_layout new_layout;
+  cfg
 
 let validate = function
   | Identity -> true
   | _ -> false
+

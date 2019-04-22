@@ -2,50 +2,89 @@ open Core
 
 let verbose = ref false
 
-(* CR gyorsh: it has to be named t for csv  fields ppx to work. move to separate
-   module. *)
-(* We don't need all the fields, but redundancy is used for validating
-   the input. *)
-type t = {
-  address : int64; (* start of function *)
-  offset : int; (* offset from address *)
-  index : int; (* index in the original layout *)
-  position : int; (* new position in the permutation *)
-} [@@deriving fields, csv, compare, sexp]
+module Raw_layout : sig
+  (* CR gyorsh: it has to be named t for csv  fields ppx to work. move to separate
+     module. *)
+  (* We don't need all the fields, but redundancy is used for validating
+     the input. *)
+  type p
 
-type permutation = t list [@@deriving sexp]
+  val read : raw_layout_filename:string -> p
+  val print : p -> unit
+
+end = struct
+  type t = {
+    address : int64; (* start of function *)
+    offset : int; (* offset from address *)
+    index : int; (* index in the original layout *)
+    position : int; (* new position in the permutation *)
+  } [@@deriving fields, csv, compare, sexp]
+
+  type p = t list [@@deriving sexp]
+
+
+  let print_t i =
+    Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
+
+  let print l =
+    (* List.iter l ~f:print_t; *)
+    Printf.printf !"%{sexp:p}\n" l
+
+  let read filename =
+    if !verbose then
+      printf "Reading raw layout from %s\n" filename;
+    let p = csv_load ~separator:':' filename in
+    if !verbose then print p;
+    p
+
+end
+
+module Rel_layout : sig
+
+  type p
+
+  val read : rel_layout_filename:string -> p
+  val print : p -> unit
+  val create : string -> int list -> p
+
+end = struct
+  type t = {
+    func : string;
+    label list: int
+  } [@@deriving sexp]
+
+  type p : t list [@@deriving sexp]
+
+  let print l =
+    Printf.printf !"%{sexp:p}\n" l
+
+  let read filename =
+    if !verbose then
+      printf "Reading relative layout from %s\n" filename;
+    let p = csv_load ~separator:':' filename in
+    if !verbose then print p;
+    p
+
+  let create name labels =
+    List.map labels ~f:(fun lbl -> [name; lbl])
+
+  let write p ~filename =
+    csv_append ~separator:':' filename (create name labels)
+end
 
 let _test elf_locations name =
   let (start,size) = Elf_locations.resolve_function elf_locations ~name in
-  Printf.printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
+  if !verbose then
+    Printf.printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
 
 let load_locations binary_filename =
   let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-let read_perf_data ~perf_profile_filename =
-  match perf_profile_filename with
-  | None -> ()
-  | Some filename ->
-    printf "Reading perf profile from %s\n" filename
-
-let print_t i =
-  Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
-
-let print_permutation l =
-  (* List.iter l ~f:print_t; *)
-  Printf.printf !"%{sexp:permutation}\n" l
-
-let read_permutation ~layout_filename =
-  match layout_filename with
-  | None -> []
-  | Some filename -> begin
-      printf "Reading layout from %s\n" filename;
-      let p = csv_load ~separator:':' filename in
-      if !verbose then print_permutation p;
-      p
-    end
+let decode_perf_data _locations ~perf_profile_filename =
+  if !verbose then printf "Reading perf profile from %s\n" filename;
+   Misc.fatal_error "Not implemented: read_perf_data"
 
 let print_fun_layout_item (key, data) =
   Printf.printf "position=%d linear_id=%d\n" key data
@@ -64,7 +103,7 @@ let print_layout layout =
 let to_func file =
   match String.chop_suffix file ~suffix:".linear" with
   | None ->
-    Printf.printf "Ignoring %s\n" file;
+    if !verbose then Printf.printf "Ignoring %s\n" file;
     None
   | Some name ->
     let symbol_prefix =
@@ -91,19 +130,25 @@ let decode_layout permutation locations =
       Elf_locations.function_at_pc locations ~program_counter:l.address in
     begin
       match func with
-      | None -> Printf.printf "NOT FOUND %Lx\n" l.address
+      | None ->
+        if !verbose then
+          Printf.printf "NOT FOUND %Lx\n" l.address
       | Some func -> begin
-          Printf.printf "Function %s\n" func;
+          if !verbose then
+            Printf.printf "Function %s\n" func;
           print_t l;
           let program_counter =
             Int64.(
               l.address + (Int64.of_int l.offset)) in
           let loc = Elf_locations.resolve locations ~program_counter in
           match loc with
-          | None -> Printf.printf "Elf location NOT FOUND at 0x%Lx\n"
-                      program_counter
+          | None ->
+            if !verbose then
+              Printf.printf "Elf location NOT FOUND at 0x%Lx\n"
+                program_counter
           | Some (file,line) ->
-            Printf.printf "%s:%d\n" file line;
+            if !verbose then
+              Printf.printf "%s:%d\n" file line;
             (* Check that the func symbol name from the binary where
                permutation comes from matches the function name encoded
                as filename into our special dwarf info. *)
@@ -124,45 +169,58 @@ let decode_layout permutation locations =
   if !verbose then print_layout layout;
   layout
 
-(* let _register_passes () =
- *   let dump_linear_if = mk_pass_dump_if "dump_linear" Printlinear.fundecl in
- *   let blockreorder = mk_pass "blcok_reorder" Reorder.fundecl in
- *   let linear_invariants = mk_pass "linear_invariants" Linear_invariants.check
- *   in
- *   PassManager.register_before "scheduling" [ linear_invariants ];
- *   PassManager.register_before "emit"
- *     [ blockreorder;
- *       dump_linear_if dump_reorder "After block reordering";
- *       linear_invariants;
- *     ] *)
-
 let setup_reorder ~binary_filename
       ~perf_profile_filename
-      ~layout_filename
+      ~raw_layout_filename
+      ~rel_layout_filename
       ~random_order =
   match binary_filename with
   | None -> begin
-      printf "Warning: missing -binary <filename>. Not running FDO\n";
-      printf "Creating a binary for initial profiling.\n";
+      if !verbose then begin
+        printf "Warning: missing -binary <filename>. Not running FDO\n";
+        printf "Creating a binary for initial profiling.\n"
+      end;
       (* Identity transformer, just generate linear ids and debug info. *)
       Reorder.Identity
     end
   | Some binary_filename -> begin
-      printf "Optimizing %s\n" binary_filename;
+      if !verbose then
+        printf "Optimizing %s\n" binary_filename;
       if random_order then
         Reorder.Random
       else begin
         let locations = load_locations binary_filename in
-        let permutation = read_permutation ~layout_filename in
-        if permutation <> [] then begin
-          let layout = decode_layout permutation locations in
+        let raw_layout =
+          match raw_layout_filename with
+          | None -> []
+          | Some raw_layout_filename
+            -> Raw_layout.read raw_layout_filename
+        in
+        if not (List.is_empty raw_layout) then begin
+          let layout = decode_layout raw_layout locations in
           if Hashtbl.is_empty layout then
             Misc.fatal_error "Cannot decode layout\n";
-          Reorder.External layout
+          Reorder.Raw layout
         end
         else begin
-          read_perf_data ~perf_profile_filename;
-          Reorder.CachePlus
+          let rel_layout =
+            match rel_layout_filename with
+            | None -> []
+            | Some rel_layout_filename ->
+              Rel_layout.read rel_layout_filename
+          in
+          if not (List.is_empty rel_layout) then
+            Reorder.Rel rel_layout
+          else begin
+            match perf_profile_filename with
+            | None -> Reorder.Identity
+            | Some perf_profile_filename -> begin
+                let perf_data =
+                  decode_perf_data locations ~perf_profile_filename
+                in
+                Reorder.CachePlus perf_data
+              end
+          end
         end
       end
     end
@@ -172,11 +230,15 @@ let call_ocamlopt args =
   Clflags.debug := true;
   (* set command line to args to call ocamlopt *)
   begin match args with
-  | None | Some [] -> printf "Missing compilation command\n"
+  | None | Some [] ->
+    if !verbose then
+      printf "Missing compilation command\n"
   | Some args ->
-    printf "ocamlopt ";
-    List.iter ~f:(fun s -> printf " %s" s) args;
-    printf "\n"
+    if !verbose then begin
+      printf "ocamlopt ";
+      List.iter ~f:(fun s -> printf " %s" s) args;
+      printf "\n"
+    end
   end;
   let args = (Array.of_list (Option.value args ~default:[])) in
   let len = Array.length args in
@@ -189,12 +251,17 @@ let call_ocamlopt args =
 
 let main ~binary_filename
       ~perf_profile_filename
-      ~layout_filename
+      ~raw_layout_filename
+      ~rel_layout_filename
+      ~gen_rel_layout
       ~random_order
       args =
 
   let algo = setup_reorder ~binary_filename
-               ~perf_profile_filename ~layout_filename ~random_order
+               ~perf_profile_filename
+               ~raw layout_filename
+               ~rel_layout_filename
+               ~random_order
   in
   (*
    *            (* If we eliminate dead blocks before a transformation
@@ -202,8 +269,8 @@ let main ~binary_filename
    *               on perf data based on original instructions. *)
    *            Cfg.eliminate_dead_blocks cfg;
    **)
-  let transform = Reorder.reorder algo in
-  let validate = Reorder.validate algo in
+  let transform = Reorder.reorder ~algo ~gen_rel_layout in
+  let validate = Reorder.validate ~algo in
   Reoptimize.setup ~f:(Wrapper.fundecl ~transform ~validate);
   call_ocamlopt args
 
@@ -230,29 +297,61 @@ match the build of ocamlopt used above.
     Command.Let_syntax.(
       let%map_open
         v = flag "-v" no_arg ~doc:" verbose"
-      and random_order = flag "-random-order" no_arg ~doc:" reorder blocks at random"
-      and binary_filename = flag "-binary" (optional Filename.arg_type)
-                              ~doc:"filename elf binary to optimize"
-      and perf_profile_filename = flag "-perf-profile" (optional Filename.arg_type)
-                                    ~doc:"perf.data output of perf record"
-      and layout_filename = flag "-layout" (optional Filename.arg_type)
-                              ~doc:"filename block layout to use for reordering"
+      and q = flag "-q" no_arg ~doc:" quiet"
+      and gen_rel_layout =
+        flag "-gen-layout" (optional Filename.arg_type)
+          ~doc:"filename generate relative layout and write to <filename>"
+      and random_order =
+        flag "-random-order" no_arg ~doc:" reorder blocks at random"
+      and binary_filename =
+        flag "-binary" (optional Filename.arg_type)
+          ~doc:"filename elf binary to optimize"
+      and perf_profile_filenameperf_profile_filename =
+        flag "-perf-profile" (optional Filename.arg_type)
+          ~doc:"perf.data output of perf record"
+      and raw_layout_filename =
+        flag "-raw-layout" (optional Filename.arg_type)
+          ~doc:"filename block layout for reordering: raw binary addresses"
+      and rel_layout_filename =
+        flag "-rel-layout" (optional Filename.arg_type)
+          ~doc:"filename block layout for reorderin relative to function start,
+does not require -binary"
       and args = flag "--" (escape)
                    ~doc:"ocamlopt_args standard options passed to opcamlopt"
       in
       if v then verbose := true;
+      if q then verbose := false;
       if random_order then begin
-        if perf_profile_filename <> None then
-          Printf.printf
-            "Warning: Ignoring -perf-profile. Incompatible with -random-order\n";
-        if layout_filename <> None then
-          Printf.printf
-            "Warning: Ignoring -layout. Incompatible with -random-order\n";
+        if !verbose then begin
+          if (perf_profile_filename = Some _) then
+            Printf.printf
+              "Warning: Ignoring -perf-profile.
+Incompatible with -random-order\n";
+          if (raw_layout_filename = Some _) then
+            Printf.printf
+              "Warning: Ignoring -raw-layout and -layout.
+Incompatible with -random-order\n";
+        end;
+      end;
+      if binary_file = None && !verbose then begin
+        if perf_profile_filename = Some _
+        || raw_layout_filename = Some _ then
+          Printf.printf "Warning: ignoring -raw_layout and -perf-profile,
+cannot use without -binary."
+      end;
+      if gen_rel_layout = Some _ &&
+         perf_profile_filename = None  &&
+         raw_layout_filename = None &&
+         binary_filename = Some _
+         !verbose then begin
+        Printf.printf "Creating layout without reordering, ignoring -binary\n"
       end;
       fun () -> main
                   ~binary_filename
                   ~perf_profile_filename
-                  ~layout_filename
+                  ~raw_layout_filename
+                  ~rel_layout_filename
+                  ~gen_rel_layout
                   ~random_order
                   args)
 

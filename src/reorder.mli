@@ -1,16 +1,23 @@
 open Core
 
 (* Maps functions to layout of the function,
-   which is essentially a permutation of original linear ids,
+   which is essentially a permutation of original ids,
    indexed by the position.
-   Spares, i.e., only contains unctions whose layout changed. *)
+   Used for raw and relative layout:
+   raw layout: linear ids
+   relative layout: cfg labels
+   Sparse, i.e., only contains functions whose layout changed. *)
 type layout = (string, (int, int) Hashtbl.t) Hashtbl.t
+
+type perf_data
 
 type reorder_algo =
   | Identity
   | Random
-  | External of layout
-  | CachePlus
+  | Raw of layout
+  | Rel of layout
+  | CachePlus of perf_data
 
-val reorder : reorder_algo -> Cfg.t -> Cfg.t
+val reorder : reorder_algo -> Cfg.t -> gen_rel_layout:string option -> Cfg.t
+
 val validate : reorder_algo -> bool
