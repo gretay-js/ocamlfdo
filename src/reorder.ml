@@ -8,14 +8,14 @@ open Core
 
 let verbose = ref true
 
-type fun_layout = (int, int) Hashtbl.t
-type layout = (string, fun_layout) Hashtbl.t
+type layout = (string, int list) Hashtbl.t
 
 type reorder_algo =
   | Identity
   | Random
-  | External of layout
-  | CachePlus
+  | Linear_id of layout
+  | Cfg_label of layout
+  | CachePlus of unit
 
 let reorder_random cfg =
   (* Ensure entry exit invariants *)
@@ -33,14 +33,8 @@ let reorder_layout cfg layout =
   let fun_name = Cfg.get_name cfg in
   match Hashtbl.find layout fun_name with
   | None -> cfg
-  | Some fun_layout -> begin
+  | Some sorted_fun_layout -> begin
       if !verbose then Cfg.print cfg;
-      (* get linear ids in the new order *)
-      let sorted_fun_layout =
-        List.sort (Hashtbl.to_alist fun_layout)
-          ~compare:(fun (k1, _) (k2,_) -> Int.compare k1 k2)
-        |> List.map ~f:(fun (_k, d) -> d)
-      in
       let orig_cfg_layout = Cfg.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "sorted_fun_layout" sorted_fun_layout;
@@ -117,11 +111,12 @@ let reorder ~algo cfg ~write_rel_layout =
     | Identity -> cfg
     | Random -> reorder_random cfg
     | CachePlus _ -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
-    | Raw layout -> reorder_layout cfg layout
-    | Rel layout -> reorder_rel_layout cfg layout
+    | Cfg_label layout -> reorder_rel_layout cfg layout
+    | Linear_id layout -> reorder_layout cfg layout
   in
-  let new_layout = Cfg.get_layout cfg in
-  write_rel_layout new_layout;
+  let new_layout = Cfg.get_layout new_cfg in
+  let fun_name = Cfg.get_name new_cfg in
+  write_rel_layout fun_name new_layout;
   cfg
 
 let validate = function

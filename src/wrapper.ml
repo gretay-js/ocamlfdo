@@ -90,7 +90,7 @@ let check_equal f ~new_body =
   end
 
 
-let fundecl f ~transform ~validate ~gen_rel_layout =
+let fundecl f ~transform ~validate =
   if f.fun_fast then begin
     if !verbose then begin
       Printf.printf "Processing %s\n" f.fun_name;

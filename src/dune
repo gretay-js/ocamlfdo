@@ -7,7 +7,8 @@
         csvfields
         compiler-libs.common
         compiler-libs.bytecomp
-        compiler-libs.optcomp)
+        compiler-libs.optcomp
+        parsexp_io)
  (preprocess (pps ppx_jane ppx_csv_conv)))
 
 
