@@ -107,14 +107,9 @@ end = struct
           ~append:true
 end
 
-let _test elf_locations name =
-  let (start,size) = Elf_locations.resolve_function elf_locations ~name in
-  if !verbose then
-    Printf.printf "Found %s at 0x%Lx size 0x%Lx\n" name start size
-
 let load_locations binary_filename =
   let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
-  if !verbose then Elf_locations.print_dwarf elf_locations;
+  (* if !verbose then Elf_locations.print_dwarf elf_locations; *)
   elf_locations
 
 let decode_perf_data _locations ~perf_profile_filename =
@@ -147,8 +142,7 @@ let to_func file =
     in
     Some (X86_proc.string_of_symbol symbol_prefix name)
 
-(* Use addresses from permutation locations to linear id layout *)
-(* Linear ids that are not locations....  *)
+(* Use addresses from permutation locations to find linear id layout *)
 let decode_layout permutation locations =
   let layout = Hashtbl.create (module String) in
   let add func pos id =
@@ -159,24 +153,26 @@ let decode_layout permutation locations =
     | `Duplicate -> Misc.fatal_errorf
                       "Cannot add linear_id %d at position %d in function %s"
                       id pos func
-    | `Ok -> ()
+    | `Ok ->
+      if !verbose then
+        Printf.printf "Adding %s %d %d\n" func pos id;
+      ()
   in
   let decode_item (l:Raw_layout.t) =
     let func =
-      Elf_locations.function_at_pc locations ~program_counter:l.address in
+      Elf_locations.resolve_function_at_pc locations ~program_counter:l.address in
     begin
       match func with
       | None ->
         if !verbose then
-          Printf.printf "NOT FOUND %Lx\n" l.address
+          Printf.printf "NOT FOUND %Lx\n" l.address;
       | Some func -> begin
           if !verbose then begin
             Printf.printf "Function %s\n" func;
             Raw_layout.print_t l
           end;
           let program_counter =
-            Int64.(
-              l.address + (Int64.of_int l.offset)) in
+            Int64.(l.address + (Int64.of_int l.offset)) in
           let loc = Elf_locations.resolve locations ~program_counter in
           match loc with
           | None ->
@@ -216,7 +212,8 @@ let setup_reorder ~binary_filename
       ~raw_layout_filename
       ~rel_layout_filename
       ~linearid_layout_filename
-      ~random_order =
+      ~random_order
+      w =
   match binary_filename with
   | None ->
     let get_layout (l:Rel_layout.p) =
@@ -256,6 +253,8 @@ let setup_reorder ~binary_filename
           let layout = decode_layout raw_layout locations in
           if Hashtbl.is_empty layout then
             Misc.fatal_error "Cannot decode layout\n";
+          Hashtbl.iteri layout ~f:(fun ~key ~data ->
+            if not (List.is_empty data) then w key data);
           Reorder.Linear_id layout
         | None -> begin
             match perf_profile_filename with
@@ -294,13 +293,6 @@ let call_ocamlopt args =
   Array.fill Sys.argv ~pos:(len+1) ~len:(argc-len-1) "-inlining-report";
   Optmain.main ()
 
-let gen_linearid filename = function
-  | Reorder.Linear_id layout ->
-    let w = Rel_layout.write filename in
-    Hashtbl.iteri layout ~f:(fun ~key ~data ->
-      if not (List.is_empty data) then w key data)
-  | _ -> ()
-
 let main ~binary_filename
       ~perf_profile_filename
       ~raw_layout_filename
@@ -311,12 +303,14 @@ let main ~binary_filename
       ~random_order
       args =
 
+  let w = Rel_layout.write gen_linearid_layout in
   let algo = setup_reorder ~binary_filename
                ~perf_profile_filename
                ~raw_layout_filename
                ~rel_layout_filename
                ~linearid_layout_filename
                ~random_order
+               w
   in
   (*
    *            (* If we eliminate dead blocks before a transformation
@@ -324,7 +318,6 @@ let main ~binary_filename
    *               on perf data based on original instructions. *)
    *            Cfg.eliminate_dead_blocks cfg;
    **)
-  gen_linearid gen_linearid_layout algo;
   let write_rel_layout = Rel_layout.write gen_rel_layout in
   let transform = Reorder.reorder ~algo ~write_rel_layout in
   let validate = Reorder.validate algo in

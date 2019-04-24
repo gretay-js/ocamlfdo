@@ -6,6 +6,9 @@ type t = {
   strtab : Owee_elf.String_table.t;
   symtab : Owee_elf.Symbol_table.t;
   resolved : (Int64.t, (string * int) option) Hashtbl.t;
+  resolved_functions : (Int64.t, string option) Hashtbl.t;
+  mutable hits : int;
+  mutable misses : int;
 }
 
 let create ~elf_executable =
@@ -21,12 +24,23 @@ let create ~elf_executable =
   Unix.close fd;
   let _header, sections = Owee_elf.read_elf map in
   let resolved = Hashtbl.create 42 in
+  let resolved_functions = Hashtbl.create 42 in
   let strtab = Owee_elf.find_string_table map sections in
   let symtab = Owee_elf.find_symbol_table map sections in
+  let hits =  0 in
+  let misses = 0 in
   match symtab, strtab with
   | None, _ -> failwith "Can't find symbol table in elf binary"
   | _, None -> failwith "Can't find string table in elf binary"
-  | Some symtab, Some strtab -> { map; sections; strtab; symtab; resolved; }
+  | Some symtab, Some strtab -> { map;
+                                  sections;
+                                  strtab;
+                                  symtab;
+                                  resolved;
+                                  resolved_functions;
+                                  hits;
+                                  misses;
+                                }
 
 (* CR mshinwell: tidy all this up.  Also, the pinpointing of which row
    is the correct one isn't great. *)
@@ -65,7 +79,6 @@ let print_dwarf t =
   resolve_from_dwarf t ~f:print
 
 exception FoundLoc of string * int
-exception FoundSym of Owee_elf.Symbol_table.Symbol.t
 exception FinishedFunc
 
 let find_range t ~start ~finish
@@ -80,40 +93,15 @@ let find_range t ~start ~finish
   else if state_address <= finish then
     raise FinishedFunc
 
-let resolve_function t ~name =
-  (* find symbol for this function name *)
-  let module S = Owee_elf.Symbol_table.Symbol in
+let _resolve_function t ~sym =
+  (* find function addresses *)
+  let start = Owee_elf.Symbol_table.Symbol.value sym in
+  let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
+  let finish = Int64.add start size in
+  (* find dwarf locations for this function *)
   try
-    Owee_elf.Symbol_table.iter t.symtab ~f:(fun sym ->
-      match S.type_attribute sym with
-      | Func -> begin
-        match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
-        | Some ns -> if name = ns then raise (FoundSym (sym))
-        | _ -> ()
-      end
-      | _ -> ());
-    failwith "Function not found"
-  with (FoundSym sym) -> begin
-      (* find function addresses *)
-      let start = S.value sym in
-      let size = S.size_in_bytes sym in
-      let finish = Int64.add start size in
-      (* find dwarf locations for this function *)
-      begin try
-        resolve_from_dwarf t ~f:(find_range t ~start ~finish)
-      with FinishedFunc -> ()
-      end;
-      (* we found everything in the range, now fill in the gaps *)
-      let prev = ref None in
-      let address = ref start in
-      while !address < finish do
-        match Hashtbl.find t.resolved !address with
-        | resolved -> prev := resolved
-        | exception Not_found -> Hashtbl.add t.resolved !address !prev;
-          address := Int64.add !address 1L
-      done;
-      (start, size)
-    end
+    resolve_from_dwarf t ~f:(find_range t ~start ~finish)
+  with FinishedFunc -> ()
 
 let find ~program_counter
       ~filename
@@ -129,7 +117,6 @@ let find ~program_counter
       | Some filename -> raise (FoundLoc (filename, prev_state.line))
 
 let resolve_pc t ~program_counter =
-  (* CR-soon mshinwell: owee should use Int64.t *)
   try
     resolve_from_dwarf t ~f:(find ~program_counter);
     Hashtbl.add t.resolved program_counter None;
@@ -139,10 +126,29 @@ let resolve_pc t ~program_counter =
     Hashtbl.add t.resolved program_counter result;
     result
 
+let reset_cache t =
+  let hits = float_of_int t.hits in
+  let misses = float_of_int t.misses in
+  let ratio =
+    if (misses +. hits) > 0. then
+      hits /. (misses +. hits)
+    else
+      0.
+  in
+  Printf.printf "hit=%d, miss=%d, hit/(miss+hit)=%.3f\n"
+    t.hits t.misses ratio;
+  Hashtbl.clear t.resolved;
+  t.hits <- 0;
+  t.misses <- 0
+
 let resolve t ~program_counter =
   match Hashtbl.find t.resolved program_counter with
-  | resolved -> resolved
-  | exception Not_found -> resolve_pc t ~program_counter
+  | resolved ->
+    t.hits <- t.hits + 1;
+    resolved
+  | exception Not_found ->
+    t.misses <- t.misses + 1;
+    resolve_pc t ~program_counter
 
 let function_at_pc t ~program_counter:address =
   match Owee_elf.Symbol_table.functions_enclosing_address t.symtab ~address with
@@ -150,3 +156,21 @@ let function_at_pc t ~program_counter:address =
   (* Just take the first one for the moment.  There will usually be
      only one. *)
   | sym::_ -> Owee_elf.Symbol_table.Symbol.name sym t.strtab
+
+let resolve_function_at_pc t ~program_counter =
+  match Hashtbl.find t.resolved_functions program_counter with
+  | name -> name
+  | exception Not_found ->
+    let name =
+      let syms = Owee_elf.Symbol_table.functions_enclosing_address
+                   t.symtab
+                   ~address:program_counter in
+      match syms with
+      | [] -> None
+      | sym::_ ->
+        reset_cache t;
+        (* resolve_function t ~sym; *)
+        Owee_elf.Symbol_table.Symbol.name sym t.strtab
+    in
+    Hashtbl.add t.resolved_functions program_counter name;
+    name
