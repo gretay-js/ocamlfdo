@@ -15,7 +15,4 @@ type reorder_algo =
 val reorder
   : algo:reorder_algo
   -> Cfg.t
-  -> write_rel_layout:(string -> int list -> unit)
   -> Cfg.t
-
-val validate : reorder_algo -> bool

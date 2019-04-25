@@ -105,21 +105,10 @@ let reorder_rel_layout cfg layout =
       Cfg.set_layout cfg new_cfg_layout
     end
 
-let reorder ~algo cfg ~write_rel_layout =
-  let new_cfg =
-    match algo with
-    | Identity -> cfg
-    | Random -> reorder_random cfg
-    | CachePlus _ -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
-    | Cfg_label layout -> reorder_rel_layout cfg layout
-    | Linear_id layout -> reorder_layout cfg layout
-  in
-  let new_layout = Cfg.get_layout new_cfg in
-  let fun_name = Cfg.get_name new_cfg in
-  write_rel_layout fun_name new_layout;
-  cfg
-
-let validate = function
-  | Identity -> true
-  | _ -> false
-
+let reorder ~algo cfg =
+  match algo with
+  | Identity -> cfg
+  | Random -> reorder_random cfg
+  | CachePlus _ -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
+  | Cfg_label layout -> reorder_rel_layout cfg layout
+  | Linear_id layout -> reorder_layout cfg layout
