@@ -579,13 +579,6 @@ let make_empty_cfg name =
     id_to_label = Numbers.Int.Map.empty;
   }
 
-let _compute_trap_depths t f =
-  Hashtbl.add t.trap_depths t.entry_label 0;
-  let open Linear_invariants in
-  LabelMap.iter (fun label depth ->
-    Hashtbl.add t.trap_depths label depth)
-    (compute_trap_depths f)
-
 let compute_id_to_label t =
   let fold_block map label =
     let block = Hashtbl.find t.blocks label in

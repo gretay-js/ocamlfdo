@@ -44,9 +44,9 @@ let reorder_layout cfg layout =
           ~f:(fun id ->
             Printf.printf "%d\n" id;
             match Cfg.id_to_label cfg id with
-            | None -> Misc.fatal_errorf
+            | None -> failwithf
                         "Cannot find label for linear id %d in %s\n"
-                        id fun_name
+                        id fun_name ()
             | Some label -> label
           )
         |> List.remove_consecutive_duplicates ~equal:Int.equal
@@ -109,6 +109,6 @@ let reorder ~algo cfg =
   match algo with
   | Identity -> cfg
   | Random -> reorder_random cfg
-  | CachePlus _ -> Misc.fatal_error "Not implemented: cache+ reorder algorithm"
+  | CachePlus _ -> failwith "Not implemented: cache+ reorder algorithm"
   | Cfg_label layout -> reorder_rel_layout cfg layout
   | Linear_id layout -> reorder_layout cfg layout

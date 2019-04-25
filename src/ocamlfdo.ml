@@ -115,7 +115,7 @@ let load_locations binary_filename =
 let decode_perf_data _locations filename =
   if !verbose then
     printf "Reading perf profile from %s\n" filename;
-  Misc.fatal_error "Not implemented: read_perf_data"
+  failwith "Not implemented: read_perf_data"
 
 let print_fun_layout_item (key, data) =
   Printf.printf "position=%d linear_id=%d\n" key data
@@ -148,9 +148,9 @@ let decode_layout locations permutation =
       Hashtbl.find_or_add layout func
         ~default:(fun () -> Hashtbl.create (module Int)) in
     match Hashtbl.add fun_layout ~key:pos ~data:id with
-    | `Duplicate -> Misc.fatal_errorf
+    | `Duplicate -> failwithf
                       "Cannot add linear_id %d at position %d in function %s"
-                      id pos func
+                      id pos func ()
     | `Ok ->
       if !verbose then
         Printf.printf "Adding %s %d %d\n" func pos id;
@@ -190,9 +190,8 @@ let decode_layout locations permutation =
                 if func_name_dwarf = func then
                   add func l.position line
                 else
-                  Misc.fatal_errorf
-                    "func_name_dwarf = %s func = %s\n"
-                    func_name_dwarf func
+                  failwithf "func_name_dwarf = %s func = %s\n"
+                    func_name_dwarf func ()
               end
         end
     end
@@ -207,7 +206,7 @@ let decode_layout locations permutation =
   let layout = Hashtbl.map layout ~f:sort in
   if Hashtbl.is_empty layout &&
      not (List.is_empty permutation) then
-    Misc.fatal_error "Cannot decode layout\n";
+    failwith "Cannot decode layout\n";
   layout
 
 let convert_layout (l:Rel_layout.p) =
@@ -317,8 +316,8 @@ let check_equal f ~new_body =
       Printlinear.fundecl f;
     Format.kasprintf prerr_endline "\nAfter:@;%a"
       Printlinear.fundecl {f with fun_body = new_body};
-    Misc.fatal_errorf "Conversion from linear to cfg and back to linear \
-                       is not an identity function.\n"
+    failwith "Conversion from linear to cfg and back to linear \
+              is not an identity function.\n"
   end
 
 let print_linear msg f =
