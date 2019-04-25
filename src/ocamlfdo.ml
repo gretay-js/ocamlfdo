@@ -140,29 +140,8 @@ let to_func file =
     in
     Some (X86_proc.string_of_symbol symbol_prefix name)
 
-module Stats : sig
-  type t
-  val mk : unit -> t
-  val raw : t -> unit
-  val decoded : t -> unit
-  val print : t -> unit
-end = struct
-  type t = {
-    mutable raw : int;
-    (* number of locations with raw layout. *)
-    mutable decoded : int;
-    (* number of locations that were decoded succesfully from raw layouts. *)
-  }
-  let mk () = { raw = 0; decoded = 0; }
-  let raw t = t.raw <- t.raw + 1
-  let decoded t = t.decoded <- t.decoded + 1
-  let print t =
-    Printf.printf "stats: raw=%d,decoded=%d\n" t.raw t.decoded
-end
-
 (* Use addresses from permutation locations to find linear id layout *)
 let decode_layout locations permutation =
-  let stats = Stats.mk () in
   let layout = Hashtbl.create (module String) in
   let add func pos id =
     let fun_layout =
@@ -204,12 +183,10 @@ let decode_layout locations permutation =
             (* Check that the func symbol name from the binary where
                permutation comes from matches the function name encoded
                as filename into our special dwarf info. *)
-            Stats.raw stats;
             match to_func file with
             | None ->
               if !verbose then Printf.printf "Ignoring %s in %s\n" func file;
             | Some func_name_dwarf -> begin
-                Stats.decoded stats;
                 if func_name_dwarf = func then
                   add func l.position line
                 else
@@ -231,7 +208,6 @@ let decode_layout locations permutation =
   if Hashtbl.is_empty layout &&
      not (List.is_empty permutation) then
     Misc.fatal_error "Cannot decode layout\n";
-  Stats.print stats
   layout
 
 let convert_layout (l:Rel_layout.p) =
