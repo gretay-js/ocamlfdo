@@ -30,7 +30,6 @@ end = struct
 
   type p = t list [@@deriving sexp]
 
-
   let print_t i =
     Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
 
@@ -163,9 +162,10 @@ let decode_layout locations permutation =
    * only for those cache them in a way that everything else returns
    * null. *)
   let decode_item (l:Raw_layout.t) =
-    let func =
-      Elf_locations.resolve_function_at_pc locations ~program_counter:l.address in
-    begin
+    if !verbose then Raw_layout.print_t l;
+    let func = Elf_locations.resolve_function_starting_at locations
+                 ~program_counter:l.address
+    in begin
       match func with
       | None ->
         if !verbose then

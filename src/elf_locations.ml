@@ -49,6 +49,9 @@ let create ~elf_executable =
 (* CR mshinwell: tidy all this up.  Also, the pinpointing of which row
    is the correct one isn't great. *)
 
+type l = { filename : string option;
+           state: Owee_debug_line.state }
+
 let resolve_from_dwarf t ~f =
   match Owee_elf.find_section t.sections ".debug_line" with
   | None -> ()
@@ -59,25 +62,30 @@ let resolve_from_dwarf t ~f =
       | None -> ()
       | Some (header, chunk) ->
         let check header
-              (state : Owee_debug_line.state)
-              (prev_state : Owee_debug_line.state option) =
-          if not state.end_sequence then begin
-            let filename = Owee_debug_line.get_filename header state
-            in (f ~filename state prev_state)
-          end;
-           (* N.B. [state] is mutable! *)
-          Some (Owee_debug_line.copy state)
+              (state: Owee_debug_line.state)
+              (prev:l option) : l option  =
+          if state.end_sequence then
+            None
+          else begin
+            let filename = Owee_debug_line.get_filename header state in
+            let cur = { filename;
+                        state = Owee_debug_line.copy state;
+                      } in
+            f cur prev;
+            Some cur
+          end
         in
         ignore (Owee_debug_line.fold_rows (header, chunk) check None);
         aux ()
     in
     aux ()
 
-let print ~filename (state : Owee_debug_line.state) _ =
-    match filename with
+let print cur _ =
+    match cur.filename with
     | None -> ()
     | Some filename ->
-      Printf.printf "%s\t%d\t0x%Lx\n" filename state.line state.address
+      Printf.printf "%s\t%d\t0x%Lx\n"
+        filename cur.state.line cur.state.address
 
 let print_dwarf t =
   resolve_from_dwarf t ~f:print
@@ -85,25 +93,19 @@ let print_dwarf t =
 exception FoundLoc of string * int
 exception FinishedFunc
 
-let find_range t ~start ~finish
-      ~filename (_state : Owee_debug_line.state)
-      (prev_state : Owee_debug_line.state option) =
+let find_range t ~start ~finish cur _ =
   (* if verbose then
    *   Printf.printf "Find range for cache: (0x%Lx,0x%Lx):0x%Lx\n"
    *     start finish state.address; *)
-  match prev_state with
-  | None -> ()
-  | Some prev_state ->
-    if finish < prev_state.address then
+    if finish <= cur.state.address then
       raise FinishedFunc;
-    if start <= prev_state.address then begin
-      let line = prev_state.line in
+    if start <= cur.state.address then begin
       let filename =
-        match filename with
+        match cur.filename with
         | None ->
           if verbose then
             Printf.printf "find_range filename=None\n";
-          prev_state.filename
+          cur.state.filename
         | Some filename ->
           if verbose then
             Printf.printf "find_range filename=%s\n" filename;
@@ -111,8 +113,9 @@ let find_range t ~start ~finish
       in
       if verbose then
         Printf.printf "Caching loc 0x%Lx %s %d\n"
-          prev_state.address filename line;
-      Hashtbl.add t.resolved prev_state.address (Some (filename,line))
+          cur.state.address filename cur.state.line;
+      Hashtbl.add t.resolved cur.state.address
+        (Some (filename,cur.state.line))
     end
 
 let resolve_function t ~sym =
@@ -128,28 +131,28 @@ let resolve_function t ~sym =
     resolve_from_dwarf t ~f:(find_range t ~start ~finish)
   with FinishedFunc -> ()
 
-let find ~program_counter
-      ~filename
-      (state : Owee_debug_line.state)
-      (prev_state : Owee_debug_line.state option) =
-  match prev_state with
+let find ~program_counter cur prev =
+  match prev with
   | None -> ()
-  | Some prev_state ->
-    if program_counter >= prev_state.address
-    && program_counter < state.address then
+  | Some prev ->
+    if program_counter >= prev.state.address
+    && program_counter < cur.state.address then begin
       if verbose then begin
-        Printf.printf "find prev.filename=%s\n" prev_state.filename;
-        Printf.printf "find state.filename=%s\n" state.filename;
-      end
-      match filename with
+        Printf.printf "find prev.state.filename=%s .addr=0x%Lx\n"
+          prev.state.filename prev.state.address;
+        Printf.printf "find cur.state.filename=%s .addr=0x%Lx\n"
+          cur.state.filename cur.state.address;
+      end;
+      match prev.filename with
       | None ->
         if verbose then
           Printf.printf "find filename=None\n";
-        raise (FoundLoc (prev_state.filename, prev_state.line))
+        raise (FoundLoc (prev.state.filename, prev.state.line))
       | Some filename ->
         if verbose then
           Printf.printf "find filename=%s\n" filename;
-        raise (FoundLoc (filename, prev_state.line))
+        raise (FoundLoc (filename, prev.state.line))
+    end
 
 let resolve_pc t ~program_counter =
   try
@@ -205,7 +208,7 @@ let function_at_pc t ~program_counter:address =
      only one. *)
   | sym::_ -> Owee_elf.Symbol_table.Symbol.name sym t.strtab
 
-let resolve_function_at_pc t ~program_counter =
+let resolve_function_starting_at t ~program_counter =
   let report msg name =
     if verbose then
       Printf.printf "%s 0x%Lx:%s\n" msg program_counter
@@ -213,6 +216,7 @@ let resolve_function_at_pc t ~program_counter =
          | None -> "none"
          | Some n -> n)
   in
+  report "Resolve_function_starting_at_pc:" None;
   match Hashtbl.find t.resolved_fun program_counter with
   | name ->
     t.fun_hits <- t.fun_hits + 1;
@@ -220,19 +224,32 @@ let resolve_function_at_pc t ~program_counter =
     name
   | exception Not_found ->
     t.fun_misses <- t.fun_misses + 1;
-    let name =
-      let syms = Owee_elf.Symbol_table.functions_enclosing_address
-                   t.symtab
-                   ~address:program_counter in
+    let syms = Owee_elf.Symbol_table.functions_enclosing_address
+                 t.symtab
+                 ~address:program_counter in
+    let rec find_func syms =
       match syms with
       | [] -> None
-      | sym::_ ->
-        (* Once we have completed processing a function,
-           we never go back to its addresses again. *)
-        reset_cache t;
-        resolve_function t ~sym;
-        Owee_elf.Symbol_table.Symbol.name sym t.strtab
+      | sym::tail ->
+        let start = Owee_elf.Symbol_table.Symbol.value sym in
+        if verbose then
+          Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n"
+            start program_counter;
+        (* Look for symbol whose start address is program counter.
+           This is needed because functions_enclosing_address
+           is based on start+size of symbols, and sometimes previous
+           symbol's end of interval covers the start of the next symbol.
+           This may be a bug in Owee, or maybe intentional,
+           but we can work around it here. *)
+        if start = program_counter then begin
+          (* Once we have completed processing a function,
+             we never go back to its addresses again. *)
+          reset_cache t;
+          resolve_function t ~sym;
+          Owee_elf.Symbol_table.Symbol.name sym t.strtab
+        end else find_func tail
     in
+    let name = find_func syms in
     report "Caching fun " name;
     Hashtbl.add t.resolved_fun program_counter name;
     name

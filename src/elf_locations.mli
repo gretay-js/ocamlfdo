@@ -6,7 +6,7 @@ val resolve : t -> program_counter:Int64.t -> (string * int) option
 
 val function_at_pc : t -> program_counter:Int64.t -> string option
 
-val resolve_function_at_pc : t -> program_counter:Int64.t -> string option
+val resolve_function_starting_at : t -> program_counter:Int64.t -> string option
 
 val print_dwarf : t -> unit
 
