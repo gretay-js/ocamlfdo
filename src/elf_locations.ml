@@ -93,19 +93,22 @@ let print_dwarf t =
 exception FoundLoc of string * int
 exception FinishedFunc
 
-let find_range t ~start ~finish cur _ =
+let find_range t ~start ~finish ~fill_gaps cur prev =
   (* if verbose then
    *   Printf.printf "Find range for cache: (0x%Lx,0x%Lx):0x%Lx\n"
    *     start finish state.address; *)
-    if finish <= cur.state.address then
+  match prev with
+  | None -> ()
+  | Some prev ->
+    if finish <= prev.state.address then
       raise FinishedFunc;
-    if start <= cur.state.address then begin
+    if start <= prev.state.address then begin
       let filename =
-        match cur.filename with
+        match prev.filename with
         | None ->
           if verbose then
             Printf.printf "find_range filename=None\n";
-          cur.state.filename
+          prev.state.filename
         | Some filename ->
           if verbose then
             Printf.printf "find_range filename=%s\n" filename;
@@ -113,9 +116,21 @@ let find_range t ~start ~finish cur _ =
       in
       if verbose then
         Printf.printf "Caching loc 0x%Lx %s %d\n"
-          cur.state.address filename cur.state.line;
-      Hashtbl.add t.resolved cur.state.address
-        (Some (filename,cur.state.line))
+          prev.state.address filename prev.state.line;
+      let res = (Some (filename,prev.state.line)) in
+      if fill_gaps then begin
+        let n =
+          if cur.state.address < finish then cur.state.address
+          else finish
+        in
+        let i = ref prev.state.address in
+        while !i < n do
+          Hashtbl.add t.resolved !i res;
+          i := Int64.add !i 1L
+        done
+      end else begin
+        Hashtbl.add t.resolved prev.state.address res
+      end
     end
 
 let resolve_function t ~sym =
@@ -126,9 +141,11 @@ let resolve_function t ~sym =
   if verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
       start size finish;
+  (* CR gyorsh: consider turning off fill_gaps for functions that are very
+     long or do not have any linear ids. *)
   (* find dwarf locations for this function *)
   try
-    resolve_from_dwarf t ~f:(find_range t ~start ~finish)
+    resolve_from_dwarf t ~f:(find_range t ~start ~finish ~fill_gaps:true)
   with FinishedFunc -> ()
 
 let find ~program_counter cur prev =
