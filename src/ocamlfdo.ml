@@ -156,6 +156,12 @@ let decode_layout locations permutation =
         Printf.printf "Adding %s %d %d\n" func pos id;
       ()
   in
+  (* CR gyorsh: optimize reading locations and raw_layouts:
+     scan the layout file for function start addresses,
+   * then scan the debug info from the binary and check for each of the function
+   * addresses if there are any locations with ".linear" filename and
+   * only for those cache them in a way that everything else returns
+   * null. *)
   let decode_item (l:Raw_layout.t) =
     let func =
       Elf_locations.resolve_function_at_pc locations ~program_counter:l.address in

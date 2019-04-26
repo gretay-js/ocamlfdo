@@ -86,21 +86,34 @@ exception FoundLoc of string * int
 exception FinishedFunc
 
 let find_range t ~start ~finish
-      ~filename (state : Owee_debug_line.state) _ =
+      ~filename (_state : Owee_debug_line.state)
+      (prev_state : Owee_debug_line.state option) =
   (* if verbose then
    *   Printf.printf "Find range for cache: (0x%Lx,0x%Lx):0x%Lx\n"
    *     start finish state.address; *)
-  if start <= state.address then begin
-    if finish < state.address then
+  match prev_state with
+  | None -> ()
+  | Some prev_state ->
+    if finish < prev_state.address then
       raise FinishedFunc;
-    let result = match filename with
-      | None -> state.filename, state.line
-      | Some filename -> filename, state.line
-    in
-    if verbose then
-      Printf.printf "Caching loc 0x%Lx\n" state.address;
-    Hashtbl.add t.resolved state.address (Some result)
-  end
+    if start <= prev_state.address then begin
+      let line = prev_state.line in
+      let filename =
+        match filename with
+        | None ->
+          if verbose then
+            Printf.printf "find_range filename=None\n";
+          prev_state.filename
+        | Some filename ->
+          if verbose then
+            Printf.printf "find_range filename=%s\n" filename;
+          filename
+      in
+      if verbose then
+        Printf.printf "Caching loc 0x%Lx %s %d\n"
+          prev_state.address filename line;
+      Hashtbl.add t.resolved prev_state.address (Some (filename,line))
+    end
 
 let resolve_function t ~sym =
   (* find function addresses *)
@@ -124,9 +137,19 @@ let find ~program_counter
   | Some prev_state ->
     if program_counter >= prev_state.address
     && program_counter < state.address then
+      if verbose then begin
+        Printf.printf "find prev.filename=%s\n" prev_state.filename;
+        Printf.printf "find state.filename=%s\n" state.filename;
+      end
       match filename with
-      | None -> raise (FoundLoc (prev_state.filename, prev_state.line))
-      | Some filename -> raise (FoundLoc (filename, prev_state.line))
+      | None ->
+        if verbose then
+          Printf.printf "find filename=None\n";
+        raise (FoundLoc (prev_state.filename, prev_state.line))
+      | Some filename ->
+        if verbose then
+          Printf.printf "find filename=%s\n" filename;
+        raise (FoundLoc (filename, prev_state.line))
 
 let resolve_pc t ~program_counter =
   try
@@ -135,6 +158,9 @@ let resolve_pc t ~program_counter =
     None
   with (FoundLoc (filename, line)) ->
     let result = Some (filename, line) in
+    if verbose then
+      Printf.printf "Caching loc 0x%Lx %s %d\n"
+        program_counter filename line;
     Hashtbl.add t.resolved program_counter result;
     result
 
