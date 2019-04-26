@@ -13,6 +13,7 @@ struct
   let compare (x:t) y = compare x y
 end)
 
+let verbose = false
 
 (* CR gyorsh: update label after? *)
 type func_call_operation =
@@ -262,9 +263,11 @@ let eliminate_dead_blocks t =
   find_dead_block ();
   let num_dead_blocks = List.length !dead_blocks in
   if num_dead_blocks > 0 then begin
-    Printf.printf "Found %d dead blocks in function %s:"
-      num_dead_blocks
-      t.fun_name;
+    if verbose then begin
+      Printf.printf "Found %d dead blocks in function %s:"
+        num_dead_blocks
+        t.fun_name
+    end;
     List.iter (fun (lbl, _) -> Printf.printf "\n%d" lbl) !dead_blocks;
     Printf.printf "\n"
   end
@@ -761,5 +764,6 @@ let id_to_label t id =
     print t;
     Misc.fatal_errorf "Cannot find label for id %d in map\n" id
   | Some lbl ->
-    Printf.printf "Found label %d for id %d in map\n" lbl id;
+    if verbose then
+      Printf.printf "Found label %d for id %d in map\n" lbl id;
     Some lbl

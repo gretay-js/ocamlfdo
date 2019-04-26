@@ -6,7 +6,7 @@
    when we use the algorithm to. *)
 open Core
 
-let verbose = ref true
+let verbose = false
 
 type layout = (string, int list) Hashtbl.t
 
@@ -26,7 +26,7 @@ let reorder_random cfg =
   Cfg.set_layout cfg new_layout
 
 let print_list msg l =
-  if !verbose then
+  if verbose then
     Printf.printf !"%s: %{sexp:int list}\n" msg l
 
 let reorder_layout cfg layout =
@@ -34,7 +34,7 @@ let reorder_layout cfg layout =
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some sorted_fun_layout -> begin
-      if !verbose then Cfg.print cfg;
+      if verbose then Cfg.print cfg;
       let orig_cfg_layout = Cfg.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "sorted_fun_layout" sorted_fun_layout;
@@ -93,7 +93,7 @@ let reorder_rel_layout cfg layout =
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some new_cfg_layout -> begin
-      if !verbose then Cfg.print cfg;
+      if verbose then Cfg.print cfg;
       let orig_cfg_layout = Cfg.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "new" new_cfg_layout;

@@ -130,7 +130,7 @@ let print_fun_layout ~key:name ~data:(fun_layout : (int,int) Hashtbl.t) =
 let print_layout layout =
   Hashtbl.iteri layout ~f:print_fun_layout
 
-let to_func file =
+let _to_func file =
   match String.chop_suffix file ~suffix:".linear" with
   | None -> None
   | Some name ->
@@ -189,9 +189,10 @@ let decode_layout locations permutation =
             (* Check that the func symbol name from the binary where
                permutation comes from matches the function name encoded
                as filename into our special dwarf info. *)
-            match to_func file with
+            match String.chop_suffix file ~suffix:".linear" with
             | None ->
-              if !verbose then Printf.printf "Ignoring %s in %s\n" func file;
+              if !verbose then
+                Printf.printf "Ignoring %s in %s\n" func file;
             | Some func_name_dwarf -> begin
                 if func_name_dwarf = func then
                   add func l.position line
