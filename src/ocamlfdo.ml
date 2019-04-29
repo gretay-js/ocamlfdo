@@ -334,6 +334,28 @@ let print_linear msg f =
     Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f
   end
 
+let rec remove_discriminator = function
+  | [] -> []
+  | item::t ->
+    if String.is_suffix item.Debuginfo.dinfo_file ~suffix:".linear" then t
+    else item::(remove_discriminator t)
+
+let rec remove_linear_discriminator i =
+  let open Linearize in
+  match i.desc with
+  | Lend -> i
+  | _ -> begin
+      { i with dbg = remove_discriminator i.dbg;
+               next = remove_linear_discriminator i.next;
+      }
+    end
+
+let remove_linear_discriminators f =
+  let open Linearize in
+  { f with fun_dbg = remove_discriminator f.fun_dbg;
+           fun_body = remove_linear_discriminator f.fun_body;
+  }
+
 let main ~binary_filename
       ~perf_profile_filename
       ~raw_layout_filename
@@ -343,6 +365,7 @@ let main ~binary_filename
       ~gen_linearid_layout
       ~random_order
       ~eliminate_dead_blocks
+      ~remove_linear_ids
       args =
 
   let w_linearid = Rel_layout.writer gen_linearid_layout in
@@ -381,6 +404,11 @@ let main ~binary_filename
     let new_body = Cfg.to_linear new_cfg in
     validate f ~new_body;
     let fnew = {f with fun_body = new_body} in
+    let fnew =
+      if remove_linear_ids then
+        remove_linear_discriminators fnew
+      else fnew
+    in
     print_linear "After" fnew;
     fnew
   in
@@ -411,6 +439,7 @@ match the build of ocamlopt used above.
       let%map_open
         v = flag "-v" no_arg ~doc:" verbose"
       and q = flag "-q" no_arg ~doc:" quiet"
+      and remove_linear_ids = flag "-remove-linear-ids" no_arg ~doc:" remove extra dwarf info with linear ids"
       and eliminate_dead_blocks =
         flag "-edb" no_arg ~doc:" eliminate dead blocks"
       and gen_rel_layout =
@@ -483,6 +512,7 @@ does not require -binary"
                   ~gen_linearid_layout
                   ~random_order
                   ~eliminate_dead_blocks
+                  ~remove_linear_ids
                   args)
 
 let () = Command.run command
