@@ -29,8 +29,11 @@ let print_list msg l =
   if verbose then
     Printf.printf !"%s: %{sexp:int list}\n" msg l
 
+exception KeyAlreadyPresent of int * int
+
 let reorder_layout cfg layout =
   let fun_name = Cfg.get_name cfg in
+  try
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some sorted_fun_layout -> begin
@@ -55,7 +58,11 @@ let reorder_layout cfg layout =
       let partial_cfg_map =
         List.foldi partial_cfg_layout
           ~init:Int.Map.empty
-          ~f:(fun i m label -> Map.add_exn m ~key:label ~data:i)
+          ~f:(fun i m label ->
+            match Map.add m ~key:label ~data:i with
+            | `Duplicate -> raise (KeyAlreadyPresent (label, i))
+            | `Ok m -> m
+          )
       in
       (* Create new layout that extends partial layout with missing
          labels in the original order.
@@ -87,6 +94,14 @@ let reorder_layout cfg layout =
               (List.sort orig_cfg_layout ~compare:Int.compare));
       Cfg.set_layout cfg new_cfg_layout;
     end
+  with KeyAlreadyPresent (id, pos) -> begin
+    if verbose then begin
+      Printf.printf "Cannot add linear_id %d at position %d in function %s\n"
+        id pos fun_name;
+      Printf.printf "Ignoring %s\n" fun_name
+    end;
+    cfg
+  end
 
 let reorder_rel_layout cfg layout =
   let fun_name = Cfg.get_name cfg in
