@@ -427,7 +427,8 @@ $ ocamlfdo -- <standard ocamlopt options including -o prog.exe>
 Collect perf profile with LBR information:
 $ perf record -e cycles:u -j any,u -o perf.data <prog.exe> <args..>
 
-Run ocamlfdo with exactly the same version of the source code and options as above:
+Run ocamlfdo with exactly the same version of the source code and
+options as above:
 $ ocamlfdo -perf-profile <perf.data> -binary <prog.exe> -- \\
            <standard ocamlopt options including -o prog.fdo.exe>
 
@@ -439,7 +440,8 @@ match the build of ocamlopt used above.
       let%map_open
         v = flag "-v" no_arg ~doc:" verbose"
       and q = flag "-q" no_arg ~doc:" quiet"
-      and remove_linear_ids = flag "-remove-linear-ids" no_arg ~doc:" remove extra dwarf info with linear ids"
+      and remove_linear_ids = flag "-remove-linear-ids" no_arg
+                                ~doc:" remove extra dwarf info with linear ids"
       and eliminate_dead_blocks =
         flag "-edb" no_arg ~doc:" eliminate dead blocks"
       and gen_rel_layout =
