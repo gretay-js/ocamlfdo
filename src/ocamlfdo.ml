@@ -1,6 +1,7 @@
 open Core
 
 let verbose = ref false
+let strict = ref false
 
 module Raw_layout : sig
   (* CR gyorsh: it has to be named t for csv  fields ppx to work. move to separate
@@ -312,19 +313,30 @@ let check_equal f ~new_body =
       else equal i1.next i2.next
     end
     else begin
-      Format.kasprintf prerr_endline "Equality failed on:@;%a@;%a"
+      Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
+        f.fun_name
         Printlinear.instr i1
         Printlinear.instr i2;
       false
     end
   in
   if not (equal f.fun_body new_body) then begin
-    Format.kasprintf prerr_endline "Before:@;%a"
-      Printlinear.fundecl f;
-    Format.kasprintf prerr_endline "\nAfter:@;%a"
-      Printlinear.fundecl {f with fun_body = new_body};
-    failwith "Conversion from linear to cfg and back to linear \
-              is not an identity function.\n"
+    let name = X86_proc.string_of_symbol "" f.fun_name in
+    let report msg func =
+      let filename = sprintf "%s-%s.fdo.org" name msg in
+      let out_channel = Out_channel.create filename in
+      let ppf = Format.formatter_of_out_channel out_channel in
+      Printlinear.fundecl ppf func;
+      Out_channel.close out_channel;
+      if !verbose then
+        Format.kasprintf prerr_endline "%s:@;%a" msg
+          Printlinear.fundecl func
+    in
+    report "Before" f;
+    report "After" {f with fun_body = new_body};
+    if !strict then
+      failwithf "Conversion from linear to cfg and back to linear \
+                 is not an identity function %s.\n" name ()
   end
 
 let print_linear msg f =
@@ -458,6 +470,12 @@ match the build of ocamlopt used above.
       and perf_profile_filename =
         flag "-perf-profile" (optional Filename.arg_type)
           ~doc:"perf.data output of perf record"
+      and _gen_fdo_profile =
+        flag "-gen-fdo-profile" (optional Filename.arg_type)
+          ~doc:"perf.fdodata output of perf record processed by ocamlfdo"
+      and _fdo_profile_filename =
+        flag "-fdo-profile" (optional Filename.arg_type)
+          ~doc:"perf.fdodata output of perf record processed by ocamlfdo"
       and raw_layout_filename =
         flag "-raw-layout" (optional Filename.arg_type)
           ~doc:"filename block layout for reordering: raw binary addresses"
