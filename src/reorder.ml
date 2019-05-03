@@ -32,11 +32,11 @@ type reorder_algo =
 
 let reorder_random cfg =
   (* Ensure entry exit invariants *)
-  let original_layout = Cfg.get_layout cfg in
+  let original_layout = Cfg_builder.get_layout cfg in
   let new_layout = (List.hd_exn original_layout)::
                    (List.permute (List.tl_exn original_layout))
   in
-  Cfg.set_layout cfg new_layout
+  Cfg_builder.set_layout cfg new_layout
 
 let print_list msg l =
   if verbose then
@@ -45,13 +45,13 @@ let print_list msg l =
 exception KeyAlreadyPresent of int * int
 
 let reorder_layout cfg layout =
-  let fun_name = Cfg.get_name cfg in
+  let fun_name = Cfg_builder.get_name cfg in
   try
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some sorted_fun_layout -> begin
-      if verbose then Cfg.print cfg;
-      let orig_cfg_layout = Cfg.get_layout cfg in
+      if verbose then Cfg_builder.print cfg;
+      let orig_cfg_layout = Cfg_builder.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "sorted_fun_layout" sorted_fun_layout;
       (* Convert linear_ids to labels *)
@@ -59,7 +59,7 @@ let reorder_layout cfg layout =
         List.map sorted_fun_layout
           ~f:(fun id ->
             Printf.printf "%d\n" id;
-            match Cfg.id_to_label cfg id with
+            match Cfg_builder.id_to_label cfg id with
             | None -> failwithf
                         "Cannot find label for linear id %d in %s\n"
                         id fun_name ()
@@ -105,7 +105,7 @@ let reorder_layout cfg layout =
       assert (List.length new_cfg_layout = List.length orig_cfg_layout);
       assert ((List.sort new_cfg_layout ~compare:Int.compare) =
               (List.sort orig_cfg_layout ~compare:Int.compare));
-      Cfg.set_layout cfg new_cfg_layout;
+      Cfg_builder.set_layout cfg new_cfg_layout;
     end
   with KeyAlreadyPresent (id, pos) -> begin
     if verbose then begin
@@ -117,12 +117,12 @@ let reorder_layout cfg layout =
   end
 
 let reorder_rel_layout cfg layout =
-  let fun_name = Cfg.get_name cfg in
+  let fun_name = Cfg_builder.get_name cfg in
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some new_cfg_layout -> begin
-      if verbose then Cfg.print cfg;
-      let orig_cfg_layout = Cfg.get_layout cfg in
+      if verbose then Cfg_builder.print cfg;
+      let orig_cfg_layout = Cfg_builder.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "new" new_cfg_layout;
       (* Make sure the new layout is just a permutation.
@@ -130,7 +130,7 @@ let reorder_rel_layout cfg layout =
       assert (List.length new_cfg_layout = List.length orig_cfg_layout);
       assert ((List.sort new_cfg_layout ~compare:Int.compare) =
               (List.sort orig_cfg_layout ~compare:Int.compare));
-      Cfg.set_layout cfg new_cfg_layout
+      Cfg_builder.set_layout cfg new_cfg_layout
     end
 
 let reorder ~algo cfg =

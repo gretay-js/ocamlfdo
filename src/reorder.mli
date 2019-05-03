@@ -27,5 +27,5 @@ type reorder_algo =
 
 val reorder
   : algo:reorder_algo
-  -> Cfg.t
-  -> Cfg.t
+  -> Cfg_builder.t
+  -> Cfg_builder.t

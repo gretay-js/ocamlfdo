@@ -405,8 +405,8 @@ let main ~binary_filename
   let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in
   let write_rel_layout new_cfg =
-    let new_layout = Cfg.get_layout new_cfg in
-    let fun_name = Cfg.get_name new_cfg in
+    let new_layout = Cfg_builder.get_layout new_cfg in
+    let fun_name = Cfg_builder.get_name new_cfg in
     w_rel fun_name new_layout
   in
   let validate f ~new_body =
@@ -418,15 +418,15 @@ let main ~binary_filename
   in
   let transform f =
     print_linear "Before" f;
-    let cfg = Cfg.from_linear f in
+    let cfg = Cfg_builder.from_linear f in
     let new_cfg = reorder cfg in
     write_rel_layout new_cfg;
     (* If we eliminate dead blocks before a transformation
        then some algorithms might not apply because they rely
        on perf data based on original instructions. *)
     if eliminate_dead_blocks then
-      Cfg.eliminate_dead_blocks cfg;
-    let new_body = Cfg.to_linear new_cfg in
+      Cfg_builder.eliminate_dead_blocks cfg;
+    let new_body = Cfg_builder.to_linear new_cfg in
     validate f ~new_body;
     let fnew = {f with fun_body = new_body} in
     let fnew =
