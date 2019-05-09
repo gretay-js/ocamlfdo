@@ -307,7 +307,7 @@ let call_ocamlopt args =
   assert (len < argc);
   Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:1 ~len;
   (* CR gyorsh: Can't resize args array. Fake missing arguments. Better way? *)
-  Array.fill Sys.argv ~pos:(len+1) ~len:(argc-len-1) "-inlining-report";
+  Array.fill Sys.argv ~pos:(len+1) ~len:(argc-len-1) "-absname";  (* -inlining-report? *)
   Optmain.main ()
 
 let check_equal f ~new_body =
