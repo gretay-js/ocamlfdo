@@ -651,7 +651,7 @@ let to_linear t =
             (* CR gyorsh: is this correct with label_after for calls? *)
             (* If label is original,
                print it for linear to cfg and back to be identity. *)
-            if LabelSet.mem label t.new_labels &&
+            if LabelSet.mem label t.new_labels ||
                not t.preserve_orig_labels then
               body
             else
