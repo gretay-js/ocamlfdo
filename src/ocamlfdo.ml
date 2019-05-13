@@ -310,6 +310,7 @@ let call_ocamlopt args =
   Array.fill Sys.argv ~pos:(len+1) ~len:(argc-len-1) "-absname";  (* -inlining-report? *)
   Optmain.main ()
 
+
 let check_equal f ~new_body =
   let open Linearize in
   let rec equal i1 i2 =
@@ -335,18 +336,9 @@ let check_equal f ~new_body =
   in
   if not (equal f.fun_body new_body) then begin
     let name = X86_proc.string_of_symbol "" f.fun_name in
-    let report msg func =
-      let filename = sprintf "%s-%s.fdo.org" name msg in
-      let out_channel = Out_channel.create filename in
-      let ppf = Format.formatter_of_out_channel out_channel in
-      Printlinear.fundecl ppf func;
-      Out_channel.close out_channel;
-      if !verbose then
-        Format.kasprintf prerr_endline "%s:@;%a" msg
-          Printlinear.fundecl func
-    in
-    report "Before" f;
-    report "After" {f with fun_body = new_body};
+    (* Separate files for before and after make it easier to diff *)
+    Report.linear ~name "Before" f;
+    Report.linear ~name "After" {f with fun_body = new_body};
     if !strict then
       failwithf "Conversion from linear to cfg and back to linear \
                  is not an identity function %s.\n" name ()
@@ -381,6 +373,22 @@ let remove_linear_discriminators f =
            fun_body = remove_linear_discriminator f.fun_body;
   }
 
+(* CR gyorsh: this is intended as a report at source level and human readable form,
+   like inlining report. Currently, just prints the IRs.
+   Could share infrastructure with inlining report to map back to source when
+   reordering involves inlined functions.
+   CR gyorsh: add separate "dump" flags for all passes in ocamlfdo, printing
+   to stdout similarly to -dcmm -dlinear in the compiler, etc. *)
+let write_reorder_report f cfg newf newcfg =
+  if not (phys_equal cfg newcfg) then begin
+    (* Separate files for before and after make it easier to diff *)
+    let name = X86_proc.string_of_symbol "" f.Linearize.fun_name in
+    Report.linear ~name "Before-Reorder" f;
+    Report.linear ~name "After-Reorder" newf;
+    Report.cfg ~name "Before-Reorder" cfg;
+    Report.cfg ~name "After-Reorder" newcfg;
+  end
+
 let main ~binary_filename
       ~perf_profile_filename
       ~raw_layout_filename
@@ -391,6 +399,7 @@ let main ~binary_filename
       ~random_order
       ~eliminate_dead_blocks
       ~remove_linear_ids
+      ~reorder_report
       args =
 
   let w_linearid = Rel_layout.writer gen_linearid_layout in
@@ -418,7 +427,7 @@ let main ~binary_filename
   in
   let transform f =
     print_linear "Before" f;
-    let cfg = Cfg_builder.from_linear f in
+    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
     let new_cfg = reorder cfg in
     write_rel_layout new_cfg;
     (* If we eliminate dead blocks before a transformation
@@ -429,6 +438,7 @@ let main ~binary_filename
     let new_body = Cfg_builder.to_linear new_cfg in
     validate f ~new_body;
     let fnew = {f with fun_body = new_body} in
+    if reorder_report then write_reorder_report f cfg fnew new_cfg;
     let fnew =
       if remove_linear_ids then
         remove_linear_discriminators fnew
@@ -438,7 +448,8 @@ let main ~binary_filename
     fnew
   in
   Reoptimize.setup ~f:transform;
-  call_ocamlopt args
+  call_ocamlopt args;
+  Report.output ()
 
 let command =
   Command.basic
@@ -499,12 +510,14 @@ does not require -binary"
       and linearid_layout_filename =
         flag "-linearid-layout" (optional Filename.arg_type)
           ~doc:"filename same as -rel-layout but uses linear id not cfg labels"
+      and reorder_report =
+        flag "-reorder-report" no_arg ~doc: " Emit files showing the decisions"
       and args = flag "--" (escape)
                    ~doc:"ocamlopt_args standard options passed to opcamlopt"
       in
       if v then verbose := true;
       if q then verbose := false;
-
+      if !verbose then Report.verbose := true;
       (* CR gyorsh: use choose_one to reduce the mess below? *)
       if !verbose then begin
         if random_order then begin
@@ -546,6 +559,7 @@ does not require -binary"
                   ~random_order
                   ~eliminate_dead_blocks
                   ~remove_linear_ids
+                  ~reorder_report
                   args)
 
 let () = Command.run command

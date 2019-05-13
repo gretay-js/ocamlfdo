@@ -30,12 +30,23 @@ type reorder_algo =
   | Cfg_label of layout
   | CachePlus of unit
 
+let validate fun_name orig_cfg_layout new_cfg_layout  =
+  (* Make sure the new layout is just a permutation.
+     CR gyorsh: do we need to handle block duplication here? *)
+  if not (new_cfg_layout = orig_cfg_layout) then begin
+    assert (List.length new_cfg_layout = List.length orig_cfg_layout);
+    assert ((List.sort new_cfg_layout ~compare:Int.compare) =
+            (List.sort orig_cfg_layout ~compare:Int.compare));
+    Report.log (sprintf "Reordered %s\n" fun_name);
+  end
+
 let reorder_random cfg =
   (* Ensure entry exit invariants *)
   let original_layout = Cfg_builder.get_layout cfg in
   let new_layout = (List.hd_exn original_layout)::
                    (List.permute (List.tl_exn original_layout))
   in
+  validate (Cfg_builder.get_name cfg) original_layout new_layout;
   Cfg_builder.set_layout cfg new_layout
 
 let print_list msg l =
@@ -50,7 +61,7 @@ let reorder_layout cfg layout =
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some sorted_fun_layout -> begin
-      if verbose then Cfg_builder.print cfg;
+      if verbose then Cfg_builder.print stdout cfg;
       let orig_cfg_layout = Cfg_builder.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "sorted_fun_layout" sorted_fun_layout;
@@ -100,20 +111,14 @@ let reorder_layout cfg layout =
         |> List.concat
       in
       print_list "new:" new_cfg_layout;
-      (* Make sure the new layout is just a permutation.
-         CR gyorsh: do we need to handle block duplication here? *)
-      assert (List.length new_cfg_layout = List.length orig_cfg_layout);
-      assert ((List.sort new_cfg_layout ~compare:Int.compare) =
-              (List.sort orig_cfg_layout ~compare:Int.compare));
+      validate fun_name orig_cfg_layout new_cfg_layout;
       Cfg_builder.set_layout cfg new_cfg_layout;
     end
   with KeyAlreadyPresent (id, pos) -> begin
-    if verbose then begin
-      Printf.printf "Cannot add linear_id %d at position %d in function %s\n"
-        id pos fun_name;
-      Printf.printf "Ignoring %s\n" fun_name
-    end;
-    cfg
+      Report.log (sprintf
+                    "Ignoring %s: cannot add linear_id %d at position %d\n"
+                    fun_name id pos);
+      cfg
   end
 
 let reorder_rel_layout cfg layout =
@@ -121,16 +126,12 @@ let reorder_rel_layout cfg layout =
   match Hashtbl.find layout fun_name with
   | None -> cfg
   | Some new_cfg_layout -> begin
-      if verbose then Cfg_builder.print cfg;
+      if verbose then Cfg_builder.print stdout cfg;
       let orig_cfg_layout = Cfg_builder.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "new" new_cfg_layout;
-      (* Make sure the new layout is just a permutation.
-         CR gyorsh: do we need to handle block duplication here? *)
-      assert (List.length new_cfg_layout = List.length orig_cfg_layout);
-      assert ((List.sort new_cfg_layout ~compare:Int.compare) =
-              (List.sort orig_cfg_layout ~compare:Int.compare));
-      Cfg_builder.set_layout cfg new_cfg_layout
+      validate fun_name orig_cfg_layout new_cfg_layout;
+      Cfg_builder.set_layout cfg new_cfg_layout;
     end
 
 let reorder ~algo cfg =

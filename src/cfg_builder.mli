@@ -20,7 +20,7 @@ module Layout : sig
   type t = label list
 end
 
-val from_linear : Linearize.fundecl -> t
+val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
 val to_linear : t -> Linearize.instruction
 
 (* Mutates t *)
@@ -33,4 +33,5 @@ val get_name : t -> string
 
 val id_to_label : t -> int -> label option
 
-val print : t -> unit
+(* CR gyorsh: add dot format output *)
+val print : out_channel -> t -> unit

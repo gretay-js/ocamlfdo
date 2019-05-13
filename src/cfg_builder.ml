@@ -64,6 +64,9 @@ type t = {
   mutable id_to_label : label Numbers.Int.Map.t;
   (* Map id of instruction to label of the block that contains
      the instruction. Used for mapping perf data back to linear IR. *)
+
+  mutable preserve_orig_labels : bool;
+  (* Unset to false for validation, set for optimization. *)
 }
 
 let get_layout t = t.layout
@@ -144,7 +147,8 @@ let register_split_labels t =
 exception Dead_block of label * block
 
 let eliminate_dead_blocks t =
-
+  if not t.preserve_orig_labels then
+    failwith "Won't eliminate dead blocks when preserve_orig_labels is set.";
   let dead_blocks = ref [] in
   let eliminate_dead_block label block =
     dead_blocks := (label,block)::!dead_blocks;
@@ -500,7 +504,7 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
       block.body <- (create_instr desc i ~trap_depth)::block.body;
       create_blocks t i.next block ~trap_depth
 
-let make_empty_cfg name =
+let make_empty_cfg name ~preserve_orig_labels =
   let cfg =
   {
     fun_name = name;
@@ -516,6 +520,7 @@ let make_empty_cfg name =
     split_labels = (Hashtbl.create 7 : (label, Layout.t) Hashtbl.t);
     layout = [];
     id_to_label = Numbers.Int.Map.empty;
+    preserve_orig_labels;
   }
 
 let compute_id_to_label t =
@@ -531,8 +536,8 @@ let compute_id_to_label t =
                      Numbers.Int.Map.empty
                      t.layout
 
-let from_linear (f : Linearize.fundecl) =
-  let t = make_empty_cfg f.fun_name in
+let from_linear (f : Linearize.fundecl) ~preserve_orig_labels =
+  let t = make_empty_cfg f.fun_name ~preserve_orig_labels in
   (* CR gyorsh: label of the function entry must not conflict with existing
      labels. Relies on the invariant: Cmm.new_label() is int > 99.
      An alternative is to create a new type for label here,
@@ -646,7 +651,8 @@ let to_linear t =
             (* CR gyorsh: is this correct with label_after for calls? *)
             (* If label is original,
                print it for linear to cfg and back to be identity. *)
-            if LabelSet.mem label t.new_labels then
+            if LabelSet.mem label t.new_labels &&
+               not t.preserve_orig_labels then
               body
             else
               make_simple_linear (Llabel label) body
@@ -668,36 +674,36 @@ let to_linear t =
   done;
   !next.insn
 
-let print t =
+let print oc t =
+  let ppf = Format.formatter_of_out_channel oc in
   let print_instr i =
-    Format.kasprintf print_endline "@;%a"
-      Printlinear.instr (basic_to_linear i end_instr);
+      Printlinear.instr ppf (basic_to_linear i end_instr);
   in
-  Printf.printf "%s\n" t.cfg.fun_name;
-  Printf.printf "layout.length=%d\n" (List.length t.layout);
-  Printf.printf "blocks.length=%d\n" (Hashtbl.length t.cfg.blocks);
+  Printf.fprintf oc "%s\n" t.cfg.fun_name;
+  Printf.fprintf oc "layout.length=%d\n" (List.length t.layout);
+  Printf.fprintf oc "blocks.length=%d\n" (Hashtbl.length t.cfg.blocks);
   let print_block label block =
-      Printf.printf "%d:\n" label;
+      Printf.fprintf oc "%d:\n" label;
       List.iter (fun i->
-        Printf.printf "\t%d\n" i.id;
+        Printf.fprintf oc "\t%d\n" i.id;
         print_instr i)
         block.body;
-      Printf.printf "\t%d\n" block.terminator.id
+      Printf.fprintf oc "\t%d\n" block.terminator.id
   in
   List.iter (fun label ->
     let block = Hashtbl.find t.cfg.blocks label
     in print_block label block)
     t.layout;
-  Printf.printf "id_to_label map: \n";
+  Printf.fprintf oc "id_to_label map: \n";
   Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
     t.id_to_label;
-  Printf.printf "\n"
+  Printf.fprintf oc "\n"
 
 
 let id_to_label t id =
   match Numbers.Int.Map.find_opt id t.id_to_label with
   | None ->
-    print t;
+    print stdout t;
     Misc.fatal_errorf "Cannot find label for id %d in map\n" id
   | Some lbl ->
     if verbose then
