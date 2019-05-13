@@ -336,7 +336,7 @@ let check_equal f ~new_body =
   in
   if not (equal f.fun_body new_body) then begin
     let name = X86_proc.string_of_symbol "" f.fun_name in
-    (* Separate files for before and after make it easier to diff *)
+    (* Separate files for before and after to make it easier to diff *)
     Report.linear ~name "Before" f;
     Report.linear ~name "After" {f with fun_body = new_body};
     if !strict then
