@@ -398,6 +398,7 @@ let main ~binary_filename
       ~gen_linearid_layout
       ~random_order
       ~eliminate_dead_blocks
+      ~eliminate_fallthrough_blocks
       ~remove_linear_ids
       ~reorder_report
       args =
@@ -418,23 +419,29 @@ let main ~binary_filename
     let fun_name = Cfg_builder.get_name new_cfg in
     w_rel fun_name new_layout
   in
+  let preserve_orig_labels = false in
   let validate f ~new_body =
     match algo with
     | Reorder.Identity ->
-      if eliminate_dead_blocks then ()
+      if eliminate_fallthrough_blocks ||
+         eliminate_dead_blocks
+         (* || not preserve_orig_labels *)
+      then ()
       else check_equal f ~new_body
     | _ -> ()
   in
   let transform f =
     print_linear "Before" f;
-    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
+    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels in
     let new_cfg = reorder cfg in
     write_rel_layout new_cfg;
     (* If we eliminate dead blocks before a transformation
        then some algorithms might not apply because they rely
        on perf data based on original instructions. *)
-    if eliminate_dead_blocks then
-      Cfg_builder.eliminate_dead_blocks cfg;
+    if eliminate_fallthrough_blocks then (* implies dead block elimination *)
+      Cfg_builder.eliminate_fallthrough_blocks new_cfg
+    else if eliminate_dead_blocks then
+      Cfg_builder.eliminate_dead_blocks new_cfg;
     let new_body = Cfg_builder.to_linear new_cfg in
     validate f ~new_body;
     let fnew = {f with fun_body = new_body} in
@@ -480,6 +487,8 @@ match the build of ocamlopt used above.
                                 ~doc:" remove extra dwarf info with linear ids"
       and eliminate_dead_blocks =
         flag "-edb" no_arg ~doc:" eliminate dead blocks"
+      and eliminate_fallthrough_blocks =
+        flag "-efb" no_arg ~doc:" eliminate fallthrough blocks, implies -edb"
       and gen_rel_layout =
         flag "-gen-layout" (optional Filename.arg_type)
           ~doc:"filename generate relative layout and write to <filename>"
@@ -558,6 +567,7 @@ does not require -binary"
                   ~gen_linearid_layout
                   ~random_order
                   ~eliminate_dead_blocks
+                  ~eliminate_fallthrough_blocks
                   ~remove_linear_ids
                   ~reorder_report
                   args)

@@ -76,6 +76,8 @@ let set_layout t new_layout =
 
 let get_name t = t.cfg.fun_name
 
+let preserve_orig_labels t = t.preserve_orig_labels
+
 let no_label = (-1)
 type labelled_insn =
   { label : label;
@@ -141,71 +143,6 @@ let register_split_labels t =
     t.layout
     []
   |> ignore
-
-(* Must be called after predecessors are registered
-   and split labels are registered. *)
-exception Dead_block of label * block
-
-let eliminate_dead_blocks t =
-  if not t.preserve_orig_labels then
-    failwith "Won't eliminate dead blocks when preserve_orig_labels is set.";
-  let dead_blocks = ref [] in
-  let eliminate_dead_block label block =
-    dead_blocks := (label,block)::!dead_blocks;
-    Hashtbl.remove t.cfg.blocks label;
-    (* Update successor blocks of the dead block *)
-    List.iter (fun target ->
-      let target_block = Hashtbl.find t.cfg.blocks target in
-      (* Remove label from predecessors of target. *)
-      target_block.predecessors <- LabelSet.remove
-                                     label
-                                     target_block.predecessors)
-      (successor_labels block);
-    (* Remove from layout and other data-structures that track labels. *)
-    t.layout <- List.filter (fun l -> l <> label) t.layout;
-    (* If the dead block contains Lpushtrap, its handler becomes dead.
-       Find all occurrences of label as values of trap_labels
-       and remove them, because is_live_trap_handler depends on it. *)
-    Hashtbl.filter_map_inplace
-      (fun _ lbl_pushtrap_block ->
-         if label = lbl_pushtrap_block then None
-         else Some lbl_pushtrap_block)
-      t.trap_labels;
-
-    (* If dead block's label is not new, add it to split_labels,
-       mapped to the empty layout!
-       Needed for mapping annotations that may refer to dead blocks. *)
-    if not (LabelSet.mem label t.new_labels) then
-      Hashtbl.add t.split_labels label [];
-
-    (* No need to remove it from trap_depths, because it will
-       only be accessed. *)
-    (* Hashtbl.remove t.trap_depths label; *)
-  in
-  let rec find_dead_block () =
-    try
-      Hashtbl.iter (fun label block ->
-        if (LabelSet.is_empty block.predecessors) &&
-           (not (is_live_trap_handler t label)) &&
-           (t.cfg.entry_label <> label) then
-          raise (Dead_block (label, block)))
-        t.cfg.blocks;
-    with Dead_block (label,block) -> begin
-        eliminate_dead_block label block;
-        find_dead_block ()
-      end
-  in
-  find_dead_block ();
-  let num_dead_blocks = List.length !dead_blocks in
-  if num_dead_blocks > 0 then begin
-    if verbose then begin
-      Printf.printf "Found %d dead blocks in function %s:"
-        num_dead_blocks
-        t.cfg.fun_name
-    end;
-    List.iter (fun (lbl, _) -> Printf.printf "\n%d" lbl) !dead_blocks;
-    Printf.printf "\n"
-  end
 
 let create_instr desc ~trap_depth (i:Linearize.instruction) =
   {
@@ -378,7 +315,7 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
          in the new order.
          Also, for linear to cfg and back will be
          harder to generate exactly the same layout.
-         How do we map execution counts about branches
+         Also, how do we map execution counts about branches
          onto this terminator? *)
       let fallthrough = get_or_make_label t i.next in
       let successors = [(Test cond,lbl);
@@ -650,14 +587,17 @@ let to_linear t =
                no need for the label. *)
             (* CR gyorsh: is this correct with label_after for calls? *)
             (* If label is original,
-               print it for linear to cfg and back to be identity. *)
+               print it for linear to cfg and back to be identity,
+               and for various assertions in reorder. *)
             if LabelSet.mem label t.new_labels ||
-               not t.preserve_orig_labels then
+               not t.preserve_orig_labels then begin
               body
+            end
             else
               make_simple_linear (Llabel label) body
           end
           else begin
+            Printf.printf "%d " label;
             make_simple_linear (Llabel label) body
           end
         in
@@ -709,3 +649,253 @@ let id_to_label t id =
     if verbose then
       Printf.printf "Found label %d for id %d in map\n" lbl id;
     Some lbl
+
+(* Simplify CFG *)
+(* CR gyorsh: simplify needs testing. *)
+
+exception Dead_block of label * block
+(* Must be called after predecessors are registered
+   and split labels are registered. *)
+let eliminate_dead_blocks t =
+  if not t.preserve_orig_labels then
+    failwith "Won't eliminate dead blocks when preserve_orig_labels is set.";
+  let dead_blocks = ref [] in
+  let eliminate_dead_block label block =
+    dead_blocks := (label,block)::!dead_blocks;
+    Hashtbl.remove t.cfg.blocks label;
+    (* Update successor blocks of the dead block *)
+    List.iter (fun target ->
+      let target_block = Hashtbl.find t.cfg.blocks target in
+      (* Remove label from predecessors of target. *)
+      target_block.predecessors <- LabelSet.remove
+                                     label
+                                     target_block.predecessors)
+      (successor_labels block);
+    (* Remove from layout and other data-structures that track labels. *)
+    t.layout <- List.filter (fun l -> l <> label) t.layout;
+    (* If the dead block contains Lpushtrap, its handler becomes dead.
+       Find all occurrences of label as values of trap_labels
+       and remove them, because is_live_trap_handler depends on it. *)
+    Hashtbl.filter_map_inplace
+      (fun _ lbl_pushtrap_block ->
+         if label = lbl_pushtrap_block then None
+         else Some lbl_pushtrap_block)
+      t.trap_labels;
+
+    (* If dead block's label is not new, add it to split_labels,
+       mapped to the empty layout!
+       Needed for mapping annotations that may refer to dead blocks. *)
+    if not (LabelSet.mem label t.new_labels) then
+      Hashtbl.add t.split_labels label [];
+
+    (* No need to remove it from trap_depths, because it will
+       only be accessed. *)
+    (* Hashtbl.remove t.trap_depths label; *)
+  in
+  let rec find_dead_block () =
+    try
+      Hashtbl.iter (fun label block ->
+        if (LabelSet.is_empty block.predecessors) &&
+           (not (is_live_trap_handler t label)) &&
+           (t.cfg.entry_label <> label) then
+          raise (Dead_block (label, block)))
+        t.cfg.blocks;
+    with Dead_block (label,block) -> begin
+        eliminate_dead_block label block;
+        find_dead_block ()
+      end
+  in
+  find_dead_block ();
+  let num_dead_blocks = List.length !dead_blocks in
+  if num_dead_blocks > 0 then begin
+    if verbose then begin
+      Printf.printf "Found %d dead blocks in function %s:"
+        num_dead_blocks
+        t.cfg.fun_name
+    end;
+    List.iter (fun (lbl, _) -> Printf.printf "\n%d" lbl) !dead_blocks;
+    Printf.printf "\n"
+  end
+
+(* Naive *)
+(* [f] is the constructor to apply to the simplified comparison operator *)
+let simplify_disjunction_int c1 c2 f =
+  let open Cmm in
+  let res =
+    match c1, c2 with (* commutative - fix *)
+    | Ceq, Clt | Clt, Ceq -> f Cle (* merge ranges *)
+    | Ceq, Cgt | Cgt, Ceq -> f Cge (* merge ranges *)
+    | Cne, Cle | Cle, Cne -> f Clt (* intersect ranges *)
+    | Cne, Cge | Cge, Cne -> f Cgt (* intersect ranges *)
+    | Ceq, Cle | Cle, Ceq -> f Cle (* subsume range *)
+    | Ceq, Cge | Cge, Ceq -> f Cge (* subsume range *)
+    | Cne, Clt | Clt, Cne -> f Clt (* subsume range *)
+    | Cne, Cgt | Cgt, Cne -> f Cgt (* subsume range *)
+    | Clt, Cgt | Cgt, Clt -> f Cne (* complement ranges *)
+    | Cle, Cge | Cge, Cle -> Always (* entire range *)
+    | _ -> assert false (* handled before, returning Always *)
+  in [res]
+
+let simplify_disjunction cmp1 cmp2 =
+  match cmp1, cmp2 with
+  | Always, _ | _, Always ->
+    (* This can happen only as a result of a previous simplification. *)
+    [Always]
+  | (Test c1), (Test c2) -> begin
+      if c1 = c2 then [(Test c1)]
+      else if c1 = invert_test c2 then [Always]
+      else begin
+        match c1, c2 with
+        | Iinttest(Isigned cmp1), Iinttest(Isigned cmp2) ->
+          simplify_disjunction_int cmp1 cmp2
+            (fun cmp -> Test(Iinttest(Isigned cmp)))
+        | Iinttest(Iunsigned cmp1), Iinttest(Iunsigned cmp2) ->
+          simplify_disjunction_int cmp1 cmp2
+            (fun cmp -> Test(Iinttest(Iunsigned cmp)))
+        | Iinttest_imm(Isigned cmp1, n1), Iinttest_imm(Isigned cmp2, n2)
+          when n1 = n2 ->
+          simplify_disjunction_int cmp1 cmp2
+            (fun cmp -> Test(Iinttest_imm(Isigned cmp, n1)))
+        | Iinttest_imm(Iunsigned cmp1, n1), Iinttest_imm(Iunsigned cmp2, n2)
+          when n1 = n2 ->
+          simplify_disjunction_int cmp1 cmp2
+            (fun cmp -> Test(Iinttest_imm(Iunsigned cmp, n1)))
+        | _ -> [cmp1;cmp2] (* do not simplify further, even if it is possible. *)
+      end
+    end
+
+let simplify_terminator block =
+  let t = block.terminator in
+  match t.desc with
+  | Branch successors ->
+    (* Merge successors that go to the same label.
+       Preserve order of branches whenever possible. *)
+    let sorted =
+      List.stable_sort
+        (fun (_,l1) (_, l2) -> Numbers.Int.compare l1 l2)
+        successors in
+    let new_successors =
+      List.fold_left
+        (fun res (c,l) ->
+           match res with
+           | (c1,l)::tl ->
+             let res = (simplify_disjunction c c1) in
+             let hd = List.map (fun c -> (c,l)) res in
+             hd @ tl
+           | _ -> (c,l)::res)
+        [] sorted in
+    block.terminator <- { t with desc = Branch new_successors }
+  | Switch labels ->
+    (* Convert simple case to branches. *)
+    (* Find position k and label l such that label.(j)=l for all j=k...len-1. *)
+    let len = Array.length labels in
+    assert (len > 0);
+    let l = labels.(len - 1) in
+    let rec find_pos k =
+      if k = 0 then k
+      else if labels.(k-1) = l then
+        find_pos k-1
+      else k
+    in
+    begin match find_pos len-1 with
+    | 0 -> (* All labels are the same and equal to l *)
+      block.terminator <- { t with desc = (Branch [(Always,l)] ) }
+    | 1 ->
+      let t0 = Test(Iinttest_imm(Iunsigned Clt, 1)) (* arg < 1  *) in
+      let t1 = Test(Iinttest_imm(Isigned   Cge, 1)) (* arg >= 1 *) in
+      block.terminator <- { t with desc = Branch [(t0,labels.(0));
+                                                  (t1,l)] }
+    | 2 ->
+      let t0 = Test(Iinttest_imm(Iunsigned Clt, 1)) (* arg < 1  *) in
+      let t1 = Test(Iinttest_imm(Iunsigned Ceq, 1)) (* arg = 1 *) in
+      let t2 = Test(Iinttest_imm(Isigned   Cgt, 1)) (* arg > 1 *) in
+      block.terminator <- { t with desc =  Branch [(t0,labels.(0));
+                                                   (t1,labels.(1));
+                                                   (t2,l)] }
+    | _ -> ()
+    end
+  | _ -> ()
+
+type binfo = { label:label;
+               block:block;
+               target_label:label;
+             }
+exception Fallthrough_block of binfo
+(* Disconnects fallthrough blocks by re-routing their predecessors
+   to point directly to the successor block.
+   Does not eliminate dead blocks that result from it.
+   Dead block elimination should run after it to delete these blocks.
+*)
+let disconnect_fallthrough_blocks t =
+  let disconnect_fallthrough_block { label; block; target_label; } =
+    (* Update the successor block's predecessors set:
+       first remove the current block and then add its predecessors.  *)
+    let target_block = Hashtbl.find t.cfg.blocks target_label in
+    target_block.predecessors <- LabelSet.remove label
+                                   target_block.predecessors;
+    (* Update the predecessor block's terminators *)
+    let replace_label l =
+      if l = label then begin
+        target_block.predecessors <- LabelSet.add l
+                                       target_block.predecessors;
+        target_label
+      end else l in
+    let replace_successor (cond, l) = (cond, replace_label l) in
+    let update_pred pred_label =
+      let pred_block = Hashtbl.find t.cfg.blocks pred_label in
+      let t = pred_block.terminator in begin
+        match t.desc with
+        | Branch successors ->
+          let new_successors = List.map replace_successor successors in
+          pred_block.terminator <- { t with desc = Branch new_successors }
+        | Switch labels ->
+          let new_labels = Array.map replace_label labels in
+          pred_block.terminator <- { t with desc = Switch new_labels }
+        | _ -> ()
+      end;
+      simplify_terminator pred_block
+    in
+    LabelSet.iter update_pred block.predecessors;
+  in
+  let rec find_fallthrough_block () =
+    try
+      Hashtbl.iter (fun label block ->
+        let successors_labels = successor_labels block in
+        if (t.cfg.entry_label <> label) &&             (* not entry block *)
+           List.length successors_labels = 1 &&       (* single successor *)
+           (not (is_live_trap_handler t label)) &&      (* not trap label *)
+           List.length block.body = 0                       (* empty body *)
+        then begin
+          let target_label = List.hd successors_labels in
+          raise (Fallthrough_block { label; block; target_label; })
+        end)
+        t.cfg.blocks
+    with Fallthrough_block binfo -> begin
+      disconnect_fallthrough_block binfo;
+      find_fallthrough_block ()
+    end
+  in
+  find_fallthrough_block ()
+
+let eliminate_fallthrough_blocks t =
+  (* Find and disconnect fallthrough blocks (i.e., blocks with empty body
+     and a single successor) by rerouting their predecessors
+     to point directly to their successors. Then eliminate dead blocks,
+     which can create new fallthrough blocks by eliminated successors.
+     Repeat until fixpoint.
+     Termination is guaranteed because every step eliminates an edge or a node.
+     The order matters for performance but not for the final result.  *)
+  let rec loop () =
+    let len = Hashtbl.length t.cfg.blocks in
+    disconnect_fallthrough_blocks t;
+    eliminate_dead_blocks t;
+    let new_len = Hashtbl.length t.cfg.blocks in
+    if verbose then
+      Printf.printf "Eliminated fallthrough blocks: len=%d new_len=%d\n"
+        len new_len;
+    if new_len < len && new_len > 0 then loop ()
+  in
+  Hashtbl.iter (fun _ b -> simplify_terminator b) t.cfg.blocks;
+  loop ()
+
+

@@ -30,14 +30,28 @@ type reorder_algo =
   | Cfg_label of layout
   | CachePlus of unit
 
-let validate fun_name orig_cfg_layout new_cfg_layout  =
+let validate cfg new_cfg_layout  =
+  let orig_cfg_layout = Cfg_builder.get_layout cfg in
   (* Make sure the new layout is just a permutation.
      CR gyorsh: do we need to handle block duplication here? *)
   if not (new_cfg_layout = orig_cfg_layout) then begin
-    assert (List.length new_cfg_layout = List.length orig_cfg_layout);
-    assert ((List.sort new_cfg_layout ~compare:Int.compare) =
-            (List.sort orig_cfg_layout ~compare:Int.compare));
-    Report.log (sprintf "Reordered %s\n" fun_name);
+    let compare = Int.compare in
+    let orig_len = List.length orig_cfg_layout in
+    if Cfg_builder.preserve_orig_labels cfg then begin
+      assert (List.length new_cfg_layout = orig_len);
+      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
+      assert ((List.sort new_cfg_layout ~compare) =
+              (List.sort orig_cfg_layout ~compare))
+    end else begin
+      assert (List.length new_cfg_layout <= orig_len);
+      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
+      assert ((List.length
+                 (List.merge ~compare
+                    (List.sort new_cfg_layout ~compare)
+                    (List.sort orig_cfg_layout ~compare)))
+              = orig_len)
+    end;
+    Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
   end
 
 let reorder_random cfg =
@@ -46,7 +60,7 @@ let reorder_random cfg =
   let new_layout = (List.hd_exn original_layout)::
                    (List.permute (List.tl_exn original_layout))
   in
-  validate (Cfg_builder.get_name cfg) original_layout new_layout;
+  validate cfg new_layout;
   Cfg_builder.set_layout cfg new_layout
 
 let print_list msg l =
@@ -111,7 +125,7 @@ let reorder_layout cfg layout =
         |> List.concat
       in
       print_list "new:" new_cfg_layout;
-      validate fun_name orig_cfg_layout new_cfg_layout;
+      validate cfg new_cfg_layout;
       Cfg_builder.set_layout cfg new_cfg_layout;
     end
   with KeyAlreadyPresent (id, pos) -> begin
@@ -130,7 +144,7 @@ let reorder_rel_layout cfg layout =
       let orig_cfg_layout = Cfg_builder.get_layout cfg in
       print_list "orig" orig_cfg_layout;
       print_list "new" new_cfg_layout;
-      validate fun_name orig_cfg_layout new_cfg_layout;
+      validate cfg new_cfg_layout;
       Cfg_builder.set_layout cfg new_cfg_layout;
     end
 

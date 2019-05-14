@@ -1,6 +1,11 @@
 (executable
  (name ocamlfdo)
- (modules ocamlfdo elf_locations reorder cfg cfg_builder report)
+ (modules ocamlfdo
+          elf_locations
+          reorder
+          cfg
+          cfg_builder
+          report)
  (libraries
         owee
         core
