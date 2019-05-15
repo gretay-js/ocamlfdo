@@ -597,7 +597,7 @@ let to_linear t =
               make_simple_linear (Llabel label) body
           end
           else begin
-            Printf.printf "%d " label;
+            if verbose then Printf.printf "%d " label;
             make_simple_linear (Llabel label) body
           end
         in
