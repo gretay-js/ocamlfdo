@@ -423,11 +423,12 @@ let main ~binary_filename
   let validate f ~new_body =
     match algo with
     | Reorder.Identity ->
-      if eliminate_fallthrough_blocks ||
-         eliminate_dead_blocks
-         (* || not preserve_orig_labels *)
-      then ()
-      else check_equal f ~new_body
+      (* if eliminate_fallthrough_blocks ||
+       *    eliminate_dead_blocks
+       *    (* || not preserve_orig_labels *)
+       * then ()
+       * else *)
+        check_equal f ~new_body
     | _ -> ()
   in
   let transform f =
