@@ -419,7 +419,7 @@ let main ~binary_filename
     let fun_name = Cfg_builder.get_name new_cfg in
     w_rel fun_name new_layout
   in
-  let preserve_orig_labels = false in
+  let preserve_orig_labels = true in
   let validate f ~new_body =
     match algo with
     | Reorder.Identity ->
