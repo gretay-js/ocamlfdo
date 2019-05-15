@@ -717,24 +717,39 @@ let eliminate_dead_blocks t =
     Printf.printf "\n"
   end
 
-(* Naive *)
-(* [f] is the constructor to apply to the simplified comparison operator *)
+(* Compute one comparison operator that is equivalent to the disjunction
+   of the operators c1 and c2.
+   [f] is the constructor to apply to the simplified comparison operator,
+   unless the result is "Always" which is not expressible as a comparison. *)
 let simplify_disjunction_int c1 c2 f =
   let open Cmm in
-  let res =
-    match c1, c2 with (* commutative - fix *)
-    | Ceq, Clt | Clt, Ceq -> f Cle (* merge ranges *)
-    | Ceq, Cgt | Cgt, Ceq -> f Cge (* merge ranges *)
-    | Cne, Cle | Cle, Cne -> f Clt (* intersect ranges *)
-    | Cne, Cge | Cge, Cne -> f Cgt (* intersect ranges *)
-    | Ceq, Cle | Cle, Ceq -> f Cle (* subsume range *)
-    | Ceq, Cge | Cge, Ceq -> f Cge (* subsume range *)
-    | Cne, Clt | Clt, Cne -> f Clt (* subsume range *)
-    | Cne, Cgt | Cgt, Cne -> f Cgt (* subsume range *)
-    | Clt, Cgt | Cgt, Clt -> f Cne (* complement ranges *)
-    | Cle, Cge | Cge, Cle -> Always (* entire range *)
-    | _ -> assert false (* handled before, returning Always *)
-  in [res]
+  (* Each operator can be represented as a set of the first three,
+     encoded as a list for efficiency here. *)
+  let to_rep = function
+    | Ceq -> [Ceq]
+    | Clt -> [Clt]
+    | Cgt -> [Cgt]
+    | Cne -> [Clt; Cgt]
+    | Cle -> [Ceq; Clt]
+    | Cge -> [Ceq; Cgt]
+  in
+  let of_rep c =
+    match List.sort_uniq compare c with
+    | [Ceq] -> f Ceq
+    | [Clt] -> f Clt
+    | [Cgt] -> f Cgt
+    (* No need enumrate permutations of lists of length 2 and 3, becase
+       the order of the variants in the definition fo integer_comparison
+       determines the order of the list we get using polymorphic compare. *)
+    | [Clt; Cgt] -> f Cne
+    | [Ceq; Clt] -> f Cle
+    | [Ceq; Cgt] -> f Cge
+    (* This case is not representable as a single operator. Returns Always. *)
+    | [Ceq; Cgt; Clt] -> Always
+    | _ -> assert false
+  in
+  let c = List.concat [(to_rep c1); (to_rep c2)] in
+  [ of_rep c ]
 
 let simplify_disjunction cmp1 cmp2 =
   match cmp1, cmp2 with
