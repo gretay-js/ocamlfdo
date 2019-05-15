@@ -534,6 +534,7 @@ let linearize_terminator terminator next =
       | [(Test cond_p,label_p); (Test cond_q,label_q)] ->
         if cond_p <> invert_test cond_q then
           Misc.fatal_error ("Illegal successors")
+          (* [Lcondbranch(cond_p,label_p); Lcondbranch(cond_q,label_q); ] *)
         else if label_p = next.label && label_q = next.label then
           []
         else if label_p <> next.label && label_q <> next.label then
@@ -634,7 +635,7 @@ let print oc t =
   let print_block label block =
       Printf.fprintf oc "\n%d:\n" label;
       List.iter (fun i->
-        (* Printf.fprintf oc "\t%d\n" i.id; *)
+        Printf.fprintf oc "\n\t";
         print_instr i)
         block.body;
       (* Printf.fprintf oc "\t%d\n" block.terminator.id; *)
@@ -708,8 +709,8 @@ let eliminate_dead_block t dead_blocks label =
 (* Must be called after predecessors are registered
    and split labels are registered. *)
 let rec eliminate_dead_blocks t =
-  if not t.preserve_orig_labels then
-    failwith "Won't eliminate dead blocks when preserve_orig_labels is set.";
+  (* if not t.preserve_orig_labels then
+   *   failwith "Won't eliminate dead blocks when preserve_orig_labels is set."; *)
   let found = Hashtbl.fold (fun label block found ->
     if (LabelSet.is_empty block.predecessors) &&
        (not (is_live_trap_handler t label)) &&
@@ -784,10 +785,11 @@ let simplify_terminator block =
     let rec find_pos k =
       if k = 0 then k
       else if labels.(k-1) = l then
-        find_pos k-1
+        find_pos (k-1)
       else k
     in
-    begin match find_pos len-1 with
+    let k = find_pos (len-1) in
+    begin match k with
     | 0 -> (* All labels are the same and equal to l *)
       block.terminator <- { t with desc = (Branch [(Always,l)] ) }
     | 1 ->
@@ -818,15 +820,15 @@ let disconnect_fallthrough_block t { label; target_label; } =
   let target_block = Hashtbl.find t.cfg.blocks target_label in
   target_block.predecessors <- LabelSet.remove label
                                  target_block.predecessors;
-  (* Update the predecessor block's terminators *)
-  let replace_label l =
-    if l = label then begin
-      target_block.predecessors <- LabelSet.add l
-                                     target_block.predecessors;
-      target_label
-    end else l in
-  let replace_successor (cond, l) = (cond, replace_label l) in
   let update_pred pred_label =
+    (* Update the predecessor block's terminators *)
+    let replace_label l =
+      if l = label then begin
+        target_block.predecessors <- LabelSet.add pred_label
+                                       target_block.predecessors;
+        target_label
+      end else l in
+    let replace_successor (cond, l) = (cond, replace_label l) in
     let pred_block = Hashtbl.find t.cfg.blocks pred_label in
     let t = pred_block.terminator in begin
       match t.desc with
@@ -892,8 +894,10 @@ let eliminate_fallthrough_blocks t =
     end
   in
   if verbose then print stdout t;
+  print stdout t;
   Hashtbl.iter (fun _ b -> simplify_terminator b) t.cfg.blocks;
+  print stderr t;
   loop ();
-
+  print stderr t
 
 (* CR gyorsh: implement CFG traversal *)

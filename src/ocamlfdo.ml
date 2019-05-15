@@ -419,15 +419,15 @@ let main ~binary_filename
     let fun_name = Cfg_builder.get_name new_cfg in
     w_rel fun_name new_layout
   in
-  let preserve_orig_labels = true in
+  let preserve_orig_labels = false in
   let validate f ~new_body =
     match algo with
     | Reorder.Identity ->
-      if eliminate_fallthrough_blocks ||
-         eliminate_dead_blocks ||
-         not preserve_orig_labels
-      then ()
-      else
+      (* if eliminate_fallthrough_blocks ||
+       *    eliminate_dead_blocks ||
+       *    not preserve_orig_labels
+       * then ()
+       * else *)
         check_equal f ~new_body
     | _ -> ()
   in
