@@ -5,6 +5,7 @@
           reorder
           cfg
           cfg_builder
+          simplify
           report)
  (libraries
         owee

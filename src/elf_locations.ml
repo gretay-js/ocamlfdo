@@ -30,7 +30,7 @@ type t = {
   mutable fun_misses : int;
 }
 
-let verbose = true
+let verbose = false
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [Unix.O_RDONLY] 0 in

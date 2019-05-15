@@ -21,7 +21,7 @@ module Layout = struct
   type t = label list
 end
 
-let verbose = false
+let verbose = true
 
 let successors block =
   match block.terminator.desc with
@@ -522,7 +522,7 @@ let linearize_terminator terminator next =
     | Switch labels -> [Lswitch labels]
     | Branch successors ->
       match successors with
-      | [] -> Misc.fatal_error ("Branch without successors")
+      | [] -> Misc.fatal_error "Branch without successors"
       | [(Always,label)] ->
         if next.label = label then []
         else [Lbranch(label)]
@@ -654,7 +654,8 @@ let id_to_label t id =
 (* CR gyorsh: needs mroe testing. *)
 
 (* CR gyorsh: eliminate transitively blocks that become dead from this one. *)
-let eliminate_dead_block t dead_blocks (label, block) =
+let eliminate_dead_block t dead_blocks label =
+  let block = Hashtbl.find t.cfg.blocks label in
   Hashtbl.remove t.cfg.blocks label;
   (* Update successor blocks of the dead block *)
   List.iter (fun target ->
@@ -698,18 +699,19 @@ let rec eliminate_dead_blocks t =
     if (LabelSet.is_empty block.predecessors) &&
        (not (is_live_trap_handler t label)) &&
        (t.cfg.entry_label <> label) then
-      (label, block)::found
+      label::found
     else found)
     t.cfg.blocks []
   in
   let num_found = List.length found in
   if num_found > 0 then begin
-    let dead_blocks = List.fold_left (eliminate_dead_block t) [] found
-                      |> List.sort_uniq Numbers.Int.compare in
+    let dead_blocks = List.fold_left (eliminate_dead_block t) [] found in
+    let dead_blocks = List.sort_uniq Numbers.Int.compare dead_blocks in
     let num_eliminated = List.length dead_blocks in
     assert (num_eliminated >= num_found);
     if verbose then begin
-      Printf.printf "Found %d dead blocks in function %s, eliminated %d (transitively)."
+      Printf.printf
+        "Found %d dead blocks in function %s, eliminated %d (transitively).\n"
         num_found
         t.cfg.fun_name
         num_eliminated;
@@ -719,69 +721,6 @@ let rec eliminate_dead_blocks t =
     end;
     eliminate_dead_blocks t
   end
-
-(* CR gyorsh: can we do the same for float comparisons? *)
-(* Compute one comparison operator that is equivalent to the disjunction
-   of the operators c1 and c2.
-   [f] is the constructor to apply to the simplified comparison operator,
-   unless the result is "Always" which is not expressible as a comparison. *)
-let simplify_disjunction_int c1 c2 f =
-  let open Cmm in
-  (* Each operator can be represented as a set of the first three,
-     encoded as a list for efficiency here. *)
-  let to_rep = function
-    | Ceq -> [Ceq]
-    | Clt -> [Clt]
-    | Cgt -> [Cgt]
-    | Cne -> [Clt; Cgt]
-    | Cle -> [Ceq; Clt]
-    | Cge -> [Ceq; Cgt]
-  in
-  let of_rep c =
-    match List.sort_uniq compare c with
-    | [Ceq] -> f Ceq
-    | [Clt] -> f Clt
-    | [Cgt] -> f Cgt
-    (* No need enumrate permutations of lists of length 2 and 3, becase
-       the order of the variants in the definition fo integer_comparison
-       determines the order of the list we get using polymorphic compare. *)
-    | [Clt; Cgt] -> f Cne
-    | [Ceq; Clt] -> f Cle
-    | [Ceq; Cgt] -> f Cge
-    (* This case is not representable as a single operator. Returns Always. *)
-    | [Ceq; Cgt; Clt] -> Always
-    | _ -> assert false
-  in
-  let c = List.concat [(to_rep c1); (to_rep c2)] in
-  [ of_rep c ]
-
-let simplify_disjunction cmp1 cmp2 =
-  match cmp1, cmp2 with
-  | Always, _ | _, Always ->
-    (* This can happen only as a result of a previous simplification. *)
-    [Always]
-  | (Test c1), (Test c2) -> begin
-      if c1 = c2 then [(Test c1)]
-      else if c1 = invert_test c2 then [Always]
-      else begin
-        match c1, c2 with
-        | Iinttest(Isigned cmp1), Iinttest(Isigned cmp2) ->
-          simplify_disjunction_int cmp1 cmp2
-            (fun cmp -> Test(Iinttest(Isigned cmp)))
-        | Iinttest(Iunsigned cmp1), Iinttest(Iunsigned cmp2) ->
-          simplify_disjunction_int cmp1 cmp2
-            (fun cmp -> Test(Iinttest(Iunsigned cmp)))
-        | Iinttest_imm(Isigned cmp1, n1), Iinttest_imm(Isigned cmp2, n2)
-          when n1 = n2 ->
-          simplify_disjunction_int cmp1 cmp2
-            (fun cmp -> Test(Iinttest_imm(Isigned cmp, n1)))
-        | Iinttest_imm(Iunsigned cmp1, n1), Iinttest_imm(Iunsigned cmp2, n2)
-          when n1 = n2 ->
-          simplify_disjunction_int cmp1 cmp2
-            (fun cmp -> Test(Iinttest_imm(Iunsigned cmp, n1)))
-        | _ -> [cmp1;cmp2] (* do not simplify further, even if it is possible. *)
-      end
-    end
 
 let simplify_terminator block =
   let t = block.terminator in
@@ -798,7 +737,7 @@ let simplify_terminator block =
         (fun res (c,l) ->
            match res with
            | (c1,l)::tl ->
-             let res = (simplify_disjunction c c1) in
+             let res = (Simplify.disjunction c c1) in
              let hd = List.map (fun c -> (c,l)) res in
              hd @ tl
            | _ -> (c,l)::res)
@@ -836,12 +775,12 @@ let simplify_terminator block =
   | _ -> ()
 
 type fallthrough_block = { label:label;
-                           block:block;
                            target_label:label;
                          }
 (* Disconnects fallthrough block by re-routing it predecessors
    to point directly to the successor block. *)
-let disconnect_fallthrough_block t { label; block; target_label; } =
+let disconnect_fallthrough_block t { label; target_label; } =
+  let block = Hashtbl.find t.cfg.blocks label in
   (* Update the successor block's predecessors set:
      first remove the current block and then add its predecessors.  *)
   let target_block = Hashtbl.find t.cfg.blocks target_label in
@@ -869,7 +808,9 @@ let disconnect_fallthrough_block t { label; block; target_label; } =
     end;
     simplify_terminator pred_block
   in
-  LabelSet.iter update_pred block.predecessors
+  LabelSet.iter update_pred block.predecessors;
+  block.terminator <- { block.terminator with desc = Branch [] };
+  block.predecessors <- LabelSet.empty
 
 (* Find and disconnect fallthrough blocks until fixpoint.
    Does not eliminate dead blocks that result from it.
@@ -883,14 +824,14 @@ let rec disconnect_fallthrough_blocks t =
        List.length block.body = 0                       (* empty body *)
     then begin
       let target_label = List.hd successors_labels in
-      { label; block; target_label; }::found
+      { label; target_label; }::found
     end else found)
     t.cfg.blocks []
   in
   let len = List.length found in
   if len > 0 then begin
     List.iter (disconnect_fallthrough_block t) found;
-    if verbose then Printf.printf "Discounnected fallthrough blocks: %d\n" len;
+    if verbose then Printf.printf "Disconnected fallthrough blocks: %d\n" len;
     disconnect_fallthrough_blocks t
   end
 
@@ -907,10 +848,12 @@ let eliminate_fallthrough_blocks t =
     disconnect_fallthrough_blocks t;
     eliminate_dead_blocks t;
     let new_len = Hashtbl.length t.cfg.blocks in
-    if verbose then
-      Printf.printf "Eliminated fallthrough blocks: len=%d new_len=%d\n"
-        len new_len;
-    if new_len < len && new_len > 0 then loop ()
+    if new_len < len && new_len > 0 then begin
+      if verbose then
+        Printf.printf "Eliminated %d fallthrough blocks in %s: len=%d new_len=%d\n"
+          (len - new_len) t.cfg.fun_name len new_len;
+      loop ()
+    end
   in
   Hashtbl.iter (fun _ b -> simplify_terminator b) t.cfg.blocks;
   loop ()
