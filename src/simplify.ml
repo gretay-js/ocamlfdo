@@ -11,6 +11,12 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+(* Simplify comparison operations. *)
+
+(* CR gyorsh: Too complicated?
+   This approach may be useful earlier in the compiler.
+   Is there existing code in the compiler that does something similar? *)
+
 open Cmm
 module Rep = struct
   (* Represent a powerset of {eq,lt,gt,uo} as a "bitvector" of length 4. *)

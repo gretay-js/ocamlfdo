@@ -21,7 +21,7 @@ module Layout = struct
   type t = label list
 end
 
-let verbose = true
+let verbose = false
 
 let successors block =
   match block.terminator.desc with
@@ -343,6 +343,8 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
       create_blocks t fallthrough.insn block ~trap_depth
 
     | Lswitch labels ->
+      (* CR gyorsh: get rid of switches entirely
+         and re-generate them based on optimization and perf data *)
       add_terminator (Switch labels);
       Array.iter (record_trap_depth_at_label t ~trap_depth) labels;
       assert (has_label i.next);
@@ -522,7 +524,9 @@ let linearize_terminator terminator next =
     | Switch labels -> [Lswitch labels]
     | Branch successors ->
       match successors with
-      | [] -> Misc.fatal_error "Branch without successors"
+      | [] ->
+        if verbose then Printf.printf "next label is %d\n" next.label;
+        Misc.fatal_error "Branch without successors"
       | [(Always,label)] ->
         if next.label = label then []
         else [Lbranch(label)]
@@ -534,12 +538,13 @@ let linearize_terminator terminator next =
           []
         else if label_p <> next.label && label_q <> next.label then
           (* CR gyorsh: if both label are not fall through, then arrangement
-             should depend on the relative position of the target labels
+             should depend on perf data and possibly
+             the relative position of the target labels
              and the current block: whether the jumps are forward or back.
              This information can be obtained from layout but it needs
              to be made accessible here.
           *)
-          [Lcondbranch(cond_p,label_p); Lcondbranch(cond_q,label_q)]
+          [Lcondbranch(cond_p,label_p); Lbranch(label_q)]
         else if label_p = next.label then
           [Lcondbranch(cond_q,label_q)]
         else if label_q = next.label then
@@ -616,18 +621,30 @@ let to_linear t =
 let print oc t =
   let ppf = Format.formatter_of_out_channel oc in
   let print_instr i =
-      Printlinear.instr ppf (basic_to_linear i end_instr);
+    Printlinear.instr ppf (basic_to_linear i end_instr)
   in
+  let print_terminator ti =
+    Printlinear.instr ppf (linearize_terminator ti
+                             { label = no_label;
+                               insn = end_instr;
+                             }) in
   Printf.fprintf oc "%s\n" t.cfg.fun_name;
   Printf.fprintf oc "layout.length=%d\n" (List.length t.layout);
   Printf.fprintf oc "blocks.length=%d\n" (Hashtbl.length t.cfg.blocks);
   let print_block label block =
-      Printf.fprintf oc "%d:\n" label;
+      Printf.fprintf oc "\n%d:\n" label;
       List.iter (fun i->
-        Printf.fprintf oc "\t%d\n" i.id;
+        (* Printf.fprintf oc "\t%d\n" i.id; *)
         print_instr i)
         block.body;
-      Printf.fprintf oc "\t%d\n" block.terminator.id
+      (* Printf.fprintf oc "\t%d\n" block.terminator.id; *)
+      print_terminator block.terminator;
+      Printf.fprintf oc "\npredecessors:";
+      LabelSet.iter (fun l -> Printf.fprintf oc " %d" l)
+        block.predecessors;
+      Printf.fprintf oc "\nsuccessors:";
+      List.iter (fun l -> Printf.fprintf oc " %d" l)
+        (successor_labels block)
   in
   List.iter (fun label ->
     let block = Hashtbl.find t.cfg.blocks label
@@ -637,7 +654,6 @@ let print oc t =
   Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
     t.id_to_label;
   Printf.fprintf oc "\n"
-
 
 let id_to_label t id =
   match Numbers.Int.Map.find_opt id t.id_to_label with
@@ -721,27 +737,44 @@ let rec eliminate_dead_blocks t =
     eliminate_dead_blocks t
   end
 
+
+module M = Numbers.Int.Map
 let simplify_terminator block =
   let t = block.terminator in
   match t.desc with
   | Branch successors ->
     (* Merge successors that go to the same label.
-       Preserve order of branches whenever possible. *)
-    let sorted =
-      List.stable_sort
-        (fun (_,l1) (_, l2) -> Numbers.Int.compare l1 l2)
-        successors in
-    let new_successors =
+       Preserve order of successors, except
+       successors that share the same label target are grouped. *)
+    (* Map label to list of conditions that target it. *)
+    (* CR gyorsh: pairwise join of conditions is not canonical,
+       because some joins are not representable as a condition. *)
+    let map = List.fold_left (fun map (c,l) ->
+      let s = match M.find_opt l map with
+        | None -> [c] (* Not seen this target yet *)
+        | Some (c1::rest) -> (Simplify.disjunction c c1) @ rest
+        | Some [] -> assert false
+      in M.add l s map)
+      M.empty
+      successors in
+    let (new_successors, map) =
       List.fold_left
-        (fun res (c,l) ->
-           match res with
-           | (c1,l)::tl ->
-             let res = (Simplify.disjunction c c1) in
-             let hd = List.map (fun c -> (c,l)) res in
-             hd @ tl
-           | _ -> (c,l)::res)
-        [] sorted in
-    block.terminator <- { t with desc = Branch new_successors }
+        (fun (res, map) (_,l)  ->
+           match M.find_opt l map with
+           | None -> (res, map)
+           | Some s ->
+             let map = M.remove l map in
+             let res = List.fold_left
+                         (fun res c -> ((c,l)::res))
+                         res s in
+             (res, map))
+        ([],map) successors in
+    assert (M.is_empty map);
+    let new_len = List.length new_successors in
+    let len = List.length successors in
+    assert (new_len <= len);
+    if new_len < len then
+      block.terminator <- { t with desc = Branch new_successors };
   | Switch labels ->
     (* Convert simple case to branches. *)
     (* Find position k and label l such that label.(j)=l for all j=k...len-1. *)
@@ -823,6 +856,10 @@ let rec disconnect_fallthrough_blocks t =
        List.length block.body = 0                       (* empty body *)
     then begin
       let target_label = List.hd successors_labels in
+      if verbose then begin
+        Printf.printf "block at %d has single successor %d\n"
+          label target_label
+      end;
       { label; target_label; }::found
     end else found)
     t.cfg.blocks []
@@ -854,8 +891,9 @@ let eliminate_fallthrough_blocks t =
       loop ()
     end
   in
+  if verbose then print stdout t;
   Hashtbl.iter (fun _ b -> simplify_terminator b) t.cfg.blocks;
-  loop ()
+  loop ();
 
 
 (* CR gyorsh: implement CFG traversal *)
