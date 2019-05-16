@@ -894,10 +894,11 @@ let eliminate_fallthrough_blocks t =
     end
   in
   if verbose then print stdout t;
-  print stdout t;
   Hashtbl.iter (fun _ b -> simplify_terminator b) t.cfg.blocks;
-  print stderr t;
-  loop ();
-  print stderr t
+  loop ()
 
 (* CR gyorsh: implement CFG traversal *)
+(* CR gyorsh: abstraction of cfg updates that transparently and efficiently
+   keeps predecessors and successors in sync. For example,
+   change successors relation should automatically updates the predecessors
+   relation without recomputing them from scratch. *)
