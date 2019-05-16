@@ -334,7 +334,7 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
       in
       let s0 = (Test(Iinttest_imm(Iunsigned Clt, 1)), get_dest lbl0) in
       let s1 = (Test(Iinttest_imm(Iunsigned Ceq, 1)), get_dest lbl1) in
-      let s2 = (Test(Iinttest_imm(Isigned   Cgt, 1)), get_dest lbl2) in
+      let s2 = (Test(Iinttest_imm(Iunsigned Cgt, 1)), get_dest lbl2) in
       add_terminator (Branch [s0;s1;s2]);
       create_blocks t fallthrough.insn block ~trap_depth
 
@@ -529,7 +529,7 @@ let linearize_terminator terminator ~next =
         else [Lbranch(label)]
       | [(Test _, _)] -> failwith "Successors not exhastive";
       | [(Test cond_p,label_p); (Test cond_q,label_q)] ->
-        if cond_p <> invert_test cond_q then begin
+        if not (cond_p = invert_test cond_q) then begin
           Printf.fprintf stderr "Cannot linearize branch with non-invert:\n";
           Printcfg.terminator
             (Format.formatter_of_out_channel stderr)
@@ -554,7 +554,8 @@ let linearize_terminator terminator ~next =
         else assert false
       | [(Test(Iinttest_imm(Iunsigned Clt, 1)),label0);
          (Test(Iinttest_imm(Iunsigned Ceq, 1)),label1);
-         (Test(Iinttest_imm(Isigned   Cgt, 1)),label2)] ->
+         (Test(Iinttest_imm(Iunsigned Cgt, 1)),label2)]
+        ->
         let find_label l =
           if next.label = l then None
           else Some l
@@ -754,13 +755,13 @@ let simplify_terminator block =
       block.terminator <- { t with desc = (Branch [(Always,l)] ) }
     | 1 ->
       let t0 = Test(Iinttest_imm(Iunsigned Clt, 1)) (* arg < 1  *) in
-      let t1 = Test(Iinttest_imm(Isigned   Cge, 1)) (* arg >= 1 *) in
+      let t1 = Test(Iinttest_imm(Iunsigned Cge, 1)) (* arg >= 1 *) in
       block.terminator <- { t with desc = Branch [(t0,labels.(0));
                                                   (t1,l)] }
     | 2 ->
       let t0 = Test(Iinttest_imm(Iunsigned Clt, 1)) (* arg < 1  *) in
       let t1 = Test(Iinttest_imm(Iunsigned Ceq, 1)) (* arg = 1 *) in
-      let t2 = Test(Iinttest_imm(Isigned   Cgt, 1)) (* arg > 1 *) in
+      let t2 = Test(Iinttest_imm(Iunsigned Cgt, 1)) (* arg > 1 *) in
       block.terminator <- { t with desc =  Branch [(t0,labels.(0));
                                                    (t1,labels.(1));
                                                    (t2,l)] }
