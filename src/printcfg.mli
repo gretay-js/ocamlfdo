@@ -11,29 +11,17 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-(* Control Flow Graph of a function. *)
-type t
+(* Debug printing *)
+(* CR gyorsh: add dot format output *)
+open Cfg
 
-type label = Linearize.label
+val cfg
+  : out_channel
+  -> t
+  -> label list
+  -> basic_to_linear :
+       (basic instruction -> Linearize.instruction -> Linearize.instruction)
+  -> linearize_terminator : (terminator instruction -> Linearize.instruction)
+  -> unit
 
-module Layout : sig
-  type t = label list
-end
-
-val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
-val to_linear : t -> Linearize.instruction
-
-val get_layout : t -> Layout.t
-val set_layout : t -> Layout.t -> t
-
-val get_name : t -> string
-val preserve_orig_labels : t -> bool
-
-val id_to_label : t -> int -> label option
-
-val print : out_channel -> t -> unit
-
-(* Mutates t inplace *)
-val eliminate_dead_blocks : t -> unit
-(* Mutates t inplace and also eliminate dead blocks *)
-val eliminate_fallthrough_blocks : t -> unit
+val terminator : Format.formatter -> terminator instruction -> unit

@@ -23,22 +23,6 @@ end
 
 let verbose = false
 
-let successors block =
-  match block.terminator.desc with
-  | Branch successors -> successors
-  | Return -> []
-  | Raise _ -> []
-  | Tailcall _ -> []
-  | Switch labels ->
-    Array.mapi (fun i label ->
-      (Test(Iinttest_imm(Iunsigned Ceq, i)), label))
-      labels
-    |> Array.to_list
-
-let successor_labels block =
-  let (_, labels) = List.split (successors block) in
-  labels
-
 type t = {
   cfg : Cfg.t;
   mutable layout : Layout.t;      (* Original layout: linear order of blocks. *)
@@ -76,12 +60,28 @@ let set_layout t new_layout =
 
 let get_name t = t.cfg.fun_name
 
+let id_to_label t id =
+  match Numbers.Int.Map.find_opt id t.id_to_label with
+  | None ->
+    Printf.fprintf stderr "id_to_label map: \n";
+    Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
+      t. id_to_label;
+    Printf.fprintf stderr "\n";
+    Misc.fatal_errorf "Cannot find label for id %d in map\n" id
+  | Some lbl ->
+    if verbose then
+      Printf.printf "Found label %d for id %d in map\n" lbl id;
+    Some lbl
+
 let preserve_orig_labels t = t.preserve_orig_labels
 
-let no_label = (-1)
 type labelled_insn =
   { label : label;
     insn : Linearize.instruction;
+  }
+let labelled_insn_end =
+  { label = -1;
+    insn = end_instr;
   }
 
 let create_empty_instruction ?(trap_depth=0) desc =
@@ -512,7 +512,7 @@ let basic_to_linear i next =
   let desc = from_basic i.desc in
   to_linear_instr desc next ~i
 
-let linearize_terminator terminator next =
+let linearize_terminator terminator ~next =
   let desc_list =
     match terminator.desc with
     | Return -> [Lreturn]
@@ -532,10 +532,13 @@ let linearize_terminator terminator next =
         else [Lbranch(label)]
       | [(Test _, _)] -> Misc.fatal_error ("Successors not exhastive");
       | [(Test cond_p,label_p); (Test cond_q,label_q)] ->
-        if cond_p <> invert_test cond_q then
+        if cond_p <> invert_test cond_q then begin
+          Printcfg.terminator
+            (Format.formatter_of_out_channel stderr)
+            terminator;
           Misc.fatal_error ("Illegal successors")
           (* [Lcondbranch(cond_p,label_p); Lcondbranch(cond_q,label_q); ] *)
-        else if label_p = next.label && label_q = next.label then
+        end else if label_p = next.label && label_q = next.label then
           []
         else if label_p <> next.label && label_q <> next.label then
           (* CR gyorsh: if both label are not fall through, then arrangement
@@ -570,13 +573,13 @@ let linearize_terminator terminator next =
 let to_linear t =
   let layout = Array.of_list t.layout in
   let len = Array.length layout in
-  let next = ref { label = no_label; insn = end_instr; } in
+  let next = ref labelled_insn_end in
   for i = len - 1 downto 0 do
     let label = layout.(i) in
     if not (Hashtbl.mem t.cfg.blocks label) then
       Misc.fatal_errorf "Unknown block labelled %d\n" label;
     let block = Hashtbl.find t.cfg.blocks label in
-    let terminator = linearize_terminator block.terminator !next  in
+    let terminator = linearize_terminator block.terminator ~next:!next  in
     let body = List.fold_right basic_to_linear block.body terminator in
     let insn =
       if i = 0 then begin (* First block, don't add label. *)
@@ -620,54 +623,12 @@ let to_linear t =
   !next.insn
 
 let print oc t =
-  let ppf = Format.formatter_of_out_channel oc in
-  let print_instr i =
-    Printlinear.instr ppf (basic_to_linear i end_instr)
-  in
-  let print_terminator ti =
-    Printlinear.instr ppf (linearize_terminator ti
-                             { label = no_label;
-                               insn = end_instr;
-                             }) in
-  Printf.fprintf oc "%s\n" t.cfg.fun_name;
-  Printf.fprintf oc "layout.length=%d\n" (List.length t.layout);
-  Printf.fprintf oc "blocks.length=%d\n" (Hashtbl.length t.cfg.blocks);
-  let print_block label block =
-      Printf.fprintf oc "\n%d:\n" label;
-      List.iter (fun i->
-        Printf.fprintf oc "\n\t";
-        print_instr i)
-        block.body;
-      (* Printf.fprintf oc "\t%d\n" block.terminator.id; *)
-      print_terminator block.terminator;
-      Printf.fprintf oc "\npredecessors:";
-      LabelSet.iter (fun l -> Printf.fprintf oc " %d" l)
-        block.predecessors;
-      Printf.fprintf oc "\nsuccessors:";
-      List.iter (fun l -> Printf.fprintf oc " %d" l)
-        (successor_labels block)
-  in
-  List.iter (fun label ->
-    let block = Hashtbl.find t.cfg.blocks label
-    in print_block label block)
-    t.layout;
-  Printf.fprintf oc "id_to_label map: \n";
-  Numbers.Int.Map.iter (fun id lbl -> Printf.printf "(%d,%d) "  id lbl)
-    t.id_to_label;
-  Printf.fprintf oc "\n"
-
-let id_to_label t id =
-  match Numbers.Int.Map.find_opt id t.id_to_label with
-  | None ->
-    print stdout t;
-    Misc.fatal_errorf "Cannot find label for id %d in map\n" id
-  | Some lbl ->
-    if verbose then
-      Printf.printf "Found label %d for id %d in map\n" lbl id;
-    Some lbl
+  Printcfg.cfg oc t.cfg t.layout
+      ~basic_to_linear
+      ~linearize_terminator:(linearize_terminator ~next:labelled_insn_end)
 
 (* Simplify CFG *)
-(* CR gyorsh: needs mroe testing. *)
+(* CR gyorsh: needs more testing. *)
 
 (* CR gyorsh: eliminate transitively blocks that become dead from this one. *)
 let eliminate_dead_block t dead_blocks label =

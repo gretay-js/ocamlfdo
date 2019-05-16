@@ -105,3 +105,19 @@ type t = {
   fun_name : string;             (* Function name, used for printing messages *)
   entry_label : label;           (* Must be first in all layouts of this cfg. *)
 }
+
+let successors block =
+  match block.terminator.desc with
+  | Branch successors -> successors
+  | Return -> []
+  | Raise _ -> []
+  | Tailcall _ -> []
+  | Switch labels ->
+    Array.mapi (fun i label ->
+      (Test(Iinttest_imm(Iunsigned Ceq, i)), label))
+      labels
+    |> Array.to_list
+
+let successor_labels block =
+  let (_, labels) = List.split (successors block) in
+  labels
