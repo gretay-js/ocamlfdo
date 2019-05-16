@@ -19,6 +19,7 @@ let terminator ppf ti =
   Format.fprintf ppf "\n";
   match ti.desc with
   | Branch successors ->
+    Format.fprintf ppf "Branch with %d successors:\n" (List.length successors);
     List.iter (fun (c,l)->
       match c with
       | Always -> Format.fprintf ppf "goto %d\n" l
