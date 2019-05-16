@@ -25,7 +25,7 @@ type layout = (string, int list) Hashtbl.t
 
 type reorder_algo =
   | Identity
-  | Random
+  | Random of Random.State.t
   | Linear_id of layout
   | Cfg_label of layout
   | CachePlus of unit
@@ -46,19 +46,19 @@ let validate cfg new_cfg_layout  =
       assert (List.length new_cfg_layout <= orig_len);
       assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
       assert ((List.length
-                 (List.merge ~compare
-                    (List.sort new_cfg_layout ~compare)
-                    (List.sort orig_cfg_layout ~compare)))
+                 (List.dedup_and_sort ~compare
+                    (new_cfg_layout @ orig_cfg_layout)))
               = orig_len)
     end;
     Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
   end
 
-let reorder_random cfg =
+let reorder_random cfg ~random_state =
   (* Ensure entry exit invariants *)
   let original_layout = Cfg_builder.get_layout cfg in
   let new_layout = (List.hd_exn original_layout)::
-                   (List.permute (List.tl_exn original_layout))
+                   (List.permute ~random_state
+                      (List.tl_exn original_layout))
   in
   validate cfg new_layout;
   Cfg_builder.set_layout cfg new_layout
@@ -69,7 +69,7 @@ let print_list msg l =
 
 exception KeyAlreadyPresent of int * int
 
-let reorder_layout cfg layout =
+let reorder_layout cfg ~layout =
   let fun_name = Cfg_builder.get_name cfg in
   try
   match Hashtbl.find layout fun_name with
@@ -135,7 +135,7 @@ let reorder_layout cfg layout =
       cfg
   end
 
-let reorder_rel_layout cfg layout =
+let reorder_rel_layout cfg ~layout =
   let fun_name = Cfg_builder.get_name cfg in
   match Hashtbl.find layout fun_name with
   | None -> cfg
@@ -151,7 +151,7 @@ let reorder_rel_layout cfg layout =
 let reorder ~algo cfg =
   match algo with
   | Identity -> cfg
-  | Random -> reorder_random cfg
+  | Random random_state -> reorder_random cfg ~random_state
   | CachePlus _ -> failwith "Not implemented: cache+ reorder algorithm"
-  | Cfg_label layout -> reorder_rel_layout cfg layout
-  | Linear_id layout -> reorder_layout cfg layout
+  | Cfg_label layout -> reorder_rel_layout cfg ~layout
+  | Linear_id layout -> reorder_layout cfg ~layout

@@ -50,7 +50,7 @@ type t = {
      the instruction. Used for mapping perf data back to linear IR. *)
 
   mutable preserve_orig_labels : bool;
-  (* Unset to false for validation, set for optimization. *)
+  (* Unset for validation, set for optimization. *)
 }
 
 let get_layout t = t.layout
@@ -340,7 +340,7 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
 
     | Lswitch labels ->
       (* CR gyorsh: get rid of switches entirely
-         and re-generate them based on optimization and perf data *)
+         and re-generate them based on optimization and perf data? *)
       add_terminator (Switch labels);
       Array.iter (record_trap_depth_at_label t ~trap_depth) labels;
       assert (has_label i.next);
@@ -567,8 +567,42 @@ let linearize_terminator terminator ~next =
   in
   List.fold_right (to_linear_instr ~i:terminator) desc_list next.insn
 
-(* CR gyorsh: handle duplicate labels in new layout: print the same
-   block more than once. *)
+let need_label t block pred_block =
+  (* Can we drop the start label for this block or not? *)
+  if block.predecessors = LabelSet.singleton pred_block.start then begin
+    (* This block has a single predecessor which appears in the layout
+       immediately prior to this block. *)
+    if is_live_trap_handler t block.start then
+      failwith (Printf.sprintf
+                  "Fallthrough from %d to trap handler %d\n"
+                  pred_block.start block.start);
+    (* No need for the label, unless the predecessor's terminator
+       is switch and then the label is needed for the jump table. *)
+    (* CR gyorsh: is this correct with label_after for calls? *)
+    match pred_block.terminator.desc with
+    | Switch _ -> true
+    | Branch _ ->
+      (* If label is original,
+         preserve it for checking that linear to cfg and back is identity,
+         and for various assertions in reorder. *)
+      if LabelSet.mem block.start t.new_labels ||
+         not t.preserve_orig_labels then false
+      else true
+    | _ -> assert false
+  end
+  else true
+
+let adjust_trap t body block pred_block =
+  (* Adjust trap depth *)
+  let block_trap_depth = Hashtbl.find t.trap_depths block.start in
+  let pred_trap_depth = pred_block.terminator.trap_depth in
+  if block_trap_depth != pred_trap_depth then
+    let delta_traps = block_trap_depth - pred_trap_depth in
+    make_simple_linear (Ladjust_trap_depth { delta_traps }) body
+  else body
+
+(* CR gyorsh: handle duplicate labels in new layout:
+   print the same block more than once. *)
 let to_linear t =
   let layout = Array.of_list t.layout in
   let len = Array.length layout in
@@ -578,46 +612,24 @@ let to_linear t =
     if not (Hashtbl.mem t.cfg.blocks label) then
       failwith (Printf.sprintf "Unknown block labelled %d\n" label);
     let block = Hashtbl.find t.cfg.blocks label in
+    assert (label = block.start);
     let terminator = linearize_terminator block.terminator ~next:!next  in
     let body = List.fold_right basic_to_linear block.body terminator in
     let insn =
-      if i = 0 then begin (* First block, don't add label. *)
-        body
-      end
-      else begin
+      if i = 0 then begin
+        body (* Entry block of the function. Don't add label. *)
+      end else begin
         let pred = layout.(i-1) in
-        let body =
-          if block.predecessors = LabelSet.singleton pred then begin
-            if is_live_trap_handler t block.start then
-              failwith (Printf.sprintf
-                          "Fallthrough from %d to trap handler %d\n"
-                          pred block.start);
-            (* Single predecessor is immediately prior to this block,
-               no need for the label. *)
-            (* CR gyorsh: is this correct with label_after for calls? *)
-            (* If label is original,
-               print it for linear to cfg and back to be identity,
-               and for various assertions in reorder. *)
-            if LabelSet.mem label t.new_labels ||
-               not t.preserve_orig_labels then begin
-              body
-            end
-            else
-              make_simple_linear (Llabel label) body
-          end
-          else begin
-            make_simple_linear (Llabel label) body
-          end
-        in
-        (* Adjust trap depth *)
         let pred_block = Hashtbl.find t.cfg.blocks pred in
-        let block_trap_depth = Hashtbl.find t.trap_depths label in
-        let pred_trap_depth = pred_block.terminator.trap_depth in
-        if block_trap_depth != pred_trap_depth then
-          let delta_traps = block_trap_depth - pred_trap_depth in
-          make_simple_linear (Ladjust_trap_depth { delta_traps }) body
-        else body
-      end in
+        let body =
+          if need_label t block pred_block then
+            make_simple_linear (Llabel block.start) body
+          else
+            body
+        in
+        adjust_trap t body block pred_block
+      end
+    in
     next := { label; insn; }
   done;
   !next.insn
@@ -863,3 +875,11 @@ let eliminate_fallthrough_blocks t =
    keeps predecessors and successors in sync. For example,
    change successors relation should automatically updates the predecessors
    relation without recomputing them from scratch. *)
+
+(* CR gyorsh: Optimize terminators. Implement switch as jump table or
+   as a sequence of branches depending on perf counters and layout.
+   It should be implemented as a separate transformation on the cfg,
+   that needs to be informated by the layout, but it should not be done
+   while emitting linear. This way we can keep to_linear as simple as possible
+   to ensure basic invariants are preserved, while other optimizations
+   can be turned on and off.*)

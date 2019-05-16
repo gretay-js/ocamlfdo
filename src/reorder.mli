@@ -20,7 +20,7 @@ type layout = (string, int list) Hashtbl.t
 
 type reorder_algo =
   | Identity
-  | Random
+  | Random of Random.State.t
   | Linear_id of layout
   | Cfg_label of layout
   | CachePlus of unit
