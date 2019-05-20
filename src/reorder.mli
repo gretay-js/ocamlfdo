@@ -16,7 +16,7 @@ open Core
 (* Maps functions to layout of the function,
    which is essentially a permutation of original ids.
    Sparse, i.e., only contains functions whose layout changed. *)
-type layout = (string, int list) Hashtbl.t
+type layout = (int list) String.Map.t
 
 type reorder_algo =
   | Identity

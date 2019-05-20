@@ -26,5 +26,11 @@ val function_at_pc : t -> program_counter:Int64.t -> string option
 
 val resolve_function_starting_at : t -> program_counter:Int64.t -> string option
 
+val resolve_function_offsets
+  : t
+  -> program_counter:Int64.t
+  -> int list
+  -> string option
+
 val print_dwarf : t -> unit
 

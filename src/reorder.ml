@@ -21,7 +21,7 @@ open Core
 
 let verbose = false
 
-type layout = (string, int list) Hashtbl.t
+type layout = (int list) String.Map.t
 
 type reorder_algo =
   | Identity
@@ -72,7 +72,7 @@ exception KeyAlreadyPresent of int * int
 let reorder_layout cfg layout =
   let fun_name = Cfg_builder.get_name cfg in
   try
-  match Hashtbl.find layout fun_name with
+  match String.Map.find layout fun_name with
   | None -> cfg
   | Some sorted_fun_layout -> begin
       if verbose then Cfg_builder.print stdout cfg;
@@ -137,7 +137,7 @@ let reorder_layout cfg layout =
 
 let reorder_rel_layout cfg layout =
   let fun_name = Cfg_builder.get_name cfg in
-  match Hashtbl.find layout fun_name with
+  match String.Map.find layout fun_name with
   | None -> cfg
   | Some new_cfg_layout -> begin
       if verbose then Cfg_builder.print stdout cfg;

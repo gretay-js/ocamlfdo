@@ -30,7 +30,7 @@ type t = {
   mutable fun_misses : int;
 }
 
-let verbose = false
+let verbose = true
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [Unix.O_RDONLY] 0 in
@@ -111,9 +111,6 @@ exception FoundLoc of string * int
 exception FinishedFunc
 
 let find_range t ~start ~finish ~fill_gaps cur prev =
-  (* if verbose then
-   *   Printf.printf "Find range for cache: (0x%Lx,0x%Lx):0x%Lx\n"
-   *     start finish state.address; *)
   match prev with
   | None -> ()
   | Some prev ->
@@ -150,6 +147,38 @@ let find_range t ~start ~finish ~fill_gaps cur prev =
       end
     end
 
+let find_offsets t ~start ~finish ~addresses cur prev =
+  match prev with
+  | None -> ()
+  | Some prev ->
+    if finish <= prev.state.address then
+      raise FinishedFunc;
+    if start <= prev.state.address then begin
+      let filename =
+        match prev.filename with
+        | None ->
+          if verbose then
+            Printf.printf "find_range filename=None\n";
+          prev.state.filename
+        | Some filename ->
+          if verbose then
+            Printf.printf "find_range filename=%s\n" filename;
+          filename
+      in
+      if verbose then
+        Printf.printf "Caching loc 0x%Lx %s %d\n"
+          prev.state.address filename prev.state.line;
+      let res = (Some (filename,prev.state.line)) in
+      let n =
+        if cur.state.address < finish then cur.state.address
+        else finish
+      in
+      List.iter (fun address ->
+        if address <= prev.state.address && address < n then
+          Hashtbl.add t.resolved address res)
+        addresses
+    end
+
 let resolve_function t ~sym =
   (* find function addresses *)
   let start = Owee_elf.Symbol_table.Symbol.value sym in
@@ -163,6 +192,22 @@ let resolve_function t ~sym =
   (* find dwarf locations for this function *)
   try
     resolve_from_dwarf t ~f:(find_range t ~start ~finish ~fill_gaps:true)
+  with FinishedFunc -> ()
+
+
+let resolve_function_offsets t ~sym offsets =
+  (* find function addresses *)
+  let start = Owee_elf.Symbol_table.Symbol.value sym in
+  let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
+  let finish = Int64.add start size in
+  let addresses =
+    List.map (fun i -> Int64.add start (Int64.of_int i)) offsets in
+  if verbose then
+    Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
+      start size finish;
+  (* find dwarf locations for this function *)
+  try
+    resolve_from_dwarf t ~f:(find_offsets t ~start ~finish ~addresses)
   with FinishedFunc -> ()
 
 let find ~program_counter cur prev =
@@ -287,3 +332,35 @@ let resolve_function_starting_at t ~program_counter =
     report "Caching fun " name;
     Hashtbl.add t.resolved_fun program_counter name;
     name
+
+
+let resolve_function_offsets t ~program_counter offsets =
+  if verbose then
+    Printf.printf "Resolve function offsets, start=0x%Lx\n" program_counter;
+  let syms = Owee_elf.Symbol_table.functions_enclosing_address
+               t.symtab
+               ~address:program_counter in
+  let rec find_func syms =
+    match syms with
+    | [] -> None
+    | sym::tail ->
+      let start = Owee_elf.Symbol_table.Symbol.value sym in
+      if verbose then
+        Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n"
+          start program_counter;
+      (* Look for symbol whose start address is program counter.
+         This is needed because functions_enclosing_address
+         is based on start+size of symbols, and sometimes previous
+         symbol's end of interval covers the start of the next symbol.
+         This may be a bug in Owee, or maybe intentional,
+         but we can work around it here. *)
+      if start = program_counter then begin
+        (* Once we have completed processing a function,
+           we never go back to its addresses again. *)
+        reset_cache t;
+        resolve_function_offsets t ~sym offsets;
+        Owee_elf.Symbol_table.Symbol.name sym t.strtab
+      end else find_func tail
+  in
+  let name = find_func syms in
+  name

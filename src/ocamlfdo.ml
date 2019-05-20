@@ -70,8 +70,7 @@ module Rel_layout : sig
 
   val read : string -> p
 
-  (* Write a single function layout *)
-  val writer : string option -> (string -> int list -> unit)
+  val writer : string option -> string -> int list -> unit
 
 end = struct
 
@@ -114,15 +113,16 @@ end = struct
            and then append to it, if the file exists. *)
         Out_channel.close_no_err (Out_channel.create filename);
         (fun func labels ->
-          let t = { func; labels; } in
-          Out_channel.with_file filename ~f:(print_t ~t)
-            ~binary:false
-            ~append:true)
+           let t = {func;labels;} in
+           Out_channel.with_file filename ~f:(print_t ~t)
+             ~binary:false
+             ~append:true)
+
 end
 
 let load_locations binary_filename =
   let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
-  (* if !verbose then Elf_locations.print_dwarf elf_locations; *)
+ (* if !verbose then Elf_locations.print_dwarf elf_locations; *)
   elf_locations
 
 let decode_perf_data _locations filename =
@@ -153,89 +153,84 @@ let _to_func file =
     in
     Some (X86_proc.string_of_symbol symbol_prefix name)
 
-(* Use addresses from permutation locations to find linear id layout *)
-let decode_layout locations permutation =
-  let layout = Hashtbl.create (module String) in
-  let add func pos id =
-    let fun_layout =
-      Hashtbl.find_or_add layout func
-        ~default:(fun () -> Hashtbl.create (module Int)) in
-    match Hashtbl.add fun_layout ~key:pos ~data:id with
-    | `Duplicate -> failwithf
-                      "Cannot add linear_id %d at position %d in function %s"
-                      id pos func ()
-    | `Ok ->
+(* Use addresses from permutation locations to find linear id layout. *)
+let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
+  let program_counter = Int64.(l.address + (Int64.of_int l.offset)) in
+  match Elf_locations.resolve locations ~program_counter with
+  | None ->
+    if !verbose then
+      Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter;
+    fun_layout
+  | Some (file,line) ->
+    if !verbose then
+      Printf.printf "%s:%d\n" file line;
+    (* Check that the func symbol name from the binary where
+       permutation comes from matches the function name encoded
+       as filename into our special dwarf info. *)
+    match String.chop_suffix file ~suffix:".linear" with
+    | None ->
       if !verbose then
-        Printf.printf "Adding %s %d %d\n" func pos id;
-      ()
-  in
-  (* CR gyorsh: optimize reading locations and raw_layouts:
-     scan the layout file for function start addresses,
-   * then scan the debug info from the binary and check for each of the function
-   * addresses if there are any locations with ".linear" filename and
-   * only for those cache them in a way that everything else returns
-   * null. *)
-  let decode_item (l:Raw_layout.t) =
-    if !verbose then Raw_layout.print_t l;
-    let func = Elf_locations.resolve_function_starting_at locations
-                 ~program_counter:l.address
-    in begin
-      match func with
-      | None ->
-        if !verbose then
-          Printf.printf "NOT FOUND %Lx\n" l.address;
-      | Some func -> begin
-          if !verbose then begin
-            Printf.printf "Function %s\n" func;
-            Raw_layout.print_t l
-          end;
-          let program_counter =
-            Int64.(l.address + (Int64.of_int l.offset)) in
-          let loc = Elf_locations.resolve locations ~program_counter in
-          match loc with
-          | None ->
+        Printf.printf "Ignoring %s in %s\n" func file;
+      fun_layout
+    | Some func_name_dwarf ->
+      begin
+        if func_name_dwarf = func then begin
+          match Map.add fun_layout ~key:l.position ~data:line with
+          | `Duplicate ->
+            failwithf
+              "Cannot add linear_id %d at position %d in function %s"
+              line l.position func ()
+          | `Ok fun_layout ->
             if !verbose then
-              Printf.printf "Elf location NOT FOUND at 0x%Lx\n"
-                program_counter
-          | Some (file,line) ->
-            if !verbose then
-              Printf.printf "%s:%d\n" file line;
-            (* Check that the func symbol name from the binary where
-               permutation comes from matches the function name encoded
-               as filename into our special dwarf info. *)
-            match String.chop_suffix file ~suffix:".linear" with
-            | None ->
-              if !verbose then
-                Printf.printf "Ignoring %s in %s\n" func file;
-            | Some func_name_dwarf -> begin
-                if func_name_dwarf = func then
-                  add func l.position line
-                else
-                  failwithf "func_name_dwarf = %s func = %s\n"
-                    func_name_dwarf func ()
-              end
-        end
+              Printf.printf "Adding %s %d %d\n" func l.position line;
+            fun_layout
+        end else
+          failwithf "func_name_dwarf = %s func = %s\n"
+            func_name_dwarf func ()
+      end
+
+let decode_fun_layout ~locations ~writer layout (raw_fun_layout:Raw_layout.p) =
+  let hd = List.hd_exn raw_fun_layout in
+  let func_start = hd.address in
+  let offsets = List.map raw_fun_layout
+                  ~f:(fun r ->
+                    assert (r.address = func_start);
+                    r.offset) in
+  let func = Elf_locations.resolve_function_offsets
+               ~program_counter:func_start locations offsets in
+  match func with
+  | None ->
+    if !verbose then
+      Printf.printf "NOT FOUND %Lx\n" func_start;
+    layout
+  | Some func -> begin
+    if !verbose then
+      Printf.printf "Function %s\n" func;
+    let fun_layout = List.fold raw_fun_layout
+                       ~init:Int.Map.empty
+                       ~f:(decode_item ~func ~locations) in
+    let labels = Map.data fun_layout in
+    if List.is_empty labels then failwith "Cannot decode layout\n"
+    else begin
+      (* Save decoded layout *)
+      writer func labels;
+      String.Map.add_exn layout ~key:func ~data:labels;
     end
-  in
-  List.iter permutation ~f:decode_item;
-  if !verbose then print_layout layout;
-  let sort fun_layout =
-    List.sort (Hashtbl.to_alist fun_layout)
-      ~compare:(fun (k1, _) (k2,_) -> Int.compare k1 k2)
-    |> List.map ~f:(fun (_k, d) -> d)
-  in
-  let layout = Hashtbl.map layout ~f:sort in
-  if Hashtbl.is_empty layout &&
-     not (List.is_empty permutation) then
-    failwith "Cannot decode layout\n";
-  layout
+  end
+
+(* Split raw layout into functions and decode each one in turn. *)
+let decode_layout locations permutation writer  =
+  (* Gather all raw entries that refer to the same base address.*)
+  List.group permutation ~break:
+    (fun r1 r2 -> r1.Raw_layout.address <> r2.Raw_layout.address)
+  (* Decode each function and record it. *)
+  |> List.fold ~init:String.Map.empty
+       ~f:(decode_fun_layout ~locations ~writer)
 
 let convert_layout (l:Rel_layout.p) =
-  let layout = Hashtbl.create (module String) in
-  List.iter l
-    ~f:(fun p ->
-      Hashtbl.add_exn layout ~key:p.func ~data:p.labels);
-  layout
+  List.fold l ~init:String.Map.empty
+    ~f:(fun layout p ->
+      String.Map.add_exn layout ~key:p.func ~data:p.labels)
 
 let setup_reorder ~binary_filename
       ~perf_profile_filename
@@ -243,7 +238,7 @@ let setup_reorder ~binary_filename
       ~rel_layout_filename
       ~linearid_layout_filename
       ~random_order
-      w =
+      ~gen_linearid_layout =
   if random_order then
     Reorder.Random
   else begin
@@ -267,10 +262,8 @@ let setup_reorder ~binary_filename
         match raw_layout_filename with
         | Some raw_layout_filename ->
           let raw_layout = Raw_layout.read raw_layout_filename in
-          let layout = decode_layout locations raw_layout  in
-          (* Save decoded layout *)
-          Hashtbl.iteri layout ~f:(fun ~key ~data ->
-            if not (List.is_empty data) then w key data);
+          let writer = Rel_layout.writer gen_linearid_layout in
+          let layout = decode_layout locations raw_layout writer in
           Reorder.Linear_id layout
         | None -> begin
             match perf_profile_filename with
@@ -403,14 +396,13 @@ let main ~binary_filename
       ~reorder_report
       args =
 
-  let w_linearid = Rel_layout.writer gen_linearid_layout in
   let algo = setup_reorder ~binary_filename
                ~perf_profile_filename
                ~raw_layout_filename
                ~rel_layout_filename
                ~linearid_layout_filename
                ~random_order
-               w_linearid
+               ~gen_linearid_layout
   in
   let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in
