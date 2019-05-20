@@ -200,23 +200,26 @@ let decode_fun_layout ~locations ~writer layout (raw_fun_layout:Raw_layout.p) =
                ~program_counter:func_start locations offsets in
   match func with
   | None ->
-    if !verbose then
-      Printf.printf "NOT FOUND %Lx\n" func_start;
-    layout
+      Report.log (sprintf "Not found function at 0x%Lx\n" func_start);
+      layout
   | Some func -> begin
-    if !verbose then
-      Printf.printf "Function %s\n" func;
-    let fun_layout = List.fold raw_fun_layout
-                       ~init:Int.Map.empty
-                       ~f:(decode_item ~func ~locations) in
-    let labels = Map.data fun_layout in
-    if List.is_empty labels then failwith "Cannot decode layout\n"
-    else begin
-      (* Save decoded layout *)
-      writer func labels;
-      String.Map.add_exn layout ~key:func ~data:labels;
+      if !verbose then
+        Printf.printf "Function %s\n" func;
+      let fun_layout = List.fold raw_fun_layout
+                         ~init:Int.Map.empty
+                         ~f:(decode_item ~func ~locations) in
+      let labels = Map.data fun_layout in
+      if List.is_empty labels then begin
+        Report.log (sprintf "Cannot decode layout of function %s at 0x%Lx\n"
+                      func func_start);
+        failwith "Cannot decode layout\n"
+      end
+      else begin
+        (* Save decoded layout *)
+        writer func labels;
+        String.Map.add_exn layout ~key:func ~data:labels;
+      end
     end
-  end
 
 (* Split raw layout into functions and decode each one in turn. *)
 let decode_layout locations permutation writer  =

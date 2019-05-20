@@ -174,9 +174,10 @@ let find_offsets t ~start ~finish ~addresses cur prev =
         else finish
       in
       List.iter (fun address ->
-        if address <= prev.state.address && address < n then
-          Hashtbl.add t.resolved address res)
-        addresses
+        if address <= prev.state.address && address < n then begin
+          Hashtbl.add t.resolved address res
+        end
+      ) addresses
     end
 
 let resolve_function t ~sym =
@@ -195,7 +196,7 @@ let resolve_function t ~sym =
   with FinishedFunc -> ()
 
 
-let resolve_function_offsets t ~sym offsets =
+let resolve_offsets t ~sym offsets =
   (* find function addresses *)
   let start = Owee_elf.Symbol_table.Symbol.value sym in
   let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
@@ -203,7 +204,7 @@ let resolve_function_offsets t ~sym offsets =
   let addresses =
     List.map (fun i -> Int64.add start (Int64.of_int i)) offsets in
   if verbose then
-    Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
+    Printf.printf "Resolving function offsets for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
       start size finish;
   (* find dwarf locations for this function *)
   try
@@ -358,7 +359,7 @@ let resolve_function_offsets t ~program_counter offsets =
         (* Once we have completed processing a function,
            we never go back to its addresses again. *)
         reset_cache t;
-        resolve_function_offsets t ~sym offsets;
+        resolve_offsets t ~sym offsets;
         Owee_elf.Symbol_table.Symbol.name sym t.strtab
       end else find_func tail
   in
