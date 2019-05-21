@@ -120,9 +120,17 @@ end = struct
 
 end
 
+let time f x =
+  let open Time in
+  let start = now () in
+  let fx = f x in
+  let stop = now () in
+  Printf.printf "Execution time: %s\n" (Span.to_string (abs_diff stop start));
+  fx
+
 let load_locations binary_filename =
   let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
- (* if !verbose then Elf_locations.print_dwarf elf_locations; *)
+  if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
 let decode_perf_data _locations filename =
@@ -188,46 +196,50 @@ let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
             func_name_dwarf func ()
       end
 
-let decode_fun_layout ~locations ~writer layout (raw_fun_layout:Raw_layout.p) =
-  let hd = List.hd_exn raw_fun_layout in
-  let func_start = hd.address in
-  let offsets = List.map raw_fun_layout
-                  ~f:(fun r ->
-                    assert (r.address = func_start);
-                    r.offset) in
-  let func = Elf_locations.resolve_function_offsets
-               ~program_counter:func_start locations offsets in
-  match func with
-  | None ->
-      Report.log (sprintf "Not found function at 0x%Lx\n" func_start);
-      layout
-  | Some func -> begin
-      if !verbose then
-        Printf.printf "Function %s\n" func;
-      let fun_layout = List.fold raw_fun_layout
-                         ~init:Int.Map.empty
-                         ~f:(decode_item ~func ~locations) in
-      let labels = Map.data fun_layout in
-      if List.is_empty labels then begin
-        Report.log (sprintf "Cannot decode layout of function %s at 0x%Lx\n"
-                      func func_start);
-        layout
-      end
-      else begin
-        (* Save decoded layout *)
-        writer func labels;
-        String.Map.add_exn layout ~key:func ~data:labels;
-      end
-    end
-
 (* Split raw layout into functions and decode each one in turn. *)
-let decode_layout locations permutation writer  =
-  (* Gather all raw entries that refer to the same base address.*)
-  List.group permutation ~break:
-    (fun r1 r2 -> r1.Raw_layout.address <> r2.Raw_layout.address)
-  (* Decode each function and record it. *)
-  |> List.fold ~init:String.Map.empty
-       ~f:(decode_fun_layout ~locations ~writer)
+let decode_layout_all locations permutation writer  =
+  let open Raw_layout in
+  (* Resolve all addresses that need decoding *)
+  let addresses = List.map permutation
+                    ~f:(fun r -> Int64.(r.address + (of_int r.offset)))
+  in
+  Elf_locations.resolve_all locations addresses ~reset:true;
+  (* Decode each function and record its layout. *)
+  let rec decode_func_layout permutation layout =
+    match permutation with
+    | [] -> layout
+    | hd::tl ->
+      let func_start = hd.address in
+      let func = Elf_locations.resolve_function_starting_at
+                   ~program_counter:func_start ~reset:true
+                   locations in
+      match func with
+      | None ->
+        Report.log (sprintf "Not found function at 0x%Lx\n" func_start);
+        decode_func_layout tl layout
+      | Some func -> begin
+          if !verbose then Printf.printf "Function %s\n" func;
+          let (l, rest) = List.split_while permutation
+                            ~f:(fun r -> r.address = func_start) in
+          let fun_layout = List.fold l
+                             ~init:Int.Map.empty
+                             ~f:(decode_item ~func ~locations) in
+          let labels = Int.Map.data fun_layout in
+          let layout =
+            if List.is_empty labels then begin
+              Report.log (sprintf "Cannot decode layout of function %s at 0x%Lx\n"
+                            func func_start);
+              layout
+            end
+            else begin
+              (* Save decoded layout *)
+              writer func labels;
+              String.Map.add_exn layout ~key:func ~data:labels
+            end in
+          decode_func_layout rest layout
+        end
+  in
+  decode_func_layout permutation (String.Map.empty)
 
 let convert_layout (l:Rel_layout.p) =
   List.fold l ~init:String.Map.empty
@@ -265,7 +277,7 @@ let setup_reorder ~binary_filename
         | Some raw_layout_filename ->
           let raw_layout = Raw_layout.read raw_layout_filename in
           let writer = Rel_layout.writer gen_linearid_layout in
-          let layout = decode_layout locations raw_layout writer in
+          let layout = decode_layout_all locations raw_layout writer in
           Reorder.Linear_id layout
         | None -> begin
             match perf_profile_filename with

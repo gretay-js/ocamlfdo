@@ -75,6 +75,10 @@ let resolve_from_dwarf t ~f =
   | Some section ->
     let body = Owee_buf.cursor (Owee_elf.section_body t.map section) in
     let rec aux () =
+      (* Within one chunk (aka sequence in dwarf line programs),
+         the entries are traversed in the increasing
+         order of code addresses their debug info refers to.
+         There is no such guarantee between chunks. *)
       match Owee_debug_line.read_chunk body with
       | None -> ()
       | Some (header, chunk) ->
@@ -96,6 +100,28 @@ let resolve_from_dwarf t ~f =
         aux ()
     in
     aux ()
+
+
+let reset_cache t =
+  let report msg h m =
+    let hits = float_of_int h in
+    let misses = float_of_int m in
+    let ratio =
+      if (misses +. hits) > 0. then
+        hits /. (misses +. hits)
+      else
+        0.
+    in
+    Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n"
+      msg h m ratio
+  in
+  if verbose then begin
+    report "loc" t.hits t.misses;
+    report "fun" t.fun_hits t.fun_misses;
+  end;
+  Hashtbl.clear t.resolved;
+  t.hits <- 0;
+  t.misses <- 0
 
 let print cur _ =
     match cur.filename with
@@ -195,7 +221,6 @@ let resolve_function t ~sym =
     resolve_from_dwarf t ~f:(find_range t ~start ~finish ~fill_gaps:true)
   with FinishedFunc -> ()
 
-
 let resolve_offsets t ~sym offsets =
   (* find function addresses *)
   let start = Owee_elf.Symbol_table.Symbol.value sym in
@@ -234,6 +259,77 @@ let find ~program_counter cur prev =
         raise (FoundLoc (filename, prev.state.line))
     end
 
+let find_all ~t ~addresses cur prev =
+  match prev with
+  | None -> ()
+  | Some prev ->
+    if verbose then begin
+      Printf.printf "find_all prev.state.filename=%s .addr=0x%Lx\n"
+        prev.state.filename prev.state.address;
+      Printf.printf "find_all cur.state.filename=%s .addr=0x%Lx\n"
+        cur.state.filename cur.state.address;
+    end;
+    let filename =
+      match prev.filename with
+      | None ->
+        if verbose then
+          Printf.printf "find_all at prev=0x%Lx: filename=None, use prev %s\n"
+            prev.state.address prev.state.filename;
+        prev.state.filename
+      | Some filename -> filename in
+    if verbose then
+      Printf.printf "find_all at 0x%Lx: using filename=%s\n"
+        prev.state.address filename;
+    (* Find all [a] in [addresses] such that [a]
+       is between address of [prev] and [cur],
+       and cache this loc info. *)
+    assert (prev.state.address <= cur.state.address);
+    (* for pc = prev.state.address to cur.state.address *)
+    (* but we can't use "for" because pc is int64 *)
+    let rec loop pc =
+      if (Int64.compare pc cur.state.address) < 0 then begin
+        begin
+          match Hashtbl.find_opt addresses pc with
+          | None -> ()
+          | Some _ -> Hashtbl.add t.resolved pc
+                        (Some (filename, prev.state.line))
+        end;
+        loop (Int64.add pc 1L);
+      end
+    in
+    loop prev.state.address
+
+let resolve_all t list ~reset =
+  let len = List.length list in
+  if len > 0 then begin
+    let addresses = Hashtbl.create len in
+    List.iter (fun key ->
+      assert (not (Hashtbl.mem addresses key));
+      Hashtbl.add addresses key 0) list;
+    if verbose then
+      Printf.printf "resolve_all: input size=%d unique addresses\n" len;
+    if reset then reset_cache t
+    else begin
+      Hashtbl.filter_map_inplace
+        (fun k d ->
+           if Hashtbl.mem t.resolved k then None
+           else Some d)
+        addresses;
+      let l = Hashtbl.length addresses in
+      if verbose && l < len then
+        Printf.printf "resolve_all: input size=%d unresolved addresses\n" l;
+    end;
+    let start = Hashtbl.length t.resolved in
+    resolve_from_dwarf t ~f:(find_all ~t ~addresses);
+    let stop = Hashtbl.length t.resolved in
+    let n = stop - start in
+    assert (n <= len);
+    if verbose then begin
+      Printf.printf "resolve_all: resolved %d addresses\n" n;
+      Printf.printf "resolve_all: not resolved %d addresses\n" (len-n);
+    end
+  end
+
 let resolve_pc t ~program_counter =
   try
     resolve_from_dwarf t ~f:(find ~program_counter);
@@ -246,27 +342,6 @@ let resolve_pc t ~program_counter =
         program_counter filename line;
     Hashtbl.add t.resolved program_counter result;
     result
-
-let reset_cache t =
-  let report msg h m =
-    let hits = float_of_int h in
-    let misses = float_of_int m in
-    let ratio =
-      if (misses +. hits) > 0. then
-        hits /. (misses +. hits)
-      else
-        0.
-    in
-    Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n"
-      msg h m ratio
-  in
-  if verbose then begin
-    report "loc" t.hits t.misses;
-    report "fun" t.fun_hits t.fun_misses;
-  end;
-  Hashtbl.clear t.resolved;
-  t.hits <- 0;
-  t.misses <- 0
 
 let resolve t ~program_counter =
   match Hashtbl.find t.resolved program_counter with
@@ -288,7 +363,8 @@ let function_at_pc t ~program_counter:address =
      only one. *)
   | sym::_ -> Owee_elf.Symbol_table.Symbol.name sym t.strtab
 
-let resolve_function_starting_at t ~program_counter =
+(* if the function is found and [reset] is true, then resets caches  *)
+let resolve_function_starting_at t ~program_counter ~reset =
   let report msg name =
     if verbose then
       Printf.printf "%s 0x%Lx:%s\n" msg program_counter
@@ -324,7 +400,7 @@ let resolve_function_starting_at t ~program_counter =
         if start = program_counter then begin
           (* Once we have completed processing a function,
              we never go back to its addresses again. *)
-          reset_cache t;
+          if reset then reset_cache t;
           resolve_function t ~sym;
           Owee_elf.Symbol_table.Symbol.name sym t.strtab
         end else find_func tail
@@ -334,7 +410,7 @@ let resolve_function_starting_at t ~program_counter =
     Hashtbl.add t.resolved_fun program_counter name;
     name
 
-let resolve_function_offsets t ~program_counter offsets =
+let resolve_function_offsets t ~program_counter offsets ~reset =
   if verbose then
     Printf.printf "Resolve function offsets, start=0x%Lx\n" program_counter;
   let syms = Owee_elf.Symbol_table.functions_enclosing_address
@@ -357,7 +433,7 @@ let resolve_function_offsets t ~program_counter offsets =
       if start = program_counter then begin
         (* Once we have completed processing a function,
            we never go back to its addresses again. *)
-        reset_cache t;
+        if reset then reset_cache t;
         resolve_offsets t ~sym offsets;
         Owee_elf.Symbol_table.Symbol.name sym t.strtab
       end else find_func tail
