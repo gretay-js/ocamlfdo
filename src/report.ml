@@ -54,6 +54,8 @@ let log msg =
 let output () =
   let filename = sprintf "summary.%s" extension in
   let out_channel = Out_channel.create filename in
+  if !verbose then
+    Printf.printf "Writing summary to %s\n" filename;
   List.iter !msgs ~f:(fun msg ->
     Printf.fprintf out_channel "%s%s" msg
       (if String.is_suffix msg ~suffix:"\n" then "" else "\n"));

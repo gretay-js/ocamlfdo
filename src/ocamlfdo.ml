@@ -169,8 +169,7 @@ let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
        as filename into our special dwarf info. *)
     match String.chop_suffix file ~suffix:".linear" with
     | None ->
-      if !verbose then
-        Printf.printf "Ignoring %s in %s\n" func file;
+      Report.log (sprintf "Ignoring %s in %s\n" func file);
       fun_layout
     | Some func_name_dwarf ->
       begin
@@ -212,7 +211,7 @@ let decode_fun_layout ~locations ~writer layout (raw_fun_layout:Raw_layout.p) =
       if List.is_empty labels then begin
         Report.log (sprintf "Cannot decode layout of function %s at 0x%Lx\n"
                       func func_start);
-        failwith "Cannot decode layout\n"
+        layout
       end
       else begin
         (* Save decoded layout *)
@@ -451,8 +450,8 @@ let main ~binary_filename
     fnew
   in
   Reoptimize.setup ~f:transform;
-  call_ocamlopt args;
-  Report.output ()
+  at_exit Report.output;
+  call_ocamlopt args
 
 let command =
   Command.basic

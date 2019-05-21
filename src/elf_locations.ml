@@ -30,7 +30,7 @@ type t = {
   mutable fun_misses : int;
 }
 
-let verbose = true
+let verbose = false
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [Unix.O_RDONLY] 0 in
@@ -158,11 +158,11 @@ let find_offsets t ~start ~finish ~addresses cur prev =
         match prev.filename with
         | None ->
           if verbose then
-            Printf.printf "find_range filename=None\n";
+            Printf.printf "find_offsets filename=None\n";
           prev.state.filename
         | Some filename ->
           if verbose then
-            Printf.printf "find_range filename=%s\n" filename;
+            Printf.printf "find_offsets filename=%s\n" filename;
           filename
       in
       if verbose then
@@ -333,7 +333,6 @@ let resolve_function_starting_at t ~program_counter =
     report "Caching fun " name;
     Hashtbl.add t.resolved_fun program_counter name;
     name
-
 
 let resolve_function_offsets t ~program_counter offsets =
   if verbose then
