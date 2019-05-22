@@ -463,8 +463,9 @@ let main ~binary_filename
     fnew
   in
   Reoptimize.setup ~f:transform;
-  at_exit Report.output;
-  call_ocamlopt args
+  at_exit Report.finish;
+  call_ocamlopt args;
+  Report.finish ()
 
 let command =
   Command.basic

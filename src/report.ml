@@ -46,18 +46,15 @@ let cfg ~name title cfg =
   Cfg_builder.print out_channel cfg;
   Out_channel.close out_channel
 
-let msgs = ref []
+let filename = sprintf "summary.%s" extension
+let out_channel = Out_channel.create filename
 let log msg =
   if !verbose then Printf.printf "%s" msg;
-  msgs := msg::!msgs
+  Printf.fprintf out_channel "%s%s" msg
+    (if String.is_suffix msg ~suffix:"\n" then "" else "\n")
 
-let output () =
-  let filename = sprintf "summary.%s" extension in
-  let out_channel = Out_channel.create filename in
+let finish () =
   if !verbose then
-    Printf.printf "Writing summary to %s\n" filename;
-  List.iter !msgs ~f:(fun msg ->
-    Printf.fprintf out_channel "%s%s" msg
-      (if String.is_suffix msg ~suffix:"\n" then "" else "\n"));
+    Printf.printf "Written summary to %s\n" filename;
   Out_channel.close out_channel
 
