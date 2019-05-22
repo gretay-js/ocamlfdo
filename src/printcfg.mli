@@ -11,22 +11,17 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
+(* Debug printing *)
+(* CR gyorsh: add dot format output *)
+open Cfg
 
-(* Maps functions to layout of the function,
-   which is essentially a permutation of original ids.
-   Sparse, i.e., only contains functions whose layout changed. *)
-type layout = (int list) String.Map.t
+val cfg
+  : out_channel
+  -> t
+  -> label list
+  -> basic_to_linear :
+       (basic instruction -> Linearize.instruction -> Linearize.instruction)
+  -> linearize_terminator : (terminator instruction -> Linearize.instruction)
+  -> unit
 
-type reorder_algo =
-  | Identity
-  | Random of Random.State.t
-  | Linear_id of layout
-  | Cfg_label of layout
-  | CachePlus of unit
-
-val reorder
-  : algo:reorder_algo
-  -> Cfg_builder.t
-  -> Cfg_builder.t
-
+val terminator : Format.formatter -> terminator instruction -> unit

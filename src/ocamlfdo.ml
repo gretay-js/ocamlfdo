@@ -253,9 +253,10 @@ let setup_reorder ~binary_filename
       ~linearid_layout_filename
       ~random_order
       ~gen_linearid_layout =
-  if random_order then
-    Reorder.Random
-  else begin
+  if random_order then begin
+    (* let random_state = Random.State.make [ deterministic seed ]; *)
+    Reorder.Random Random.State.default
+  end else begin
     match binary_filename with
     | None -> begin
         match rel_layout_filename with

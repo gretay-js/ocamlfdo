@@ -31,7 +31,6 @@ val preserve_orig_labels : t -> bool
 
 val id_to_label : t -> int -> label option
 
-(* CR gyorsh: add dot format output *)
 val print : out_channel -> t -> unit
 
 (* Mutates t inplace *)
