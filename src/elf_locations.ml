@@ -73,6 +73,13 @@ let resolve_from_dwarf t ~f =
   match Owee_elf.find_section t.sections ".debug_line" with
   | None -> ()
   | Some section ->
+    if verbose then
+      Printf.printf "Found section  name=%s addr=0x%Lx offset=0x%Lx size=0x%Lx\n"
+        section.sh_name_str
+        section.sh_addr
+        section.sh_offset
+        section.sh_size;
+
     let body = Owee_buf.cursor (Owee_elf.section_body t.map section) in
     let rec aux () =
       (* Within one chunk (aka sequence in dwarf line programs),
@@ -96,7 +103,7 @@ let resolve_from_dwarf t ~f =
             Some cur
           end
         in
-        ignore (Owee_debug_line.fold_rows (header, chunk) check None);
+        ignore ((Owee_debug_line.fold_rows (header, chunk) check None):l option);
         aux ()
     in
     aux ()
@@ -290,9 +297,16 @@ let find_all ~t ~addresses cur prev =
       if (Int64.compare pc cur.state.address) < 0 then begin
         begin
           match Hashtbl.find_opt addresses pc with
-          | None -> ()
-          | Some _ -> Hashtbl.add t.resolved pc
-                        (Some (filename, prev.state.line))
+          | None ->
+            if verbose then
+              Printf.printf "find_all: ignored 0x%Lx\n" pc;
+            ()
+          | Some _ -> begin
+              if verbose then
+                Printf.printf "find_all: resolved 0x%Lx\n" pc;
+              Hashtbl.add t.resolved pc
+                (Some (filename, prev.state.line))
+            end
         end;
         loop (Int64.add pc 1L);
       end
@@ -342,6 +356,19 @@ let resolve_pc t ~program_counter =
         program_counter filename line;
     Hashtbl.add t.resolved program_counter result;
     result
+
+let resolve_from_cache t ~program_counter =
+  match Hashtbl.find t.resolved program_counter with
+  | resolved ->
+    t.hits <- t.hits + 1;
+    if verbose then
+      Printf.printf "Found loc in cache 0x%Lx\n" program_counter;
+    resolved
+  | exception Not_found ->
+    t.misses <- t.misses + 1;
+    if verbose then
+      Printf.printf "Cannot resolve from cache 0x%Lx\n" program_counter;
+    None
 
 let resolve t ~program_counter =
   match Hashtbl.find t.resolved program_counter with

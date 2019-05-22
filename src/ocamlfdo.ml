@@ -164,7 +164,7 @@ let _to_func file =
 (* Use addresses from permutation locations to find linear id layout. *)
 let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
   let program_counter = Int64.(l.address + (Int64.of_int l.offset)) in
-  match Elf_locations.resolve locations ~program_counter with
+  match Elf_locations.resolve_from_cache locations ~program_counter with
   | None ->
     if !verbose then
       Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter;

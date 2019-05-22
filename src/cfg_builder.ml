@@ -667,7 +667,7 @@ let id_to_label t id =
     Some lbl
 
 (* Simplify CFG *)
-(* CR gyorsh: needs mroe testing. *)
+(* CR gyorsh: needs more testing. *)
 
 (* CR gyorsh: eliminate transitively blocks that become dead from this one. *)
 let eliminate_dead_block t dead_blocks label =

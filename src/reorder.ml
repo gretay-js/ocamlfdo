@@ -45,11 +45,6 @@ let validate cfg new_cfg_layout  =
     end else begin
       assert (List.length new_cfg_layout <= orig_len);
       assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
-      assert ((List.length
-                 (List.merge ~compare
-                    (List.sort new_cfg_layout ~compare)
-                    (List.sort orig_cfg_layout ~compare)))
-              = orig_len)
     end;
     Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
   end
