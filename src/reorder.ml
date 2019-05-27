@@ -79,7 +79,8 @@ let reorder_layout cfg ~layout =
       let partial_cfg_layout =
         List.map sorted_fun_layout
           ~f:(fun id ->
-            Printf.printf "%d\n" id;
+            if verbose then
+              Printf.printf "%d\n" id;
             match Cfg_builder.id_to_label cfg id with
             | None -> failwithf
                         "Cannot find label for linear id %d in %s\n"
