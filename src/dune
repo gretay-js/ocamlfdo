@@ -7,6 +7,9 @@
           cfg_builder
           simplify
           printcfg
+          layouts
+          profiles
+          ocaml_locations
           report)
  (libraries
         owee
