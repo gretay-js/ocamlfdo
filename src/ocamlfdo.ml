@@ -40,6 +40,7 @@ let setup_reorder ~binary_filename
       ~gen_linearid_profile
       ~linearid_profile_filename
   =
+  let decode_then_aggregate = false in
   if random_order then begin
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -74,23 +75,33 @@ let setup_reorder ~binary_filename
               | None -> Reorder.Identity
               | Some linearid_profile_filename ->
                 let linearid_profile =
-                  Profiles.Decoded.read linearid_profile_filename in
-                let aggregated_profile = Profiles.Aggregated.create linearid_profile in
-                Reorder.CachePlus aggregated_profile
+                  Profiles.Aggregated_decoded.read linearid_profile_filename in
+                Reorder.CachePlus (ignore linearid_profile)
               end
             | Some perf_profile_filename -> begin
                 (* CR gyorsh: decoding raw perf data should be separate from
                    reordering algorithm setup. *)
                 (* CR gyorsh: check buildid of the samples. Use owee? *)
-                (* CR gyorsh: Check pid of the samples. Use owee? *)
+                (* CR gyorsh: Check pid of the samples. *)
                 let perf_profile = Profiles.Perf.read perf_profile_filename in
-                let linearid_profile = Profiles.Perf.decode perf_profile locations in
+                let linearid_profile =
+                  if (decode_then_aggregate) then begin
+                    (* Decode raw profile and then aggregate it *)
+                    Profiles.decode_perf locations perf_profile
+                    |> Profiles.aggregate_decoded
+                  end else begin
+                    (* First aggregate raw profile and then decode it. *)
+                    let aggr_perf_profile = Profiles.aggregate_perf perf_profile in
+                    Profiles.decode_aggregated locations aggr_perf_profile
+                  end in
                 let gen_linearid_profile =
-                  match gen_linearid_profile with
-                  | None -> perf_profile_filename ^ ".linearid"
-                  | Some f -> f
+                    match gen_linearid_profile with
+                    | None -> perf_profile_filename ^ ".linearid"
+                    | Some f -> f
                 in
-                Profiles.Decoded.write linearid_profile gen_linearid_profile;
+                Profiles.Aggregated_decoded.write
+                  linearid_profile
+                  gen_linearid_profile;
                 Reorder.CachePlus (ignore linearid_profile)
               end
           end

@@ -15,38 +15,123 @@ open Core
 
 let verbose = ref true
 
-module Aggregated = struct
-  type loc = {
-    func : string;  (* Name of the containing function *)
-    linearid : int;
-  } [@@deriving compare, sexp]
-  type branch = {
-    from_loc : loc;
-    to_loc : loc;
-    mispredict : int; (* number of times the branch was mispredicted:
-                         branch target mispredicted or
-                         branch direction was mispredicted. *)
-    execount : int ;  (* execution counter: branch was taken. *)
-  } [@@deriving compare, sexp]
-
-  let create _decoded_profile =
-    failwith "Not implemented"
-end
-
-module Decoded = struct
-  type loc = {
-    addr : int64;   (* Raw address in the original binary *)
-    func : string;  (* Name of the containing function *)
-    offset : int;   (* Offset from the start of the function *)
-    (* Dwarf info associated with a location *)
+(* Dwarf info associated with a location *)
+type dbg = {
     file : string;  (* filename *)
     line : int;     (* line number *)
   } [@@deriving compare, sexp]
+
+type loc = {
+    addr : int64;   (* Raw address in the original binary *)
+    func : string;  (* Name of the containing function symbol *)
+    offset : int;   (* Offset from the start of the function *)
+    dbg : dbg option;
+  } [@@deriving compare, sexp]
+
+(* CR gyorsh: aggregated_perf and aggregated_decoded have the same structure.
+   Generalize the type? *)
+module Aggregated_perf = struct
+
+  type instruction = {
+    addr : int64;
+    execount : int;
+  }
+
+  type branch = {
+    from_addr : int64;
+    to_addr : int64;
+    mutable mispredicts : int;
+    (* number of times the branch was mispredicted:
+       branch target mispredicted or
+       branch direction was mispredicted. *)
+    mutable execount : int ;
+    (* execution count: number of times the branch was taken. *)
+  } [@@deriving compare, sexp]
+
+  type trace = {
+    from_addr : int64;
+    to_addr : int64;
+    mutable execount : int;
+  }
+
+  type t = {
+    instructions : instruction list;
+    branches : branch list;
+    traces : trace list;
+  }
+
+  let empty =
+    { instructions = [];
+      branches = [];
+      traces = [];
+    }
+end
+
+module Aggregated_decoded = struct
+
+  type instruction = {
+    loc : loc;
+    execount : int;
+  } [@@deriving compare, sexp]
+
+  type branch = {
+    from_loc : loc;
+    to_loc : loc;
+    mispredicts : int; (* number of times the branch was mispredicted:
+                         branch target mispredicted or
+                         branch direction was mispredicted. *)
+    execount : int ;  (* execution count: number of times the branch was taken. *)
+  } [@@deriving compare, sexp]
+
+  type trace = {
+    from_loc : loc;
+    to_loc : loc;
+    execount : int;
+  } [@@deriving compare, sexp]
+
+  type t = {
+    instructions : instruction list;
+    branches : branch list;
+    traces : trace list;
+  } [@@deriving compare, sexp]
+
+  let empty =
+    { instructions=[];
+      branches=[];
+      traces=[];
+    }
+
+  let read filename =
+    if !verbose then
+      printf "Reading aggregated decoded profile from %s\n" filename;
+    let t =
+      match Parsexp_io.load (module Parsexp.Single) ~filename with
+      | Ok t_sexp -> t_of_sexp t_sexp
+      | Error error ->
+        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
+        failwith "Cannot parse aggregated decoded profile file"
+    in
+    if !verbose then begin
+      Printf.printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
+    end;
+    t
+
+  let write t filename =
+    if !verbose then
+      printf "Writing aggregated decoded profile to %s\n" filename;
+    let chan = Out_channel.create filename in
+    Printf.fprintf chan !"%{sexp:t}\n" t;
+    Out_channel.close chan
+
+end
+
+module Decoded_perf = struct
   (* Branch *)
   type br = {
-    from_loc : loc option;
-    to_loc : loc option;
+    from_loc : loc;
+    to_loc : loc;
     mispredicted : bool;
+    index : int;
   } [@@deriving compare, sexp]
 
   type sample = {
@@ -76,8 +161,7 @@ module Decoded = struct
   let write t filename =
     let chan = Out_channel.create filename in
     Printf.fprintf chan !"%{sexp:t}\n" t;
-    Out_channel.close chan;
-
+    Out_channel.close chan
 end
 
 module Perf = struct
@@ -94,6 +178,8 @@ module Perf = struct
     from_addr : int64;
     to_addr : int64;
     mispredict : mispredict_flag;
+    index : int; (* Position on the stack, with 0 being the most recent branch.
+                    This field is only used for only for validation. *)
     (* cycles : int; *)
   } [@@deriving compare, sexp]
 
@@ -105,7 +191,7 @@ module Perf = struct
   type t = sample list
   [@@deriving compare, sexp]
 
-  let parse_br s =
+  let parse_br index s =
     match String.split s ~on:'/' with
     | [from_addr;to_addr;m;t;a;c] ->
       let mispredict = match m with
@@ -128,6 +214,7 @@ module Perf = struct
       {
         from_addr = Int64.of_string from_addr;
         to_addr = Int64.of_string to_addr;
+        index;
         mispredict;
       }
     | _ -> failwithf "Cannot parse %s\n" s ()
@@ -135,13 +222,15 @@ module Perf = struct
   let print t =
     Printf.printf !"%{sexp:t}\n" t
 
-  (* This function reverse the stack from its perf profile order *)
-  let rec parse_brstack brstack row =
+  (* The most recent branch is printed first by perf script.
+     The number of branch entries vary based on the underlying hardware.
+     This function reverses the stack from its perf profile order. *)
+  let rec parse_brstack (index,brstack) row =
     match row with
-    | [] -> brstack
+    | [] -> (index,brstack)
     | hd::tl ->
-      let brstack = (parse_br hd)::brstack
-      in parse_brstack brstack tl
+      let brstack = (parse_br index hd)::brstack
+      in parse_brstack (index+1,brstack) tl
 
   let split_on_whitespace row =
     let r = String.split ~on:' ' row in
@@ -162,7 +251,7 @@ module Perf = struct
           printf "parsing ip %s\n" ip;
         let sample =  {
           ip = Int64.of_string (hex ip);
-          brstack = parse_brstack [] rest;
+          brstack = snd (parse_brstack (0,[]) rest);
         } in
         sample::t
       end
@@ -204,64 +293,126 @@ module Perf = struct
     end;
     t
 
-  let decode_loc locations addr =
+end
+
+let decode_loc locations addr =
+  let interval =
     match Elf_locations.resolve_function_containing locations
             ~program_counter:addr with
+    | None ->
+      failwithf "Cannot find function symbol containing 0x%Lx" addr ()
+    | Some interval -> interval in
+  let func = interval.v in
+  let dbg =
+    match Ocaml_locations.(decode_line locations
+                             ~program_counter:addr func Linearid) with
     | None -> None
-    | Some interval ->
-      let func = interval.v in
-      let open Ocaml_locations in
-      match decode_line locations ~program_counter:addr func Linearid with
-      | None -> None
-      | Some (file,line) ->
-        let start = interval.l in
-        match Int64.(to_int (addr - start)) with
-        | None -> failwithf "Offset to big: 0x%Lx" (Int64.(addr - start)) ()
-        | Some offset ->
-          assert (offset >= 0);
-          let open Decoded in
-          Some {
-            addr;
-            func;
-            offset;
-            file;
-            line;
-          }
+    | Some (file,line) -> Some {file;line;} in
+  let start = interval.l in
+  let offset =
+    match Int64.(to_int (addr - start)) with
+      | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
+      | Some offset -> assert (offset >= 0); offset in
+  {
+    addr;
+    func;
+    offset;
+    dbg;
+  }
 
-  let decode_brstack locations brstack =
-    List.map brstack
-      ~f:(fun br ->
-        let from_loc = decode_loc locations br.from_addr in
-        let to_loc = decode_loc locations br.to_addr in
-        let mispredicted = mispredicted br.mispredict in
-        let open Decoded in
-        { from_loc; to_loc; mispredicted; }
-      )
+let decode_brstack locations (brstack:Perf.br list) =
+  List.map brstack
+    ~f:(fun br ->
+      let from_loc = decode_loc locations br.from_addr in
+      let to_loc = decode_loc locations br.to_addr in
+      let mispredicted = Perf.mispredicted br.mispredict in
+      let open Decoded_perf in
+      { from_loc; to_loc; mispredicted; index=br.index; }
+    )
 
-  let decode t locations =
-    if !verbose then
-      printf "Decoding perf profile.\n";
+let decode_perf locations (t:Perf.t) =
+  let open Perf in
+  if !verbose then
+    printf "Decoding perf profile.\n";
 
-    (* Collect all addresses that need decoding. *)
-    let len = List.length t in
-    let addresses = Caml.Hashtbl.create len in
-    List.iter t
+  (* Collect all addresses that need decoding. *)
+  let len = List.length t in
+  let addresses = Caml.Hashtbl.create len in
+  List.iter t
     ~f:(fun sample ->
-        Caml.Hashtbl.add addresses sample.ip ();
-        List.iter sample.brstack
-          ~f:(fun br ->
-            Caml.Hashtbl.add addresses br.from_addr ();
-            Caml.Hashtbl.add addresses br.to_addr ());
-      );
-    (* Resolve and cache all addresses we need in one pass over the binary. *)
-    Elf_locations.resolve_all locations addresses ~reset:true;
-    (* Decode all samples *)
-    List.filter_map t
-      ~f:(fun sample ->
-          match decode_loc locations sample.ip with
-          | None -> None
-          | Some ip ->
-            let brstack = decode_brstack locations sample.brstack in
-            let open Decoded in Some { ip; brstack; }
-        )
-end
+      Caml.Hashtbl.add addresses sample.ip ();
+      List.iter sample.brstack
+        ~f:(fun br ->
+          Caml.Hashtbl.add addresses br.from_addr ();
+          Caml.Hashtbl.add addresses br.to_addr ());
+    );
+  (* Resolve and cache all addresses we need in one pass over the binary. *)
+  Elf_locations.resolve_all locations addresses ~reset:true;
+  (* Decode all samples *)
+  List.map t
+    ~f:(fun sample ->
+      let ip = decode_loc locations sample.ip in
+      let brstack = decode_brstack locations sample.brstack in
+      let open Decoded_perf in { ip; brstack; }
+    )
+
+let decode_aggregated locations (t:Aggregated_perf.t) =
+  let open Aggregated_perf in
+  if !verbose then
+    printf "Decoding perf profile.\n";
+
+  (* Collect all addresses that need decoding. *)
+  let len = (List.length t.instructions)
+            + (List.length t.branches) in
+  let addresses = Caml.Hashtbl.create len in
+  List.iter t.instructions
+    ~f:(fun instr ->
+      Caml.Hashtbl.add addresses instr.addr ();
+    );
+  List.iter t.branches
+    ~f:(fun branch ->
+      Caml.Hashtbl.add addresses branch.from_addr ();
+      Caml.Hashtbl.add addresses branch.to_addr ();
+    );
+  List.iter t.traces
+    ~f:(fun trace ->
+      Caml.Hashtbl.add addresses trace.from_addr ();
+      Caml.Hashtbl.add addresses trace.to_addr ();
+    );
+  (* Resolve and cache all addresses we need in one pass over the binary. *)
+  Elf_locations.resolve_all locations addresses ~reset:true;
+  (* Decode all locations *)
+  let instructions =
+    List.map t.instructions
+    ~f:(fun instr ->
+        { Aggregated_decoded.
+          loc = decode_loc locations instr.addr;
+          execount = instr.execount;
+        }
+      ) in
+  let branches =
+  List.map t.branches
+    ~f:(fun branch ->
+      { Aggregated_decoded.
+        from_loc = decode_loc locations branch.from_addr;
+        to_loc = decode_loc locations branch.from_addr;
+        mispredicts = branch.mispredicts;
+        execount = branch.execount;
+      }
+    ) in
+  let traces =
+  List.map t.traces
+    ~f:(fun trace ->
+       { Aggregated_decoded.
+         from_loc = decode_loc locations trace.from_addr;
+         to_loc = decode_loc locations trace.from_addr;
+         execount = trace.execount;
+      }
+    ) in
+  { Aggregated_decoded.instructions; branches; traces; }
+
+let aggregate_perf (_t:Perf.t) =
+  failwith "Not implemented aggregate of raw perf profile"
+
+let aggregate_decoded (_t:Decoded_perf.t) =
+  failwith "Not implemented aggregate of decoded perf profile"
