@@ -152,7 +152,7 @@ let _to_func file =
 let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
   let program_counter = Int64.(l.address + (Int64.of_int l.offset)) in
   let open Ocaml_locations in
-  match decode_line locations program_counter func Linearid with
+  match decode_line locations ~program_counter func Linearid with
   | None -> fun_layout
   | Some (_,line) ->
     match Map.add fun_layout ~key:l.position ~data:line with
@@ -169,9 +169,13 @@ let decode_item ~func ~locations fun_layout (l:Raw_layout.t) =
 let decode_layout_all locations permutation writer  =
   let open Raw_layout in
   (* Resolve all addresses that need decoding, and cache them. *)
-  let addresses = List.map permutation
-                    ~f:(fun r -> Int64.(r.address + (of_int r.offset)))
-  in
+  let len = List.length permutation in
+  let addresses = Caml.Hashtbl.create len in
+  List.iter permutation
+    ~f:(fun r ->
+      let address = Int64.(r.address + (of_int r.offset)) in
+      assert (not (Caml.Hashtbl.mem addresses address));
+      Caml.Hashtbl.add addresses address ());
   Elf_locations.resolve_all locations addresses ~reset:true;
   (* Decode each function and record its layout. *)
   let rec decode_func_layout permutation layout =
@@ -180,7 +184,9 @@ let decode_layout_all locations permutation writer  =
     | hd::tl ->
       let func_start = hd.address in
       let func = Elf_locations.resolve_function_starting_at
-                   ~program_counter:func_start ~reset:false
+                   ~program_counter:func_start
+                   ~resolve_contents:false
+                   ~reset:false
                    locations in
       match func with
       | None ->

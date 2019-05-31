@@ -6,42 +6,26 @@
 (*                                                                        *)
 (*   Copyright 2019 Jane Street Group LLC                                 *)
 (*                                                                        *)
+(*                     based on spacetime_lib                             *)
+(*   Copyright (c) 2016 Leo White, Mark Shinwell                          *)
+(*   https://github.com/lpw25/spacetime_lib                               *)
+(*                                                                        *)
 (*   All rights reserved.  This file is distributed under the terms of    *)
 (*   the GNU Lesser General Public License version 2.1, with the          *)
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
-let verbose = ref true
+(* Intervals data structure that stores disjoint closed intervals.
+   Supports efficient add and find (assuming that map's find is efficient).
+   We don't need an interval tree, because all intervals are disjoint. *)
+type 'a interval = {
+  l : Int64.t ;
+  r : Int64.t ;
+  v : 'a
+}
 
-type t =
-  | Source
-  | Linearid
+type 'a t
 
-let suffix = function
-  | Source -> ".ml"
-  | Linearid -> ".linear"
-
-let decode_line locations ~program_counter func t =
-  match Elf_locations.resolve ~program_counter locations with
-  | None ->
-    if !verbose then
-      Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter;
-    None
-  | Some (file,line) ->
-    if !verbose then
-      Printf.printf "%s:%d\n" file line;
-    (* Check that the func symbol name from the binary where
-       permutation comes from matches the function name encoded
-       as filename into our special dwarf info. *)
-    let suffix = suffix t in
-    match String.chop_suffix file ~suffix with
-    | None ->
-      Report.log (sprintf "Ignoring %s in %s\n" func file);
-      None
-    | Some func_name_dwarf ->
-      if func_name_dwarf = func then begin
-        Some (file,line)
-      end else
-        failwithf "func_name_dwarf = %s func = %s\n"
-          func_name_dwarf func ()
+val empty : 'a t
+val insert : 'a t -> 'a interval -> 'a t
+val enclosing : 'a t -> Int64.t -> 'a interval option

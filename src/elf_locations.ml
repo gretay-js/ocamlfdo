@@ -24,7 +24,7 @@ type t = {
   symtab : Owee_elf.Symbol_table.t;
   resolved : (Int64.t, (string * int) option) Hashtbl.t;
   resolved_fun : (Int64.t, string option) Hashtbl.t;
-  resolved_fun_intervals : Owee_interval_tree.t ;
+  mutable resolved_fun_intervals : string Intervals.t ;
   mutable hits : int;
   mutable misses : int;
   mutable fun_hits : int;
@@ -49,6 +49,7 @@ let create ~elf_executable =
   let _header, sections = Owee_elf.read_elf map in
   let resolved = Hashtbl.create 42 in
   let resolved_fun = Hashtbl.create 42 in
+  let resolved_fun_intervals = Intervals.empty in
   let strtab = Owee_elf.find_string_table map sections in
   let symtab = Owee_elf.find_symbol_table map sections in
   match symtab, strtab with
@@ -64,6 +65,9 @@ let create ~elf_executable =
                                   misses = 0;
                                   fun_hits = 0;
                                   fun_misses = 0;
+                                  resolved_fun_intervals;
+                                  intervals_hits = 0;
+                                  intervals_misses = 0;
                                 }
 
 (* CR mshinwell: tidy all this up.  Also, the pinpointing of which row
@@ -316,13 +320,9 @@ let find_all ~t ~addresses cur prev =
     in
     loop prev.state.address
 
-let resolve_all t list ~reset =
-  let len = List.length list in
+let resolve_all t addresses ~reset =
+  let len = Hashtbl.length addresses in
   if len > 0 then begin
-    let addresses = Hashtbl.create len in
-    List.iter (fun key ->
-      assert (not (Hashtbl.mem addresses key));
-      Hashtbl.add addresses key 0) list;
     if verbose then
       Printf.printf "resolve_all: input size=%d unique addresses\n" len;
     if reset then reset_cache t
@@ -400,24 +400,27 @@ let report msg name program_counter =
        | None -> "none"
        | Some n -> n)
 
-(* if the function is found and [reset] is true, then resets caches  *)
-let resolve_function_containing t ~program_counter ~reset =
+let resolve_function_containing t ~program_counter =
   report "Resolve_function_containing:" None program_counter;
   match Hashtbl.find t.resolved_fun program_counter with
   | name ->
     t.fun_hits <- t.fun_hits + 1;
     report "Found fun in cache" name program_counter;
-    name
+     (* Only cache in resolved_fun the pcs for which no name was found.
+        The others have an entry in resolved_fun_cache cache.
+        It takes longer to extract but uses less memory. *)
+    assert (name = None);
+    None
   | exception Not_found ->
     t.fun_misses <- t.fun_misses + 1;
     begin
-      match Intervals.find t.resolved_fun_intervals program_counter with
-      | Some name ->
-        t.interval_hits <- t.interval_hits + 1;
-        report "Found fun in interval cache" name program_counter;
-        name
+      match Intervals.enclosing t.resolved_fun_intervals program_counter with
+      | Some fun_interval ->
+        t.intervals_hits <- t.intervals_hits + 1;
+        report "Found fun in interval cache" (Some fun_interval.v) program_counter;
+        Some fun_interval
       | None ->
-        t.interval_misses <- t.interval_misses + 1;
+        t.intervals_misses <- t.intervals_misses + 1;
         let syms = Owee_elf.Symbol_table.functions_enclosing_address
                      t.symtab
                      ~address:program_counter in
@@ -426,32 +429,45 @@ let resolve_function_containing t ~program_counter ~reset =
           | [] -> None
           | sym::tail ->
             let start = Owee_elf.Symbol_table.Symbol.value sym in
+            let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
+            let finish = Int64.add start size in
             if verbose then
-              Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n"
-                start program_counter;
-            (* Look for symbol whose start address is program counter.
+              Printf.printf "Find func sym: start=0x%Lx finish=0x%Lx pc=0x%Lx\n"
+                start finish program_counter;
+            (* Look for symbol that contains program counter.
                This is needed because functions_enclosing_address
                is based on start+size of symbols, and sometimes previous
                symbol's end of interval covers the start of the next symbol.
                This may be a bug in Owee, or maybe intentional,
                but we can work around it here. *)
-            if start = program_counter then begin
-              Owee_elf.Symbol_table.Symbol.name sym t.strtab
-            end else find_func tail
+            if start <= program_counter && program_counter < finish then begin
+              match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
+              | None ->
+                if verbose then
+                  Printf.printf "Symbol without a name at 0x%Lx\n" start;
+                report "Caching fun " None program_counter;
+                Hashtbl.add t.resolved_fun program_counter None;
+                None
+              | Some name ->
+                let open Intervals in
+                let fun_interval = { l=start; r=finish; v=name } in
+                report "Caching fun " (Some name) program_counter;
+                (* Hashtbl.add t.resolved_fun program_counter (Some name); *)
+                t.resolved_fun_intervals <-
+                  Intervals.insert t.resolved_fun_intervals fun_interval;
+                Some fun_interval
+            end else
+              find_func tail
         in
-        let name = find_func syms in
-        report "Caching fun " name program_counter;
-        Hashtbl.add t.resolved_fun program_counter name;
-        let start = Owee_elf.Symbol_table.Symbol.value sym in
-        let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
-        let finish = Int64.add start size in
-        Intervals.add t.resolved_fun_intervals start finish name;
-        name
+        find_func syms
     end
 
 (* if the function is found and [reset] is true, then resets caches  *)
-let resolve_function_starting_at t ~program_counter ~reset ?(resolve_contents=false) =
-
+let resolve_function_starting_at
+      t
+      ~program_counter
+      ~resolve_contents
+      ~reset =
   report "Resolve_function_starting_at_pc:" None program_counter;
   match Hashtbl.find t.resolved_fun program_counter with
   | name ->

@@ -91,7 +91,7 @@ let setup_reorder ~binary_filename
                   | Some f -> f
                 in
                 Profiles.Decoded.write linearid_profile gen_linearid_profile;
-                Reorder.CachePlus linearid_profile
+                Reorder.CachePlus (ignore linearid_profile)
               end
           end
       end

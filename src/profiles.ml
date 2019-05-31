@@ -205,44 +205,55 @@ module Perf = struct
     t
 
   let decode_loc locations addr =
-    match Elf_locations.resolve_function_containing_address locations
-            ~program_couner:addr with
+    match Elf_locations.resolve_function_containing locations
+            ~program_counter:addr with
     | None -> None
-    | Some func ->
+    | Some interval ->
+      let func = interval.v in
       let open Ocaml_locations in
-      match decode_line locations program_counter func Linearid with
+      match decode_line locations ~program_counter:addr func Linearid with
       | None -> None
       | Some (file,line) ->
-        let offset = addr - func.start_address in
-        {
-          addr;
-          func;
-          offset;
-          file;
-          line;
-        }
+        let start = interval.l in
+        match Int64.(to_int (addr - start)) with
+        | None -> failwithf "Offset to big: 0x%Lx" (Int64.(addr - start)) ()
+        | Some offset ->
+          assert (offset >= 0);
+          let open Decoded in
+          Some {
+            addr;
+            func;
+            offset;
+            file;
+            line;
+          }
 
-  let decode_brstack location brstack =
+  let decode_brstack locations brstack =
     List.map brstack
       ~f:(fun br ->
-        let from_loc = decode_loc br.from_addr in
-        let to_loc = decode_loc br.to_addr in
+        let from_loc = decode_loc locations br.from_addr in
+        let to_loc = decode_loc locations br.to_addr in
         let mispredicted = mispredicted br.mispredict in
-        Some { from_loc; to_loc; mispredicted; }
+        let open Decoded in
+        { from_loc; to_loc; mispredicted; }
       )
 
   let decode t locations =
     if !verbose then
       printf "Decoding perf profile.\n";
-    (* Resolve all addresses that need decoding, and cache them. *)
-    let addresses =
-      List.fold t ~init:[]
-        ~f:(fun addresses sample ->
-          let res = addresses.add sample.ip in
-          List.fold sample.brstack ~init:res
-            ~f:(fun res br -> br.from_addr::br.to_addr::res)
-        )
-    in
+
+    (* Collect all addresses that need decoding. *)
+    let len = List.length t in
+    let addresses = Caml.Hashtbl.create len in
+    List.iter t
+    ~f:(fun sample ->
+        Caml.Hashtbl.add addresses sample.ip ();
+        List.iter sample.brstack
+          ~f:(fun br ->
+            Caml.Hashtbl.add addresses br.from_addr ();
+            Caml.Hashtbl.add addresses br.to_addr ());
+      );
+    (* Resolve and cache all addresses we need in one pass over the binary. *)
     Elf_locations.resolve_all locations addresses ~reset:true;
     (* Decode all samples *)
     List.filter_map t
@@ -251,6 +262,6 @@ module Perf = struct
           | None -> None
           | Some ip ->
             let brstack = decode_brstack locations sample.brstack in
-            Some sample = { ip; brstack; }
+            let open Decoded in Some { ip; brstack; }
         )
 end

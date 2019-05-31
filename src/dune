@@ -9,6 +9,7 @@
           printcfg
           layouts
           profiles
+          intervals
           ocaml_locations
           report)
  (libraries

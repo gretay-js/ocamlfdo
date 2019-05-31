@@ -15,38 +15,51 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+open Base
 
-type t
+type 'a interval = {
+  l : Int64.t ;
+  r : Int64.t ;
+  v : 'a
+}
 
-val create : elf_executable:string -> t
+type 'a t = 'a interval Map.M(Int64).t
 
-val resolve : t -> program_counter:Int64.t -> (string * int) option
+let empty = Map.empty (module Int64)
 
-val resolve_from_cache : t -> program_counter:Int64.t -> (string * int) option
+let enclosing t a =
+  match Map.closest_key t `Less_or_equal_to a with
+  | None -> None
+  | Some (_,interval) ->
+    let open Int64 in
+    assert (interval.l <= a);
+    if a <= interval.r then
+      Some interval
+    else
+      None
 
-val function_at_pc : t -> program_counter:Int64.t -> string option
+(* Checks if t contains k *)
+let contains t k =
+  match enclosing t k with
+  | None -> false
+  | Some _ -> true
 
-val resolve_function_containing
-  : t
-  -> program_counter:Int64.t
-  -> string Intervals.interval option
+(* Checks if t has an interval strictly contained in i,
+   assuming that t does not contain i.l and i.r themselves. *)
+let contained t i =
+  match Map.closest_key t `Less_than i.r with
+  | None -> false
+  | Some (_,interval) ->
+    let open Int64 in
+    assert (interval.l < i.r);
+    assert (interval.r < i.r);
+    i.l < interval.l
 
-val resolve_function_starting_at
-  : t
-  -> program_counter:Int64.t
-  -> resolve_contents:bool
-  -> reset:bool
-  -> string option
-
-val resolve_function_offsets
-  : t
-  -> program_counter:Int64.t
-  -> int list
-  -> reset:bool
-  -> string option
-
-(* Resolves debug info in one pass and caches the results for addresses. *)
-val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> reset:bool -> unit
-
-val print_dwarf : t -> unit
-
+let insert t interval =
+  (* Check that the new interval is disjoint from all existing intervals *)
+  (* First, check that the bounds are not contained in another interval *)
+  assert (not (contains t interval.l));
+  assert (not (contains t interval.r));
+  (* Second, check that there is no interval contained between the bounds. *)
+  assert (not (contained t interval));
+  Map.add_exn t ~key:interval.l ~data:interval
