@@ -30,40 +30,58 @@ type loc = {
 
 (* CR gyorsh: aggregated_perf and aggregated_decoded have the same structure.
    Generalize the type? *)
-module Aggregated_perf = struct
+module 'k Aggregated = struct
 
-  type instruction = {
-    addr : int64;
-    execount : int;
-  }
-
-  type branch = {
-    from_addr : int64;
-    to_addr : int64;
-    mutable mispredicts : int;
+  type t = {
+    instructions : (k, int64) Hashtbl.t;
+    branches : (k * k, int64) Hashtbl.t;
+    (* execution count: number of times the branch was taken. *)
+    mispredicts : (k * k, int64) Hashtbl.t;
     (* number of times the branch was mispredicted:
        branch target mispredicted or
        branch direction was mispredicted. *)
-    mutable execount : int ;
-    (* execution count: number of times the branch was taken. *)
-  } [@@deriving compare, sexp]
-
-  type trace = {
-    from_addr : int64;
-    to_addr : int64;
-    mutable execount : int;
+    traces : (k * k, int64) Hashtbl.t;
+    (* execution count: number of times the trace was taken. *)
   }
 
-  type t = {
-    instructions : instruction list;
-    branches : branch list;
-    traces : trace list;
-  }
+  module S = struct
+    type t = k [@@deriving compare, hash, sexp]
+  end
+  module P = struct
+    type t = k*k [@@deriving compare, hash, sexp]
+  end
 
   let empty =
-    { instructions = [];
-      branches = [];
-      traces = [];
+    { instructions = Hashtbl.create (module S);
+      branches = Hashtbl.create (module P);
+      mispredicts = Hashtbl.create (module P);
+      traces = Hashtbl.create (module P);
+    }
+end
+
+module Aggregated_perf = struct
+
+  type t = {
+    instructions : (int64, int64) Hashtbl.t;
+    branches : (int64 * int64, int64) Hashtbl.t;
+    (* execution count: number of times the branch was taken. *)
+    mispredicts : (int64 * int64, int64) Hashtbl.t;
+    (* number of times the branch was mispredicted:
+       branch target mispredicted or
+       branch direction was mispredicted. *)
+    traces : (int64 * int64, int64) Hashtbl.t;
+    (* execution count: number of times the trace was taken. *)
+  }
+
+  module P = struct
+    type t = int64*int64 [@@deriving compare, hash, sexp]
+  end
+
+  let empty =
+    { instructions = Hashtbl.create (module Int64);
+      branches = Hashtbl.create (module P);
+      mispredicts = Hashtbl.create (module P);
+      traces = Hashtbl.create (module P);
     }
 end
 
@@ -357,62 +375,77 @@ let decode_perf locations (t:Perf.t) =
     )
 
 let decode_aggregated locations (t:Aggregated_perf.t) =
-  let open Aggregated_perf in
   if !verbose then
     printf "Decoding perf profile.\n";
 
   (* Collect all addresses that need decoding. *)
-  let len = (List.length t.instructions)
-            + (List.length t.branches) in
+  let len = Hashtbl.length t.instruction +
+            Hastbl.length t.branches in
   let addresses = Caml.Hashtbl.create len in
-  List.iter t.instructions
-    ~f:(fun instr ->
-      Caml.Hashtbl.add addresses instr.addr ();
-    );
-  List.iter t.branches
-    ~f:(fun branch ->
-      Caml.Hashtbl.add addresses branch.from_addr ();
-      Caml.Hashtbl.add addresses branch.to_addr ();
-    );
-  List.iter t.traces
-    ~f:(fun trace ->
-      Caml.Hashtbl.add addresses trace.from_addr ();
-      Caml.Hashtbl.add addresses trace.to_addr ();
-    );
+  let add key =
+    if not (Caml.Hashtbl.mem addresses key) then
+      Caml.Hashtbl.add addresses key ();
+  in
+  let add2 (f,t) = add f; add t in
+  Hashtbl.iter_keys t.instructions ~f:add;
+  Hashtbl.iter_keys t.branches ~f:add2;
+  (* Mispredicts and traces use the same addresses as branches, no need to add them *)
+  let size = Caml.Hashtbl.length addresses in
   (* Resolve and cache all addresses we need in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses ~reset:true;
   (* Decode all locations *)
-  let instructions =
-    List.map t.instructions
-    ~f:(fun instr ->
-        { Aggregated_decoded.
-          loc = decode_loc locations instr.addr;
-          execount = instr.execount;
-        }
-      ) in
-  let branches =
-  List.map t.branches
-    ~f:(fun branch ->
-      { Aggregated_decoded.
-        from_loc = decode_loc locations branch.from_addr;
-        to_loc = decode_loc locations branch.from_addr;
-        mispredicts = branch.mispredicts;
-        execount = branch.execount;
-      }
-    ) in
-  let traces =
-  List.map t.traces
-    ~f:(fun trace ->
-       { Aggregated_decoded.
-         from_loc = decode_loc locations trace.from_addr;
-         to_loc = decode_loc locations trace.from_addr;
-         execount = trace.execount;
-      }
-    ) in
-  { Aggregated_decoded.instructions; branches; traces; }
+  let addr2loc = Hashtbl.create ~size (module Int64) in
+  (* Copy aggregated profile, mapping addresses to locations in the process *)
+  let decoded = Aggregated_decoded.empty in
+  let map ~table ~key ~data =
+    let loc = Hashtbl.findo_or_add addr2loc key ~default:(decode_loc locations) in
+    Hashtbl.add_exn table ~key:loc ~data
+  in
+  let map2 ~table ~key ~data =
+    let (l,r) = key in
+    let locl = Hashtbl.findi_or_add addr2loc l ~default:(decode_loc locations) in
+    let locr = Hashtbl.findi_or_add addr2loc r ~default:(decode_loc locations) in
+    Hashtbl.add_exn table ~key:(locl,locr) ~data
+  in
+  Hashtbl.iteri t.instructions ~f:(map ~table:decoded.instructions);
+  Hashtbl.iteri t.branches ~f:(map2 ~table:decoded.branches);
+  Hashtbl.iteri t.mispredicts ~f:(map2 ~table:decoded.mispredicts);
+  Hashtbl.iteri t.traces ~f:(map2 ~table:decoded.traces);
+  decoded
 
-let aggregate_perf (_t:Perf.t) =
-  failwith "Not implemented aggregate of raw perf profile"
+let aggregate_perf (t:Perf.t) =
+  if !verbose then
+    printf "Aggregate perf profile.\n";
+  let inc table key =
+    Hashtbl.update table key
+      ~f:(fun v -> Int64.(1L + Option.value ~default:0L v)) in
+  let aggregated = Aggregated_perf.empty in
+  (* CR gyorsh: aggregate during parsing of perf profile *)
+  let aggregate (sample:Perf.sample) =
+    inc aggregated.instructions sample.ip;
+    List.iter sample.brstack
+      ~f:(fun br ->
+        let key = (br.from_addr,br.to_addr) in
+        inc aggregated.branches key;
+        if Perf.mispredicted br.mispredict then
+          inc aggregated.mispredicts key;
+      );
+    (* Instructions executed between branches can be inferred from brstack *)
+    ignore (List.fold sample.brstack ~init:None
+      ~f:(fun prev cur ->
+        match prev with
+        | None -> Some cur
+        | Some prev ->
+          assert (prev.index = (cur.index + 1));
+          let from_addr = prev.to_addr in
+          let to_addr = cur.from_addr in
+          let key = (from_addr,to_addr) in
+          inc aggregated.traces key;
+          Some cur
+         ): Perf.br option)
+  in
+  List.iter t ~f:aggregate;
+  aggregated
 
 let aggregate_decoded (_t:Decoded_perf.t) =
   failwith "Not implemented aggregate of decoded perf profile"
