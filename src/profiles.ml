@@ -39,22 +39,13 @@ module Loc = struct
     | Some func -> sprintf "1 %s %x" func.name func.offset
 end
 
-module Aggregated = struct
-
-  module type Key = sig
-    type t [@@deriving compare, hash, sexp]
-  end
-
-  module Make(Key : Key) = struct
-    module S = struct
-      type t = Key.t [@@deriving compare, hash, sexp]
-    end
+module Aggregated_perf = struct
 
     module P = struct
-      type t = Key.t*Key.t [@@deriving compare, hash, sexp]
+      type t = int64 * int64 [@@deriving compare, hash, sexp]
     end
     type t = {
-      instructions : int64 Hashtbl.M(S).t;
+      instructions : int64 Hashtbl.M(Int64).t;
       branches : int64 Hashtbl.M(P).t;
       (* execution count: number of times the branch was taken. *)
       mispredicts : int64 Hashtbl.M(P).t;
@@ -66,7 +57,7 @@ module Aggregated = struct
     } [@@deriving sexp]
 
     let empty =
-      { instructions = Hashtbl.create (module S);
+      { instructions = Hashtbl.create (module Int64);
         branches = Hashtbl.create (module P);
         mispredicts = Hashtbl.create (module P);
         traces = Hashtbl.create (module P);
@@ -74,7 +65,7 @@ module Aggregated = struct
 
     let read filename =
       if !verbose then
-        printf "Reading aggregated profile from %s\n" filename;
+        printf "Reading aggregated perf profile from %s\n" filename;
       let t =
         match Parsexp_io.load (module Parsexp.Single) ~filename with
         | Ok t_sexp -> t_of_sexp t_sexp
@@ -83,25 +74,24 @@ module Aggregated = struct
           failwith "Cannot parse aggregated profile file"
       in
       if !verbose then begin
-        Printf.printf !"Aggregated profile:\n%{sexp:t}\n" t;
+        Printf.printf !"Aggregated perf profile:\n%{sexp:t}\n" t;
       end;
       t
 
     let write t filename =
       if !verbose then
-        printf "Writing aggregated profile to %s\n" filename;
+        printf "Writing aggregated perf profile to %s\n" filename;
       let chan = Out_channel.create filename in
       Printf.fprintf chan !"%{sexp:t}\n" t;
       Out_channel.close chan
-  end
 end
 
-module Aggregated_perf = Aggregated.Make(Int64)
 module Aggregated_decoded = struct
   type t =
   { counts : Aggregated_perf.t;
     addr2loc : Loc.t Hashtbl.M(Int64).t;
   }  [@@deriving sexp]
+
   let read filename =
     if !verbose then
       printf "Reading aggregated decoded profile from %s\n" filename;
@@ -151,45 +141,6 @@ let write_bolt (t:Aggregated_decoded.t) filename =
           data in
   Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
   Out_channel.close chan
-
-module Decoded_perf = struct
-  (* Branch *)
-  type br = {
-    from_loc : Loc.t;
-    to_loc : Loc.t;
-    mispredicted : bool;
-    index : int;
-  } [@@deriving compare, sexp]
-
-  type sample = {
-    ip: Loc.t; (* instruction pointer where the sample was taken *)
-    brstack: br list;
-  } [@@deriving compare, sexp]
-
-  type t = sample list
-  [@@deriving compare, sexp]
-
-  let read filename =
-    if !verbose then
-      printf "Reading decoded profile from %s\n" filename;
-    let t =
-      match Parsexp_io.load (module Parsexp.Single) ~filename with
-      | Ok t_sexp -> t_of_sexp t_sexp
-      | Error error ->
-        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        failwith "Cannot parse decoded profile file"
-    in
-    if !verbose then begin
-      Printf.printf !"Decoded profile:\n%{sexp:t}\n" t;
-      if t = [] then Printf.printf "Empty layout!\n"
-    end;
-    t
-
-  let write t filename =
-    let chan = Out_channel.create filename in
-    Printf.fprintf chan !"%{sexp:t}\n" t;
-    Out_channel.close chan
-end
 
 module Perf = struct
   (* Perf profile format as output of perf script -F pid,ip,brstack *)
@@ -345,42 +296,6 @@ let decode_loc locations addr =
       | Some (file,line) -> Some {Loc.file;line;} in
     { addr; func; dbg; }
 
-let decode_brstack locations (brstack:Perf.br list) =
-  List.map brstack
-    ~f:(fun br ->
-      let from_loc = decode_loc locations br.from_addr in
-      let to_loc = decode_loc locations br.to_addr in
-      let mispredicted = Perf.mispredicted br.mispredict in
-      let open Decoded_perf in
-      { from_loc; to_loc; mispredicted; index=br.index; }
-    )
-
-let decode_perf locations (t:Perf.t) =
-  let open Perf in
-  if !verbose then
-    printf "Decoding perf profile.\n";
-
-  (* Collect all addresses that need decoding. *)
-  let len = List.length t in
-  let addresses = Caml.Hashtbl.create len in
-  List.iter t
-    ~f:(fun sample ->
-      Caml.Hashtbl.add addresses sample.ip ();
-      List.iter sample.brstack
-        ~f:(fun br ->
-          Caml.Hashtbl.add addresses br.from_addr ();
-          Caml.Hashtbl.add addresses br.to_addr ());
-    );
-  (* Resolve and cache all addresses we need in one pass over the binary. *)
-  Elf_locations.resolve_all locations addresses ~reset:true;
-  (* Decode all samples *)
-  List.map t
-    ~f:(fun sample ->
-      let ip = decode_loc locations sample.ip in
-      let brstack = decode_brstack locations sample.brstack in
-      let open Decoded_perf in { ip; brstack; }
-    )
-
 let decode_aggregated locations (t:Aggregated_perf.t) =
   if !verbose then
     printf "Decoding perf profile.\n";
@@ -442,6 +357,3 @@ let aggregate_perf (t:Perf.t) =
   in
   List.iter t ~f:aggregate;
   aggregated
-
-let aggregate_decoded (_t:Decoded_perf.t) =
-  failwith "Not implemented aggregate of decoded perf profile"

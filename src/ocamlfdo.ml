@@ -40,7 +40,6 @@ let setup_reorder ~binary_filename
       ~gen_linearid_profile
       ~linearid_profile_filename
   =
-  let decode_then_aggregate = false in
   let write_bolt_fdata = true in
   if random_order then begin
     (* let random_state = Random.State.make [ deterministic seed ]; *)
@@ -84,17 +83,11 @@ let setup_reorder ~binary_filename
                    reordering algorithm setup. *)
                 (* CR gyorsh: check buildid of the samples. Use owee? *)
                 (* CR gyorsh: Check pid of the samples. *)
+                (* First aggregate raw profile and then decode it. *)
                 let perf_profile = Profiles.Perf.read perf_profile_filename in
-                let linearid_profile =
-                  if (decode_then_aggregate) then begin
-                    (* Decode raw profile and then aggregate it *)
-                    Profiles.decode_perf locations perf_profile
-                    |> Profiles.aggregate_decoded
-                  end else begin
-                    (* First aggregate raw profile and then decode it. *)
-                    let aggr_perf_profile = Profiles.aggregate_perf perf_profile in
-                    Profiles.decode_aggregated locations aggr_perf_profile
-                  end in
+                let aggr_perf_profile = Profiles.aggregate_perf perf_profile in
+                let linearid_profile = Profiles.decode_aggregated
+                                         locations aggr_perf_profile in
                 let gen_linearid_profile =
                     match gen_linearid_profile with
                     | None -> perf_profile_filename ^ ".linearid"
