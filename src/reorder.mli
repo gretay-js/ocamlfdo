@@ -23,10 +23,12 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear_id of layout
   | Cfg_label of layout
-  | CachePlus of unit
+  | Profile of Profiles.t * Options.t
 
 val reorder
   : algo:reorder_algo
   -> Cfg_builder.t
   -> Cfg_builder.t
 
+
+val finish : reorder_algo -> unit

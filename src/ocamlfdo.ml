@@ -40,7 +40,6 @@ let setup_reorder ~binary_filename
       ~gen_linearid_profile
       ~linearid_profile_filename
   =
-  let write_bolt_fdata = true in
   if random_order then begin
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -76,7 +75,8 @@ let setup_reorder ~binary_filename
               | Some linearid_profile_filename ->
                 let linearid_profile =
                   Profiles.Aggregated_decoded.read linearid_profile_filename in
-                Reorder.CachePlus (ignore linearid_profile)
+                let options = Options.mk linearid_profile_filename in
+                Reorder.Profile (linearid_profile, options)
               end
             | Some perf_profile_filename -> begin
                 (* CR gyorsh: decoding raw perf data should be separate from
@@ -84,23 +84,20 @@ let setup_reorder ~binary_filename
                 (* CR gyorsh: check buildid of the samples. Use owee? *)
                 (* CR gyorsh: Check pid of the samples. *)
                 (* First aggregate raw profile and then decode it. *)
-                let perf_profile = Profiles.Perf.read perf_profile_filename in
-                let aggr_perf_profile = Profiles.aggregate_perf perf_profile in
+                let aggr_perf_profile = Profiles.Perf.read_and_aggregate
+                                          perf_profile_filename in
                 let linearid_profile = Profiles.decode_aggregated
                                          locations aggr_perf_profile in
                 let gen_linearid_profile =
-                    match gen_linearid_profile with
-                    | None -> perf_profile_filename ^ ".linearid"
-                    | Some f -> f
+                  match gen_linearid_profile with
+                  | None -> perf_profile_filename ^ ".linearid"
+                  | Some f -> f
                 in
                 Profiles.Aggregated_decoded.write
                   linearid_profile
                   gen_linearid_profile;
-                if write_bolt_fdata then
-                  Profiles.write_bolt
-                    linearid_profile
-                    (gen_linearid_profile^".bolt.fdata");
-                Reorder.CachePlus (ignore linearid_profile)
+                let options = Options.mk gen_linearid_profile in
+                Reorder.Profile (linearid_profile, options)
               end
           end
       end
@@ -281,9 +278,13 @@ let main ~binary_filename
     fnew
   in
   Reoptimize.setup ~f:transform;
-  at_exit Report.finish;
+  let finish () =
+    Reorder.finish algo;
+    Report.finish ()
+  in
+  at_exit finish;
   call_ocamlopt args;
-  Report.finish ()
+  finish ()
 
 let command =
   Command.basic

@@ -28,7 +28,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear_id of layout
   | Cfg_label of layout
-  | CachePlus of unit
+  | Profile of Profiles.t * Options.t
 
 let validate cfg new_cfg_layout  =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
@@ -149,6 +149,30 @@ let reorder ~algo cfg =
   match algo with
   | Identity -> cfg
   | Random random_state -> reorder_random cfg ~random_state
-  | CachePlus _ -> failwith "Not implemented: cache+ reorder algorithm"
   | Cfg_label layout -> reorder_rel_layout cfg ~layout
   | Linear_id layout -> reorder_layout cfg ~layout
+  | Profile _ -> failwith "Not implemented: profile-based reorder algorithm"
+
+
+let finish_profile linearid_profile options =
+  let open Options in
+  if options.write_bolt_fdata then begin
+    Profiles.write_bolt linearid_profile
+      options.gen_linearid_profile^".bolt.fdata"
+  end;
+  if options.write_linker_script then begin
+    let linker_script_hot = options.gen_linearid_profile^".linker-script-hot" in
+    if verbose then
+      printf "Writing linker script hot to %s\n" linker_script_hot;
+    match options.reorder_functions with
+    | None ->
+      if verbose then printf "Reorder functions is not enabled.\
+                              Cannot output linker script.\n"
+    | Exec_count ->
+      Profiles.write_top_functions linearid_profile linker_script_hot
+  end;
+  ()
+
+let finish = function
+  | Profile (linearid,options) -> finish_profile linearid options
+  | _ -> ()

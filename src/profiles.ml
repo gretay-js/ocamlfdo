@@ -23,13 +23,28 @@ module Loc = struct
   } [@@deriving compare, sexp, hash]
 
   type func = {
-    name : string;  (* Name of the containing function symbol *)
+    id : int;       (* Unique identifier we assign to this function *)
+    name : string;  (* Name of thefunction symbol *)
+    start : int;    (* Raw start address of the function inthe original binary *)
+  } [@@deriving compare, sexp, hash]
+
+  let get_func_id functions ~name ~start =
+    match Hashtbl.find functions name with
+    | None ->
+      let id = Hashtbl.length functions in
+      Hashtbl.set functions ~key:name ~data:{id;name;start}
+    | Some func ->
+      assert (func.start = start);
+      func.id
+
+  type rel = {
+    id : int;       (* Unique id of the containing function symbol *)
     offset : int;   (* Offset from the start of the function *)
   } [@@deriving compare, sexp, hash]
 
   type t = {
     addr : int64;   (* Raw address in the original binary *)
-    func : func option;    (* Containing function info *)
+    rel : rel option;    (* Containing function info and relative offset *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
 
@@ -37,6 +52,9 @@ module Loc = struct
     match t.func with
     | None -> "0 [unknown] 0"
     | Some func -> sprintf "1 %s %x" func.name func.offset
+
+
+
 end
 
 module Aggregated_perf = struct
@@ -90,6 +108,7 @@ module Aggregated_decoded = struct
   type t =
   { counts : Aggregated_perf.t;
     addr2loc : Loc.t Hashtbl.M(Int64).t;
+    functions : Loc.func Hashtbl.M(String).t;
   }  [@@deriving sexp]
 
   let read filename =
@@ -117,7 +136,18 @@ module Aggregated_decoded = struct
   let loc t addr = Hashtbl.find_exn t.addr2loc addr
 end
 
-let write_bolt (t:Aggregated_decoded.t) filename =
+type t = Aggregated_decoded.t
+
+let write_top_functions t filename =
+  if !verbose then
+    printf "Writing top functions to %s\n" filename;
+  let chan = Out_channel.create filename in
+  let locs = Hashtbl.data t.addr2loc in
+  List.fold t.addr2loc ~init:String.Map.empty
+    ~f:(fun loc ...
+  Out_channel.close chan
+
+let write_bolt t filename =
   let open Loc in
   let open Aggregated_perf in
   let open Aggregated_decoded in
@@ -220,7 +250,7 @@ module Perf = struct
     else
       "0x" ^ s
 
-  let row_to_sample ~keep_pid t row =
+  let row_to_sample ~keep_pid row =
     match split_on_whitespace row with
     | pid::ip::rest ->
       let pid = Int.of_string pid in
@@ -231,10 +261,10 @@ module Perf = struct
           ip = Int64.of_string (hex ip);
           brstack = snd (parse_brstack (0,[]) rest);
         } in
-        sample::t
+        Some sample
       end
       else
-        t
+        None
     | _ -> failwithf "Cannot parse %s\n" row ()
 
   let pids = ref Int.Set.empty
@@ -262,7 +292,11 @@ module Perf = struct
               \"perf script -F pid,ip,brstack\" from %s\n" filename;
     let chan = In_channel.create filename in
     let keep_pid = check_keep_pid ?expected_pid in
-    let t = In_channel.fold_lines chan ~init:[] ~f:(row_to_sample ~keep_pid) in
+    let t = In_channel.fold_lines chan ~init:[]
+              ~f:(fun acc row ->
+                match row_to_sample ~keep_pid row with
+                | None -> acc
+                | Some sample -> sample::acc) in
     In_channel.close chan;
     if !verbose then begin
       print t;
@@ -271,9 +305,71 @@ module Perf = struct
     end;
     t
 
+
+  type stats = {
+    ignored:int;
+    total:int;
+    lbr:int;
+  }
+  let read_and_aggregate ?(expected_pid=None) filename =
+    if !verbose then
+      printf "Aggregate perf profile from %s.\n" filename;
+
+    let inc table key =
+      Hashtbl.update table key
+        ~f:(fun v -> Int64.(1L + Option.value ~default:0L v)) in
+    let aggregated = Aggregated_perf.empty in
+    (* CR gyorsh: aggregate during parsing of perf profile *)
+    let aggregate sample =
+      inc aggregated.instructions sample.ip;
+      List.iter sample.brstack
+        ~f:(fun br ->
+          let key = (br.from_addr,br.to_addr) in
+          inc aggregated.branches key;
+          if mispredicted br.mispredict then
+            inc aggregated.mispredicts key;
+        );
+      (* Instructions executed between branches can be inferred from brstack *)
+      ignore (List.fold sample.brstack ~init:None
+                ~f:(fun prev cur ->
+                  match prev with
+                  | None -> Some cur
+                  | Some prev ->
+                    assert (prev.index = (cur.index + 1));
+                    let from_addr = prev.to_addr in
+                    let to_addr = cur.from_addr in
+                    let key = (from_addr,to_addr) in
+                    inc aggregated.traces key;
+                    Some cur
+                ): br option)
+
+    in
+    let chan = In_channel.create filename in
+    let keep_pid = check_keep_pid ?expected_pid in
+    let empty_stats = {ignored=0;total=0;lbr=0} in
+    let stats = In_channel.fold_lines chan ~init:empty_stats
+      ~f:(fun stats row ->
+        match row_to_sample ~keep_pid row with
+        | None ->
+          { stats with ignored=stats.ignored+1; total=stats.total+1 }
+        | Some sample ->
+          aggregate sample;
+          { stats with total=stats.total+1;
+                       lbr=stats.lbr+(List.length sample.brstack) }
+         ) in
+    In_channel.close chan;
+    if !verbose then begin
+      Printf.printf "Read %d samples with %d LBR entries\n" stats.total stats.lbr;
+      let r = Float.( (of_int stats.ignored) * 100.0 / (of_int stats.total) ) in
+      Printf.printf "Ignored %d samples (%.1f)\n" stats.ignored r;
+      Printf.printf "Found pids:\n";
+      Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid)
+    end;
+      aggregated
+
 end
 
-let decode_loc locations addr =
+let decode_loc functions locations addr =
   let open Loc in
   match Elf_locations.resolve_function_containing locations
           ~program_counter:addr with
@@ -288,7 +384,8 @@ let decode_loc locations addr =
       match Int64.(to_int (addr - start)) with
       | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
       | Some offset -> assert (offset >= 0); offset in
-    let func = Some { name; offset; } in
+    let id = Loc.get_func_id functions name start in
+    let func = Some { id; offset; } in
     let dbg =
       match Ocaml_locations.(decode_line locations
                                ~program_counter:addr name Linearid) with
@@ -319,12 +416,12 @@ let decode_aggregated locations (t:Aggregated_perf.t) =
   let addr2loc = Hashtbl.create ~size (module Int64) in
   (* Mapping addresses to locations *)
   Caml.Hashtbl.iter (fun key _ ->
-    let data = decode_loc locations key in
+    let data = decode_loc functions locations key in
     Hashtbl.set addr2loc ~key ~data)
     addresses;
-  {Aggregated_decoded.counts=t;addr2loc;}
+  {Aggregated_decoded.counts=t;addr2loc;functions;}
 
-let aggregate_perf (t:Perf.t) =
+let _aggregate_perf (t:Perf.t) =
   if !verbose then
     printf "Aggregate perf profile.\n";
   let inc table key =
