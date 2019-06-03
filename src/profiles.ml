@@ -32,6 +32,11 @@ module Loc = struct
     func : func option;    (* Containing function info *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
+
+  let to_bolt_string t =
+    match t.func with
+    | None -> "0 [unknown] 0"
+    | Some func -> sprintf "1 %s %x" func.name func.offset
 end
 
 module Aggregated = struct
@@ -84,17 +89,68 @@ module Aggregated = struct
 
     let write t filename =
       if !verbose then
-        printf "Writing aggregated decoded profile to %s\n" filename;
+        printf "Writing aggregated profile to %s\n" filename;
       let chan = Out_channel.create filename in
       Printf.fprintf chan !"%{sexp:t}\n" t;
       Out_channel.close chan
-
   end
 end
 
 module Aggregated_perf = Aggregated.Make(Int64)
-module Aggregated_decoded = Aggregated.Make(Loc)
+module Aggregated_decoded = struct
+  type t =
+  { counts : Aggregated_perf.t;
+    addr2loc : Loc.t Hashtbl.M(Int64).t;
+  }  [@@deriving sexp]
+  let read filename =
+    if !verbose then
+      printf "Reading aggregated decoded profile from %s\n" filename;
+    let t =
+      match Parsexp_io.load (module Parsexp.Single) ~filename with
+      | Ok t_sexp -> t_of_sexp t_sexp
+      | Error error ->
+        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
+        failwith "Cannot parse aggregated decoded profile file"
+    in
+    if !verbose then begin
+      Printf.printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
+    end;
+    t
 
+  let write t filename =
+    if !verbose then
+      printf "Writing aggregated decoded profile to %s\n" filename;
+    let chan = Out_channel.create filename in
+    Printf.fprintf chan !"%{sexp:t}\n" t;
+    Out_channel.close chan
+
+  let loc t addr = Hashtbl.find_exn t.addr2loc addr
+end
+
+let write_bolt (t:Aggregated_decoded.t) filename =
+  let open Loc in
+  let open Aggregated_perf in
+  let open Aggregated_decoded in
+  if !verbose then
+    printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
+  let chan = Out_channel.create filename in
+  let write_bolt_count ~key ~data =
+      let mis = Option.value
+                  (Hashtbl.find t.counts.mispredicts key)
+                  ~default:0L in
+      let (from_addr, to_addr) = key in
+      let from_loc = loc t from_addr  in
+      let to_loc = loc t to_addr in
+      match from_loc.func, to_loc.func with
+      | None, None -> ()
+      | _ ->
+        Printf.fprintf chan "%s %s %Ld %Ld\n"
+          (to_bolt_string from_loc)
+          (to_bolt_string to_loc)
+          mis
+          data in
+  Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
+  Out_channel.close chan
 
 module Decoded_perf = struct
   (* Branch *)
@@ -346,23 +402,12 @@ let decode_aggregated locations (t:Aggregated_perf.t) =
   Elf_locations.resolve_all locations addresses ~reset:true;
   (* Decode all locations *)
   let addr2loc = Hashtbl.create ~size (module Int64) in
-  (* Copy aggregated profile, mapping addresses to locations in the process *)
-  let decoded = Aggregated_decoded.empty in
-  let map ~table ~key ~data =
-    let loc = Hashtbl.findi_or_add addr2loc key ~default:(decode_loc locations) in
-    Hashtbl.add_exn table ~key:loc ~data
-  in
-  let map2 ~table ~key ~data =
-    let (l,r) = key in
-    let locl = Hashtbl.findi_or_add addr2loc l ~default:(decode_loc locations) in
-    let locr = Hashtbl.findi_or_add addr2loc r ~default:(decode_loc locations) in
-    Hashtbl.add_exn table ~key:(locl,locr) ~data
-  in
-  Hashtbl.iteri t.instructions ~f:(map ~table:decoded.instructions);
-  Hashtbl.iteri t.branches ~f:(map2 ~table:decoded.branches);
-  Hashtbl.iteri t.mispredicts ~f:(map2 ~table:decoded.mispredicts);
-  Hashtbl.iteri t.traces ~f:(map2 ~table:decoded.traces);
-  decoded
+  (* Mapping addresses to locations *)
+  Caml.Hashtbl.iter (fun key _ ->
+    let data = decode_loc locations key in
+    Hashtbl.set addr2loc ~key ~data)
+    addresses;
+  {Aggregated_decoded.counts=t;addr2loc;}
 
 let aggregate_perf (t:Perf.t) =
   if !verbose then

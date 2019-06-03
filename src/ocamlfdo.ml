@@ -41,6 +41,7 @@ let setup_reorder ~binary_filename
       ~linearid_profile_filename
   =
   let decode_then_aggregate = false in
+  let write_bolt_fdata = true in
   if random_order then begin
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -102,6 +103,10 @@ let setup_reorder ~binary_filename
                 Profiles.Aggregated_decoded.write
                   linearid_profile
                   gen_linearid_profile;
+                if write_bolt_fdata then
+                  Profiles.write_bolt
+                    linearid_profile
+                    (gen_linearid_profile^".bolt.fdata");
                 Reorder.CachePlus (ignore linearid_profile)
               end
           end

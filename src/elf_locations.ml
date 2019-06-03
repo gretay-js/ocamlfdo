@@ -33,7 +33,7 @@ type t = {
   mutable intervals_misses : int;
 }
 
-let verbose = false
+let verbose = true
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [Unix.O_RDONLY] 0 in
@@ -440,7 +440,13 @@ let resolve_function_containing t ~program_counter =
                symbol's end of interval covers the start of the next symbol.
                This may be a bug in Owee, or maybe intentional,
                but we can work around it here. *)
-            if start <= program_counter && program_counter < finish then begin
+            if start = program_counter ||
+               (* size is sometimes 0 even when the function is non-empty *)
+               (start < program_counter && program_counter < finish)
+               (* if size is non-zero, sometimes finish overlaps
+                  with the start of the next function,
+                  so we check that the program counter is strictly smaller. *)
+            then begin
               match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
               | None ->
                 if verbose then
