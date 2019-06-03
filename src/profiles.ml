@@ -15,145 +15,98 @@ open Core
 
 let verbose = ref true
 
-(* Dwarf info associated with a location *)
-type dbg = {
+module Loc = struct
+  (* Dwarf info associated with a location *)
+  type dbg = {
     file : string;  (* filename *)
     line : int;     (* line number *)
-  } [@@deriving compare, sexp]
+  } [@@deriving compare, sexp, hash]
 
-type loc = {
-    addr : int64;   (* Raw address in the original binary *)
-    func : string;  (* Name of the containing function symbol *)
+  type func = {
+    name : string;  (* Name of the containing function symbol *)
     offset : int;   (* Offset from the start of the function *)
+  } [@@deriving compare, sexp, hash]
+
+  type t = {
+    addr : int64;   (* Raw address in the original binary *)
+    func : func option;    (* Containing function info *)
     dbg : dbg option;
-  } [@@deriving compare, sexp]
-
-(* CR gyorsh: aggregated_perf and aggregated_decoded have the same structure.
-   Generalize the type? *)
-module 'k Aggregated = struct
-
-  type t = {
-    instructions : (k, int64) Hashtbl.t;
-    branches : (k * k, int64) Hashtbl.t;
-    (* execution count: number of times the branch was taken. *)
-    mispredicts : (k * k, int64) Hashtbl.t;
-    (* number of times the branch was mispredicted:
-       branch target mispredicted or
-       branch direction was mispredicted. *)
-    traces : (k * k, int64) Hashtbl.t;
-    (* execution count: number of times the trace was taken. *)
-  }
-
-  module S = struct
-    type t = k [@@deriving compare, hash, sexp]
-  end
-  module P = struct
-    type t = k*k [@@deriving compare, hash, sexp]
-  end
-
-  let empty =
-    { instructions = Hashtbl.create (module S);
-      branches = Hashtbl.create (module P);
-      mispredicts = Hashtbl.create (module P);
-      traces = Hashtbl.create (module P);
-    }
+  } [@@deriving compare, sexp, hash]
 end
 
-module Aggregated_perf = struct
+module Aggregated = struct
 
-  type t = {
-    instructions : (int64, int64) Hashtbl.t;
-    branches : (int64 * int64, int64) Hashtbl.t;
-    (* execution count: number of times the branch was taken. *)
-    mispredicts : (int64 * int64, int64) Hashtbl.t;
-    (* number of times the branch was mispredicted:
-       branch target mispredicted or
-       branch direction was mispredicted. *)
-    traces : (int64 * int64, int64) Hashtbl.t;
-    (* execution count: number of times the trace was taken. *)
-  }
-
-  module P = struct
-    type t = int64*int64 [@@deriving compare, hash, sexp]
+  module type Key = sig
+    type t [@@deriving compare, hash, sexp]
   end
 
-  let empty =
-    { instructions = Hashtbl.create (module Int64);
-      branches = Hashtbl.create (module P);
-      mispredicts = Hashtbl.create (module P);
-      traces = Hashtbl.create (module P);
-    }
+  module Make(Key : Key) = struct
+    module S = struct
+      type t = Key.t [@@deriving compare, hash, sexp]
+    end
+
+    module P = struct
+      type t = Key.t*Key.t [@@deriving compare, hash, sexp]
+    end
+    type t = {
+      instructions : int64 Hashtbl.M(S).t;
+      branches : int64 Hashtbl.M(P).t;
+      (* execution count: number of times the branch was taken. *)
+      mispredicts : int64 Hashtbl.M(P).t;
+      (* number of times the branch was mispredicted:
+         branch target mispredicted or
+         branch direction was mispredicted. *)
+      traces : int64 Hashtbl.M(P).t;
+      (* execution count: number of times the trace was taken. *)
+    } [@@deriving sexp]
+
+    let empty =
+      { instructions = Hashtbl.create (module S);
+        branches = Hashtbl.create (module P);
+        mispredicts = Hashtbl.create (module P);
+        traces = Hashtbl.create (module P);
+      }
+
+    let read filename =
+      if !verbose then
+        printf "Reading aggregated profile from %s\n" filename;
+      let t =
+        match Parsexp_io.load (module Parsexp.Single) ~filename with
+        | Ok t_sexp -> t_of_sexp t_sexp
+        | Error error ->
+          Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
+          failwith "Cannot parse aggregated profile file"
+      in
+      if !verbose then begin
+        Printf.printf !"Aggregated profile:\n%{sexp:t}\n" t;
+      end;
+      t
+
+    let write t filename =
+      if !verbose then
+        printf "Writing aggregated decoded profile to %s\n" filename;
+      let chan = Out_channel.create filename in
+      Printf.fprintf chan !"%{sexp:t}\n" t;
+      Out_channel.close chan
+
+  end
 end
 
-module Aggregated_decoded = struct
+module Aggregated_perf = Aggregated.Make(Int64)
+module Aggregated_decoded = Aggregated.Make(Loc)
 
-  type instruction = {
-    loc : loc;
-    execount : int;
-  } [@@deriving compare, sexp]
-
-  type branch = {
-    from_loc : loc;
-    to_loc : loc;
-    mispredicts : int; (* number of times the branch was mispredicted:
-                         branch target mispredicted or
-                         branch direction was mispredicted. *)
-    execount : int ;  (* execution count: number of times the branch was taken. *)
-  } [@@deriving compare, sexp]
-
-  type trace = {
-    from_loc : loc;
-    to_loc : loc;
-    execount : int;
-  } [@@deriving compare, sexp]
-
-  type t = {
-    instructions : instruction list;
-    branches : branch list;
-    traces : trace list;
-  } [@@deriving compare, sexp]
-
-  let empty =
-    { instructions=[];
-      branches=[];
-      traces=[];
-    }
-
-  let read filename =
-    if !verbose then
-      printf "Reading aggregated decoded profile from %s\n" filename;
-    let t =
-      match Parsexp_io.load (module Parsexp.Single) ~filename with
-      | Ok t_sexp -> t_of_sexp t_sexp
-      | Error error ->
-        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        failwith "Cannot parse aggregated decoded profile file"
-    in
-    if !verbose then begin
-      Printf.printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
-    end;
-    t
-
-  let write t filename =
-    if !verbose then
-      printf "Writing aggregated decoded profile to %s\n" filename;
-    let chan = Out_channel.create filename in
-    Printf.fprintf chan !"%{sexp:t}\n" t;
-    Out_channel.close chan
-
-end
 
 module Decoded_perf = struct
   (* Branch *)
   type br = {
-    from_loc : loc;
-    to_loc : loc;
+    from_loc : Loc.t;
+    to_loc : Loc.t;
     mispredicted : bool;
     index : int;
   } [@@deriving compare, sexp]
 
   type sample = {
-    ip: loc; (* instruction pointer where the sample was taken *)
+    ip: Loc.t; (* instruction pointer where the sample was taken *)
     brstack: br list;
   } [@@deriving compare, sexp]
 
@@ -314,29 +267,27 @@ module Perf = struct
 end
 
 let decode_loc locations addr =
-  let interval =
-    match Elf_locations.resolve_function_containing locations
-            ~program_counter:addr with
-    | None ->
-      failwithf "Cannot find function symbol containing 0x%Lx" addr ()
-    | Some interval -> interval in
-  let func = interval.v in
-  let dbg =
-    match Ocaml_locations.(decode_line locations
-                             ~program_counter:addr func Linearid) with
-    | None -> None
-    | Some (file,line) -> Some {file;line;} in
-  let start = interval.l in
-  let offset =
-    match Int64.(to_int (addr - start)) with
+  let open Loc in
+  match Elf_locations.resolve_function_containing locations
+          ~program_counter:addr with
+  | None ->
+    if !verbose then
+      printf "Cannot find function symbol containing 0x%Lx\n" addr;
+    { addr; func=None; dbg=None; }
+  | Some interval ->
+    let name = interval.v in
+    let start = interval.l in
+    let offset =
+      match Int64.(to_int (addr - start)) with
       | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
       | Some offset -> assert (offset >= 0); offset in
-  {
-    addr;
-    func;
-    offset;
-    dbg;
-  }
+    let func = Some { name; offset; } in
+    let dbg =
+      match Ocaml_locations.(decode_line locations
+                               ~program_counter:addr name Linearid) with
+      | None -> None
+      | Some (file,line) -> Some {Loc.file;line;} in
+    { addr; func; dbg; }
 
 let decode_brstack locations (brstack:Perf.br list) =
   List.map brstack
@@ -379,8 +330,8 @@ let decode_aggregated locations (t:Aggregated_perf.t) =
     printf "Decoding perf profile.\n";
 
   (* Collect all addresses that need decoding. *)
-  let len = Hashtbl.length t.instruction +
-            Hastbl.length t.branches in
+  let len = Hashtbl.length t.instructions +
+            Hashtbl.length t.branches in
   let addresses = Caml.Hashtbl.create len in
   let add key =
     if not (Caml.Hashtbl.mem addresses key) then
@@ -398,7 +349,7 @@ let decode_aggregated locations (t:Aggregated_perf.t) =
   (* Copy aggregated profile, mapping addresses to locations in the process *)
   let decoded = Aggregated_decoded.empty in
   let map ~table ~key ~data =
-    let loc = Hashtbl.findo_or_add addr2loc key ~default:(decode_loc locations) in
+    let loc = Hashtbl.findi_or_add addr2loc key ~default:(decode_loc locations) in
     Hashtbl.add_exn table ~key:loc ~data
   in
   let map2 ~table ~key ~data =
