@@ -39,10 +39,6 @@ type prim_call_operation =
       label_after_error : label option;
       spacetime_index : int; }
 
-type call_operation =
-  | P of prim_call_operation
-  | F of func_call_operation
-
 type operation =
   | Move
   | Spill
@@ -60,11 +56,25 @@ type operation =
   | Name_for_debugger of { ident : Ident.t; which_parameter : int option;
                            provenance : unit option; is_assignment : bool; }
 
+
+module type User_data = sig
+  module Func_data : sig type t end
+  module Block_data : sig type t end
+  module Instr_data : sig type t end
+  module Call_data : sig type t end
+  module Succ_data : sig type t end
+end
+
+module Make(U : User_data) = struct
 type condition =
   | Always
   | Test of Mach.test
 
 type successor = condition * label
+
+type call_operation =
+  | P of prim_call_operation
+  | F of func_call_operation
 
 (* basic block *)
 type block = {
@@ -72,6 +82,7 @@ type block = {
   mutable body : basic instruction list;
   mutable terminator : terminator instruction;
   mutable predecessors : LabelSet.t;
+  data : U.Block_data.t option;
 }
 
 and 'a instruction = {
@@ -82,6 +93,7 @@ and 'a instruction = {
   live : Reg.Set.t;
   trap_depth : int;
   id : int;
+  data : U.Instr_data.t option;
 }
 
 and basic =
@@ -101,10 +113,12 @@ and terminator =
 
 (* Control Flow Graph of a function. *)
 type t = {
-  blocks : (label, block) Hashtbl.t;                  (* Map labels to blocks *)
+  blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
   fun_name : string;             (* Function name, used for printing messages *)
   entry_label : label;           (* Must be first in all layouts of this cfg. *)
+  data : U.Func_data.t option;
 }
+
 
 let successors block =
   match block.terminator.desc with
@@ -121,3 +135,4 @@ let successors block =
 let successor_labels block =
   let (_, labels) = List.split (successors block) in
   labels
+end

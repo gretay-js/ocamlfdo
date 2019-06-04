@@ -22,29 +22,14 @@ module Loc = struct
     line : int;     (* line number *)
   } [@@deriving compare, sexp, hash]
 
-  type func = {
-    id : int;       (* Unique identifier we assign to this function *)
-    name : string;  (* Name of thefunction symbol *)
-    start : int;    (* Raw start address of the function inthe original binary *)
-  } [@@deriving compare, sexp, hash]
-
-  let get_func_id functions ~name ~start =
-    match Hashtbl.find functions name with
-    | None ->
-      let id = Hashtbl.length functions in
-      Hashtbl.set functions ~key:name ~data:{id;name;start}
-    | Some func ->
-      assert (func.start = start);
-      func.id
-
   type rel = {
     id : int;       (* Unique id of the containing function symbol *)
     offset : int;   (* Offset from the start of the function *)
   } [@@deriving compare, sexp, hash]
 
   type t = {
-    addr : int64;   (* Raw address in the original binary *)
-    rel : rel option;    (* Containing function info and relative offset *)
+    addr : int64;     (* Raw address in the original binary *)
+    rel : rel option; (* Containing function info and relative offset *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
 
@@ -53,8 +38,6 @@ module Loc = struct
     | None -> "0 [unknown] 0"
     | Some func -> sprintf "1 %s %x" func.name func.offset
 
-
-
 end
 
 module Aggregated_perf = struct
@@ -62,15 +45,17 @@ module Aggregated_perf = struct
     module P = struct
       type t = int64 * int64 [@@deriving compare, hash, sexp]
     end
+    module ST = int64 Hashtbl.M(Int64); (* Single address counter Table *)
+    module PT = int64 Hashtbl.M(P); (* Pair of addresses counter Table *)
     type t = {
-      instructions : int64 Hashtbl.M(Int64).t;
-      branches : int64 Hashtbl.M(P).t;
+      instructions : ST.t;
+      branches : PT.t;
       (* execution count: number of times the branch was taken. *)
-      mispredicts : int64 Hashtbl.M(P).t;
+      mispredicts : PT.t;
       (* number of times the branch was mispredicted:
          branch target mispredicted or
          branch direction was mispredicted. *)
-      traces : int64 Hashtbl.M(P).t;
+      traces : PT.t;
       (* execution count: number of times the trace was taken. *)
     } [@@deriving sexp]
 
@@ -104,12 +89,109 @@ module Aggregated_perf = struct
       Out_channel.close chan
 end
 
+module Execount = struct
+    type t = int64;
+    type branch  = {
+      taken : t;
+      mispredict : t;
+    }
+    type indirect = {
+      target : Loc.t;
+      taken : t;
+      mispredict : t;
+    }
+  end
+
 module Aggregated_decoded = struct
+  type func = {
+    id : int;       (* Unique identifier we assign to this function *)
+    name : string;  (* Name of thefunction symbol *)
+    start : int;    (* Raw start address of the function inthe original binary *)
+    cfg : Cfg.t option; (* Control flow graph *)
+  }
+
   type t =
-  { counts : Aggregated_perf.t;
+  { aggregated_perf : Aggregated_perf.t;
     addr2loc : Loc.t Hashtbl.M(Int64).t;
-    functions : Loc.func Hashtbl.M(String).t;
+    name2id : int Hashtbl.M(String).t; (* map func name to func id *)
+    functions : func Hashtbl.M(int).t; (* func id to func info mapping *)
   }  [@@deriving sexp]
+
+  let mk counts size =
+    { aggregated_perf;
+      addr2loc = Hashtbl.create ~size (module Int64);
+      name2func = Hashtbl.create (module String);
+      functions = Hashtbl.create (module Int);
+    } in
+
+  let get_func_id t ~name ~start =
+    match Hashtbl.find functions name with
+    | None ->
+      let id = Array.length functions in
+      let func = {id;name;start} in
+      Hashtbl.set t.name2func ~key:name ~data:id;
+      Hashtbl.set t.functions ~key:id ~data:func
+    | Some id ->
+      let func = Hashtbl.find_exn functions id in
+      assert (func.id = id);
+      assert (func.name = name);
+      assert (func.start = start);
+      func.id
+
+  let loc t addr = Hashtbl.find_exn t.addr2loc addr
+
+  let decode_loc t locations addr =
+    let open Loc in
+    match Elf_locations.resolve_function_containing locations
+            ~program_counter:addr with
+    | None ->
+      if !verbose then
+        printf "Cannot find function symbol containing 0x%Lx\n" addr;
+      { addr; func=None; dbg=None; }
+    | Some interval ->
+      let name = interval.v in
+      let start = interval.l in
+      let offset =
+        match Int64.(to_int (addr - start)) with
+        | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
+        | Some offset -> assert (offset >= 0); offset in
+      let id = get_func_id t name start in
+      let func = Some { id; offset; } in
+      let dbg =
+        match Ocaml_locations.(decode_line locations
+                                 ~program_counter:addr name Linearid) with
+        | None -> None
+        | Some (file,line) -> Some {Loc.file;line;} in
+      { addr; func; dbg; }
+
+  let decode_aggregated locations (t:Aggregated_perf.t) =
+    if !verbose then
+      printf "Decoding perf profile.\n";
+
+    (* Collect all addresses that need decoding. *)
+    let len = Hashtbl.length t.instructions +
+              Hashtbl.length t.branches in
+    let addresses = Caml.Hashtbl.create len in
+    let add key =
+      if not (Caml.Hashtbl.mem addresses key) then
+        Caml.Hashtbl.add addresses key ();
+    in
+    let add2 (f,t) = add f; add t in
+    Hashtbl.iter_keys t.instructions ~f:add;
+    Hashtbl.iter_keys t.branches ~f:add2;
+    (* Mispredicts and traces use the same addresses as branches, no need to add them *)
+    let size = Caml.Hashtbl.length addresses in
+    (* Resolve and cache all addresses we need in one pass over the binary. *)
+    Elf_locations.resolve_all locations addresses ~reset:true;
+    (* Decode all locations *)
+    let aggregated = Aggregated_decoded.mk t size
+                       (* Mapping addresses to locations *)
+                       Caml.Hashtbl.iter (fun key _ ->
+                         let data = decode_loc aggregated locations key in
+                         Hashtbl.set addr2loc ~key ~data)
+                       aggregated;
+      aggregated
+
 
   let read filename =
     if !verbose then
@@ -133,7 +215,6 @@ module Aggregated_decoded = struct
     Printf.fprintf chan !"%{sexp:t}\n" t;
     Out_channel.close chan
 
-  let loc t addr = Hashtbl.find_exn t.addr2loc addr
 end
 
 type t = Aggregated_decoded.t
@@ -369,57 +450,7 @@ module Perf = struct
 
 end
 
-let decode_loc functions locations addr =
-  let open Loc in
-  match Elf_locations.resolve_function_containing locations
-          ~program_counter:addr with
-  | None ->
-    if !verbose then
-      printf "Cannot find function symbol containing 0x%Lx\n" addr;
-    { addr; func=None; dbg=None; }
-  | Some interval ->
-    let name = interval.v in
-    let start = interval.l in
-    let offset =
-      match Int64.(to_int (addr - start)) with
-      | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
-      | Some offset -> assert (offset >= 0); offset in
-    let id = Loc.get_func_id functions name start in
-    let func = Some { id; offset; } in
-    let dbg =
-      match Ocaml_locations.(decode_line locations
-                               ~program_counter:addr name Linearid) with
-      | None -> None
-      | Some (file,line) -> Some {Loc.file;line;} in
-    { addr; func; dbg; }
 
-let decode_aggregated locations (t:Aggregated_perf.t) =
-  if !verbose then
-    printf "Decoding perf profile.\n";
-
-  (* Collect all addresses that need decoding. *)
-  let len = Hashtbl.length t.instructions +
-            Hashtbl.length t.branches in
-  let addresses = Caml.Hashtbl.create len in
-  let add key =
-    if not (Caml.Hashtbl.mem addresses key) then
-      Caml.Hashtbl.add addresses key ();
-  in
-  let add2 (f,t) = add f; add t in
-  Hashtbl.iter_keys t.instructions ~f:add;
-  Hashtbl.iter_keys t.branches ~f:add2;
-  (* Mispredicts and traces use the same addresses as branches, no need to add them *)
-  let size = Caml.Hashtbl.length addresses in
-  (* Resolve and cache all addresses we need in one pass over the binary. *)
-  Elf_locations.resolve_all locations addresses ~reset:true;
-  (* Decode all locations *)
-  let addr2loc = Hashtbl.create ~size (module Int64) in
-  (* Mapping addresses to locations *)
-  Caml.Hashtbl.iter (fun key _ ->
-    let data = decode_loc functions locations key in
-    Hashtbl.set addr2loc ~key ~data)
-    addresses;
-  {Aggregated_decoded.counts=t;addr2loc;functions;}
 
 let _aggregate_perf (t:Perf.t) =
   if !verbose then
