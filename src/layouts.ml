@@ -106,14 +106,13 @@ end = struct
     match filename with
       | None -> (fun _ _ -> ())
       | Some filename ->
-        (* CR gyorsh: fix this ugly hack to create an empty file
-           and then append to it, if the file exists. *)
-        Out_channel.close_no_err (Out_channel.create filename);
+        (* CR gyorsh: hack to erase pervious contents:
+           open and immediate close the file. *)
+        Out_channel.close (Out_channel.create filename);
         (fun func labels ->
-           let t = {func;labels;} in
-           Out_channel.with_file filename ~f:(print_t ~t)
-             ~binary:false
-             ~append:true)
+           let chan = Out_channel.create filename ~append:true in
+           print_t chan {func;labels;};
+           Out_channel.close chan)
 
 end
 
@@ -215,3 +214,38 @@ let decode_layout_all locations permutation writer  =
         end
   in
   decode_func_layout permutation (String.Map.empty)
+
+
+module Func_layout = struct
+  type t = string list
+
+  let write t filename =
+    if !verbose then
+      printf "Writing function layout to %s\n" filename;
+    let chan = Out_channel.create filename in
+    List.iter t ~f:(fun name ->
+      fprintf chan "%s\n" filename);
+    Out_channel.close chan
+
+  let write_linker_script t filename =
+    if !verbose then
+      printf "Writing linker script hot to %s\n" filename;
+    let chan = Out_channel.create filename in
+    List.iter t ~f:(fun name ->
+      fprintf chan "*(.text.%s)\n" filename);
+    Out_channel.close chan
+
+  let read filename =
+    if !verbose then
+      printf "Reading function layout from %s\n" filename;
+    let chan = In_channel.create filename in
+    let t = In_channel.fold_lines chan ~init:[]
+              ~f:(fun acc name -> name::acc) in
+    let t = List.rev t in
+    if !verbose then begin
+      List.iter t ~f:(fun name -> printf "%s\n" name);
+      if t = [] then printf "Empty function layout!\n"
+      else printf "Layout size = %d" (List.length t)
+    end;
+    p
+end

@@ -1,5 +1,5 @@
-type reorder_basic_blocks =  None
-type reorder_functions = None | Exec_counts
+type reorder_basic_blocks =  None | Opt
+type reorder_functions = None | Exec_counts | Hot_clusters
 
 type t = {
   gen_linearid_profile : string;

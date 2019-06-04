@@ -53,6 +53,7 @@ type t = {
   (* Unset for validation, set for optimization. *)
 }
 
+let get_cfg t = t.cfg
 let get_layout t = t.layout
 let set_layout t new_layout =
   t.layout <- new_layout;

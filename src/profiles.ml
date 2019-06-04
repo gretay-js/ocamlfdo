@@ -89,56 +89,241 @@ module Aggregated_perf = struct
       Out_channel.close chan
 end
 
-module Execount = struct
-    type t = int64;
-    type branch  = {
-      taken : t;
-      mispredict : t;
-    }
-    type indirect = {
-      target : Loc.t;
-      taken : t;
-      mispredict : t;
-    }
-  end
+module Execount : Cfg.User_data = struct
+  type t = int64;
+  type branch  = {
+    taken : t;
+    mispredict : t;
+  }
+  type target = Loc.t
 
-module Aggregated_decoded = struct
-  type func = {
+  let add d1 d2 =
+    let d1 = Option.value d1 ~default:0L in
+    let d2 = Option.value d2 ~default:0L in
+    Some Int64.(d1 + d2)
+
+  module Func_data = struct type t = t end
+  module Block_data = struct type t = t end
+  module Instr_data = struct type t = t end
+  module Succ_data = struct type t = branch end
+  module Call_data = struct
+    type t =
+      | Direct of branch
+      | Indirect of (target * branch) list
+  end
+end
+
+module Func = struct
+  type t = {
     id : int;       (* Unique identifier we assign to this function *)
-    name : string;  (* Name of thefunction symbol *)
+    name : string;  (* Name of the function symbol *)
     start : int;    (* Raw start address of the function inthe original binary *)
-    cfg : Cfg.t option; (* Control flow graph *)
+    mutable cfg : Cfg.Make(module Execount).t option;
+    (* Control flow graph annotated with execution counters *)
+    (* CR gyorsh: this might grow too large, whole program cfgs
+       collected through the entire compilation. *)
+    mutable count : Execount.t;  (* Preliminary execution count *)
   }
 
-  type t =
-  { aggregated_perf : Aggregated_perf.t;
-    addr2loc : Loc.t Hashtbl.M(Int64).t;
+  (* descending order of execution counts (reverse order of compare) *)
+  (* Tie breaker using name.
+     Slower than id but more stable w.r.t. changes in perf data and ocamlfdo,
+     because ids are an artifact of the way ocamlfdo reads
+     and decodes locations.
+     Change to tie breaker using id if speed becomes a problem. *)
+  let compare f1 f2 =
+    let res = Int.compare f2.count f1.count in
+    if res = 0 then String.compare f1.name f2.name
+    else res)
+
+end
+
+module Aggregated_decoded = struct
+  open Func
+  type t = {
+    aggregated_perf : Aggregated_perf.t;
+    addr2loc : Loc.t Hashtbl.M(Int64).t; (* map raw addresses to locations *)
     name2id : int Hashtbl.M(String).t; (* map func name to func id *)
-    functions : func Hashtbl.M(int).t; (* func id to func info mapping *)
+    functions : Func.t Hashtbl.M(int).t; (* map func id to func info *)
   }  [@@deriving sexp]
 
-  let mk counts size =
-    { aggregated_perf;
+  let mk a size =
+    { aggregated_perf=a;
       addr2loc = Hashtbl.create ~size (module Int64);
-      name2func = Hashtbl.create (module String);
+      name2id = Hashtbl.create (module String);
       functions = Hashtbl.create (module Int);
     } in
 
-  let get_func_id t ~name ~start =
-    match Hashtbl.find functions name with
+  (* Find all locs that mention this function.
+     Translate linear ids of these locations to cfg labels.
+     Get the corresponding basic blocks and update their execounts. *)
+  (* CR gyorsh: this might be too slow, because for each function it needs
+     to go over all code addresses in the original binary, in the worst case.
+     Alternatively, we can collect per function all locations that mention
+     it when we are constructing addr2loc and functions.
+     However, for branches and traces tables, where key is a pair of
+     addresses, we need to search for pairs where possibly only the second
+     element (destination) is in the current function.
+     This will be as slow as unless we change the representation of
+     branches and traces or store reverse keys in rev_branches.
+     Alternatively, store all locations and pairs of locations
+     where the function is mentioned.
+  *)
+
+  let compute_execounts t func cfg_builder =
+    let cfg = Cfg_builder.get_cfg cfg_builder in
+    let a = t.aggregated_perf in
+    let get_block loc =
+      assert (loc.rel.id = func.id);
+      match Cfg_builder.id_to_label cfg_builder loc.line with
+      | None ->
+        if verbose then
+          printf "Execution count for linearid %d ignored, \
+                  can't map to cfg node\n" loc.line;
+      | Some label ->
+        Hashtbl.find cfg.blocks label
+    in
+    List.iter func.locs ~f:(fun loc ->
+      let block = get_block
+    )
+    Hashtbl.iteri a.instructions ~f:(fun ~key ~data ->
+      let loc = Hashtbl.find_exn t.addr2loc key in
+      if loc.rel.id = func.id then
+        match Cfg_builder.id_to_label cfg_builder loc.line with
+        | None ->
+          if verbose then
+            printf "Execution count for linearid %d ignored, \
+                    can't map to cfg node\n" loc.line;
+          ()
+        | Some label ->
+          let block = Hashtbl.find cfg.blocks label in
+          block.data <- Execount.add block.data data
+    );
+    Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
+      let (f,t) = key in
+      let loc = Hashtbl.find_exn t.addr2loc key in
+      if loc.rel.id = func.id then
+        match Cfg_builder.id_to_label cfg_builder loc.line with
+        | None ->
+          if verbose then
+            printf "Execution count for linearid %d ignored, \
+                    can't map to cfg node\n" loc.line;
+          ()
+        | Some label ->
+          let block = Hashtbl.find cfg.blocks label in
+          block.data <- Execount.add block.data data
+    );
+    let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
+    cfg.data <- Execount.add cfg.data cfg.entry_block.data;
+
+
+  (* let compute_execounts t func cfg_builder =
+   *   let cfg = Cfg_builder.get_cfg cfg_builder in
+   *   let a = t.aggregated_perf in
+   *   let get_block addr =
+   *     let loc = Hashtbl.find_exn t.addr2loc addr in
+   *     if loc.rel.id = func.id then
+   *       match Cfg_builder.id_to_label cfg_builder loc.line with
+   *       | None ->
+   *         if verbose then
+   *           printf "Execution count for linearid %d ignored, \
+   *                   can't map to cfg node\n" loc.line;
+   *         ()
+   *       | Some label ->
+   *         let block = Hashtbl.find cfg.blocks label in
+   *   in
+   *   Hashtbl.iteri a.instructions ~f:(fun ~key ~data ->
+   *     let loc = Hashtbl.find_exn t.addr2loc key in
+   *     if loc.rel.id = func.id then
+   *       match Cfg_builder.id_to_label cfg_builder loc.line with
+   *       | None ->
+   *         if verbose then
+   *           printf "Execution count for linearid %d ignored, \
+   *                   can't map to cfg node\n" loc.line;
+   *         ()
+   *       | Some label ->
+   *         let block = Hashtbl.find cfg.blocks label in
+   *         block.data <- Execount.add block.data data
+   *   );
+   *   Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
+   *     let (f,t) = key in
+   *     let loc = Hashtbl.find_exn t.addr2loc key in
+   *     if loc.rel.id = func.id then
+   *       match Cfg_builder.id_to_label cfg_builder loc.line with
+   *       | None ->
+   *         if verbose then
+   *           printf "Execution count for linearid %d ignored, \
+   *                   can't map to cfg node\n" loc.line;
+   *         ()
+   *       | Some label ->
+   *         let block = Hashtbl.find cfg.blocks label in
+   *         block.data <- Execount.add block.data data
+   *   );
+   *   let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
+   *   cfg.data <- Execount.add cfg.data cfg.entry_block.data; *)
+
+  (* Compute execution counts from CFG *)
+  let compute_cfg_execounts t name cfg_builder =
+    let id = Hashtbl.find_exn t.name2id name in
+    match Hashtbl.find t.functions id with
     | None ->
-      let id = Array.length functions in
-      let func = {id;name;start} in
-      Hashtbl.set t.name2func ~key:name ~data:id;
-      Hashtbl.set t.functions ~key:id ~data:func
+      if verbose then
+        printf "Not found profile for %s with cfg.\n" name;
     | Some id ->
-      let func = Hashtbl.find_exn functions id in
+      let func = Hashtbl.find_exn t.functions id in
+      if func.count > 0 then
+        compute_execounts t func cfg_builder
+
+
+  (* Execution count of a function is determined from the execution counts
+     of samples contained in this function. It uses LBR info:
+     if a branch source or target is contained in the function,
+     it contributes to execution count of the function.
+     Does not use the CFG.
+     In particular, it does not count instructions that can be traced using LBR.
+     The advantage is that we can compute it for non-OCaml functions. *)
+  let compute_func_execounts t =
+    let a = t.aggregated_perf in
+    let len = Hashtbl.length t.functions in
+    let func_execount = Array.create ~len 0L in
+    let add addr count =
+      let loc = Hashtbl.find_exn t.addr2loc addr in
+      let id = loc.rel.id in
+      func_execount.(id) <- Int64.(func_execount.(id) + 1L) in
+    (* Iterate over instruction and brances, but not traces. *)
+    Hash.iteri a.instructions
+      ~f:(fun ~key ~data -> add key add);
+    Hash.iteri a.branches
+      ~f:(fun ~key ~data -> let (f,t) = key in add f data; add t data);
+    if verbose then
+      Array.iteri t.func_execount
+        ~f(fun i c ->
+          let func = Hashtbl.find_exn functions i in
+          printf "(%d) %s at 0x%Lx: %L" func.id func.name func.start c);
+    Hashtbl.iter t.functions
+      ~f:(fun func ->
+        func.count <- func_execount.(func.id))
+
+  (* Find or add the function and return its id *)
+  let get_func_id t ~name ~start =
+    match Hashtbl.find t.name2id name with
+    | None ->
+      let id = Hashtbl.length functions in
+      let func = { Func.
+        id;
+        name;
+        start;
+        cfg=None;
+        counts=0L;
+      } in
+      Hashtbl.add_exn t.functions ~key:id ~data:func
+      Hashtbl.add_exn t.name2id ~key:name ~data:id;
+    | Some id ->
+      let func = Hashtbl.find_exn t.functions id in
       assert (func.id = id);
       assert (func.name = name);
       assert (func.start = start);
       func.id
-
-  let loc t addr = Hashtbl.find_exn t.addr2loc addr
 
   let decode_loc t locations addr =
     let open Loc in
@@ -164,13 +349,16 @@ module Aggregated_decoded = struct
         | Some (file,line) -> Some {Loc.file;line;} in
       { addr; func; dbg; }
 
-  let decode_aggregated locations (t:Aggregated_perf.t) =
+  let decode_aggregated locations aggregated_perf =
     if !verbose then
       printf "Decoding perf profile.\n";
 
     (* Collect all addresses that need decoding. *)
-    let len = Hashtbl.length t.instructions +
-              Hashtbl.length t.branches in
+    (* Mispredicts and traces use the same addresses as branches,
+       so no need to add them *)
+    let len = Hashtbl.length aggregated_perf.instructions +
+              Hashtbl.length aggregated_perf.branches in
+    (* Elf_locations does not use Core, so we need to create Caml.Hashtbl *)
     let addresses = Caml.Hashtbl.create len in
     let add key =
       if not (Caml.Hashtbl.mem addresses key) then
@@ -179,19 +367,20 @@ module Aggregated_decoded = struct
     let add2 (f,t) = add f; add t in
     Hashtbl.iter_keys t.instructions ~f:add;
     Hashtbl.iter_keys t.branches ~f:add2;
-    (* Mispredicts and traces use the same addresses as branches, no need to add them *)
+    (* A key may appear in both t.instruction and t.branches *)
+    assert (size <= len);
     let size = Caml.Hashtbl.length addresses in
     (* Resolve and cache all addresses we need in one pass over the binary. *)
     Elf_locations.resolve_all locations addresses ~reset:true;
-    (* Decode all locations *)
-    let aggregated = Aggregated_decoded.mk t size
-                       (* Mapping addresses to locations *)
-                       Caml.Hashtbl.iter (fun key _ ->
-                         let data = decode_loc aggregated locations key in
-                         Hashtbl.set addr2loc ~key ~data)
-                       aggregated;
-      aggregated
-
+    (* Decode all locations: map addresses to locations *)
+    let t = mk aggregated_perf size in
+    Caml.Hashtbl.iter
+      (fun addr _ ->
+         let loc = decode_loc t locations addr in
+         Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc)
+      addresses;
+    compute_func_execounts t;
+    t
 
   let read filename =
     if !verbose then
@@ -222,11 +411,12 @@ type t = Aggregated_decoded.t
 let write_top_functions t filename =
   if !verbose then
     printf "Writing top functions to %s\n" filename;
-  let chan = Out_channel.create filename in
-  let locs = Hashtbl.data t.addr2loc in
-  List.fold t.addr2loc ~init:String.Map.empty
-    ~f:(fun loc ...
-  Out_channel.close chan
+  let open Aggregated_decoded in
+  (* Sort functions using preliminary function-level execution counts
+     in descending order. *)
+  let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
+  let fl = List.map sorted ~f:(fun func -> Func.func.id) in
+  Func_layout.write_linker_script fl filename
 
 let write_bolt t filename =
   let open Loc in
@@ -252,6 +442,9 @@ let write_bolt t filename =
           data in
   Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
   Out_channel.close chan
+
+let compute_execounts t name cfg =
+  Aggregated_decoded.compute_execounts t name cfg
 
 module Perf = struct
   (* Perf profile format as output of perf script -F pid,ip,brstack *)
@@ -450,38 +643,3 @@ module Perf = struct
 
 end
 
-
-
-let _aggregate_perf (t:Perf.t) =
-  if !verbose then
-    printf "Aggregate perf profile.\n";
-  let inc table key =
-    Hashtbl.update table key
-      ~f:(fun v -> Int64.(1L + Option.value ~default:0L v)) in
-  let aggregated = Aggregated_perf.empty in
-  (* CR gyorsh: aggregate during parsing of perf profile *)
-  let aggregate (sample:Perf.sample) =
-    inc aggregated.instructions sample.ip;
-    List.iter sample.brstack
-      ~f:(fun br ->
-        let key = (br.from_addr,br.to_addr) in
-        inc aggregated.branches key;
-        if Perf.mispredicted br.mispredict then
-          inc aggregated.mispredicts key;
-      );
-    (* Instructions executed between branches can be inferred from brstack *)
-    ignore (List.fold sample.brstack ~init:None
-      ~f:(fun prev cur ->
-        match prev with
-        | None -> Some cur
-        | Some prev ->
-          assert (prev.index = (cur.index + 1));
-          let from_addr = prev.to_addr in
-          let to_addr = cur.from_addr in
-          let key = (from_addr,to_addr) in
-          inc aggregated.traces key;
-          Some cur
-         ): Perf.br option)
-  in
-  List.iter t ~f:aggregate;
-  aggregated

@@ -26,8 +26,8 @@ type layout = (int list) String.Map.t
 type reorder_algo =
   | Identity
   | Random of Random.State.t
-  | Linear_id of layout
-  | Cfg_label of layout
+  | Linear of layout
+  | Cfg of layout
   | Profile of Profiles.t * Options.t
 
 let validate cfg new_cfg_layout  =
@@ -145,14 +145,21 @@ let reorder_rel_layout cfg ~layout =
       Cfg_builder.set_layout cfg new_cfg_layout;
     end
 
+let reorder_profile cfg linearid_profile options =
+  let name = Cfg_builder.get_name cfg in
+  let func = Profiles.compute_cfg_execounts linearid_profile fun_name cfg in
+  match options.reorder_basic_blocks with
+  | None -> cfg
+  | Opt -> failwith "not implemented"
+
 let reorder ~algo cfg =
   match algo with
   | Identity -> cfg
   | Random random_state -> reorder_random cfg ~random_state
-  | Cfg_label layout -> reorder_rel_layout cfg ~layout
-  | Linear_id layout -> reorder_layout cfg ~layout
-  | Profile _ -> failwith "Not implemented: profile-based reorder algorithm"
-
+  | Cfg layout -> reorder_rel_layout cfg ~layout
+  | Linear layout -> reorder_layout cfg ~layout
+  | Profile (linearid_profile,options)
+    -> reorder_profile cfg linearid_profile options
 
 let finish_profile linearid_profile options =
   let open Options in
@@ -170,6 +177,7 @@ let finish_profile linearid_profile options =
                               Cannot output linker script.\n"
     | Exec_count ->
       Profiles.write_top_functions linearid_profile linker_script_hot
+    | Hot_clusters -> failwith "Not implemented"
   end;
   ()
 

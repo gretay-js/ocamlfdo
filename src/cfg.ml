@@ -56,6 +56,9 @@ type operation =
   | Name_for_debugger of { ident : Ident.t; which_parameter : int option;
                            provenance : unit option; is_assignment : bool; }
 
+type call_operation =
+  | P of prim_call_operation
+  | F of func_call_operation
 
 module type User_data = sig
   module Func_data : sig type t end
@@ -63,76 +66,84 @@ module type User_data = sig
   module Instr_data : sig type t end
   module Call_data : sig type t end
   module Succ_data : sig type t end
+  module Jumptable_data : sig type t end
 end
 
 module Make(U : User_data) = struct
-type condition =
-  | Always
-  | Test of Mach.test
+  type condition =
+    | Always
+    | Test of Mach.test
 
-type successor = condition * label
+  type successor = {
+    cond : condition;
+    label : label;
+    mutable data : U.Succ_data option;
+  }
 
-type call_operation =
-  | P of prim_call_operation
-  | F of func_call_operation
+  (* CR gyorsh: Switch has successors but currently no way to
+     attach User_data to them. Can be fixed by translating Switch to Branch. *)
 
-(* basic block *)
-type block = {
-  start : label;
-  mutable body : basic instruction list;
-  mutable terminator : terminator instruction;
-  mutable predecessors : LabelSet.t;
-  data : U.Block_data.t option;
-}
+  (* basic block *)
+  type block = {
+    start : label;
+    mutable body : basic instruction list;
+    mutable terminator : terminator instruction;
+    mutable predecessors : LabelSet.t;
+    mutable data : U.Block_data.t option;
+  }
 
-and 'a instruction = {
-  desc : 'a;
-  arg : Reg.t array;
-  res : Reg.t array;
-  dbg : Debuginfo.t;
-  live : Reg.Set.t;
-  trap_depth : int;
-  id : int;
-  data : U.Instr_data.t option;
-}
+  and 'a instruction = {
+    desc : 'a;
+    arg : Reg.t array;
+    res : Reg.t array;
+    dbg : Debuginfo.t;
+    live : Reg.Set.t;
+    trap_depth : int;
+    id : int;
+    mutable data : U.Instr_data.t option;
+  }
 
-and basic =
-  | Op of operation
-  | Call of call_operation
-  | Reloadretaddr
-  | Entertrap
-  | Pushtrap of { lbl_handler : label }
-  | Poptrap
+  and basic =
+    | Op of operation
+    | Call of call_operation call
+    | Reloadretaddr
+    | Entertrap
+    | Pushtrap of { lbl_handler : label }
+    | Poptrap
 
-and terminator =
-  | Branch of successor list
-  | Switch of label array
-  | Return
-  | Raise of Cmm.raise_kind
-  | Tailcall of func_call_operation
+  and terminator =
+    | Branch of successor list
+    | Return
+    | Raise of Cmm.raise_kind
+    | Tailcall of func_call_operation call
 
-(* Control Flow Graph of a function. *)
-type t = {
-  blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
-  fun_name : string;             (* Function name, used for printing messages *)
-  entry_label : label;           (* Must be first in all layouts of this cfg. *)
-  data : U.Func_data.t option;
-}
+  and 'c call = {
+    c : 'c;
+    mutable data: U.Call_data.t option;
+  }
+
+  (* Control Flow Graph of a function. *)
+  type t = {
+    blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
+    fun_name : string;             (* Function name, used for printing messages *)
+    entry_label : label;           (* Must be first in all layouts of this cfg. *)
+    mutable data : U.Func_data.t option;
+  }
 
 
-let successors block =
-  match block.terminator.desc with
-  | Branch successors -> successors
-  | Return -> []
-  | Raise _ -> []
-  | Tailcall _ -> []
-  | Switch labels ->
-    Array.mapi (fun i label ->
-      (Test(Iinttest_imm(Iunsigned Ceq, i)), label))
-      labels
-    |> Array.to_list
+  let successors block =
+    match block.terminator.desc with
+    | Branch successors -> successors
+    | Return -> []
+    | Raise _ -> []
+    | Tailcall _ -> []
+    | Switch labels ->
+      Array.mapi (fun i label ->
+        (Test(Iinttest_imm(Iunsigned Ceq, i)), label))
+        labels
+      |> Array.to_list
 
-let successor_labels block =
-  let (_, labels) = List.split (successors block) in
-  labels
+  let successor_labels block =
+    let (_, labels) = List.split (successors block) in
+    labels
 end

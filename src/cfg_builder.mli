@@ -23,6 +23,7 @@ end
 val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
 val to_linear : t -> Linearize.instruction
 
+val get_cfg : t -> Cfg.t
 val get_layout : t -> Layout.t
 val set_layout : t -> Layout.t -> t
 

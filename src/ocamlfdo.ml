@@ -50,13 +50,13 @@ let setup_reorder ~binary_filename
         | Some rel_layout_filename ->
           let layout =
             convert_layout (Rel_layout.read rel_layout_filename) in
-          Reorder.Cfg_label layout
+          Reorder.Cfg layout
         | None ->
           match linearid_layout_filename with
           | Some linearid_layout_filename ->
             let layout =
               convert_layout (Rel_layout.read linearid_layout_filename) in
-            Reorder.Linear_id layout
+            Reorder.Linear layout
           | None -> Reorder.Identity
       end
     | Some binary_filename -> begin
@@ -66,7 +66,7 @@ let setup_reorder ~binary_filename
           let raw_layout = Raw_layout.read raw_layout_filename in
           let writer = Rel_layout.writer gen_linearid_layout in
           let layout = decode_layout_all locations raw_layout writer in
-          Reorder.Linear_id layout
+          Reorder.Linear layout
         | None -> begin
             match perf_profile_filename with
             | None ->

@@ -21,8 +21,8 @@ type layout = (int list) String.Map.t
 type reorder_algo =
   | Identity
   | Random of Random.State.t
-  | Linear_id of layout
-  | Cfg_label of layout
+  | Linear of layout
+  | Cfg of layout
   | Profile of Profiles.t * Options.t
 
 val reorder
