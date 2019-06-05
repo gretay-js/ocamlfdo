@@ -64,9 +64,6 @@ module type User_data = sig
   module Func_data : sig type t end
   module Block_data : sig type t end
   module Instr_data : sig type t end
-  module Call_data : sig type t end
-  module Succ_data : sig type t end
-  module Jumptable_data : sig type t end
 end
 
 module Make(U : User_data) = struct
@@ -74,11 +71,7 @@ module Make(U : User_data) = struct
     | Always
     | Test of Mach.test
 
-  type successor = {
-    cond : condition;
-    label : label;
-    mutable data : U.Succ_data option;
-  }
+  type successor = condition * label
 
   (* CR gyorsh: Switch has successors but currently no way to
      attach User_data to them. Can be fixed by translating Switch to Branch. *)
@@ -105,7 +98,7 @@ module Make(U : User_data) = struct
 
   and basic =
     | Op of operation
-    | Call of call_operation call
+    | Call of call_operation
     | Reloadretaddr
     | Entertrap
     | Pushtrap of { lbl_handler : label }
@@ -113,14 +106,10 @@ module Make(U : User_data) = struct
 
   and terminator =
     | Branch of successor list
+    | Switch of label array
     | Return
     | Raise of Cmm.raise_kind
-    | Tailcall of func_call_operation call
-
-  and 'c call = {
-    c : 'c;
-    mutable data: U.Call_data.t option;
-  }
+    | Tailcall of func_call_operation
 
   (* Control Flow Graph of a function. *)
   type t = {

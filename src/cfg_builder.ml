@@ -53,7 +53,9 @@ type t = {
   (* Unset for validation, set for optimization. *)
 }
 
-let get_cfg t = t.cfg
+let entry_label t = t.cfg.entry_label
+let get_block_exn t label =
+  Hashtbl.find t.cfg.blocks label
 let get_layout t = t.layout
 let set_layout t new_layout =
   t.layout <- new_layout;
@@ -122,7 +124,7 @@ let register_predecessors t =
       targets
   ) t.cfg.blocks
 
-let is_live_trap_handler t label =
+let is_trap_handler t label =
   Hashtbl.mem t.trap_labels label
 
 let register_split_labels t =
@@ -573,7 +575,7 @@ let need_label t block pred_block =
   if block.predecessors = LabelSet.singleton pred_block.start then begin
     (* This block has a single predecessor which appears in the layout
        immediately prior to this block. *)
-    if is_live_trap_handler t block.start then
+    if is_trap_handler t block.start then
       failwith (Printf.sprintf
                   "Fallthrough from %d to trap handler %d\n"
                   pred_block.start block.start);
@@ -659,7 +661,7 @@ let eliminate_dead_block t dead_blocks label =
   t.layout <- List.filter (fun l -> l <> label) t.layout;
   (* If the dead block contains Lpushtrap, its handler becomes dead.
      Find all occurrences of label as values of trap_labels
-     and remove them, because is_live_trap_handler depends on it. *)
+     and remove them, because is_trap_handler depends on it. *)
   Hashtbl.filter_map_inplace
     (fun _ lbl_pushtrap_block ->
        if label = lbl_pushtrap_block then None
@@ -687,7 +689,7 @@ let rec eliminate_dead_blocks t =
    *   failwith "Won't eliminate dead blocks when preserve_orig_labels is set."; *)
   let found = Hashtbl.fold (fun label block found ->
     if (LabelSet.is_empty block.predecessors) &&
-       (not (is_live_trap_handler t label)) &&
+       (not (is_trap_handler t label)) &&
        (t.cfg.entry_label <> label) then
       label::found
     else found)
@@ -828,7 +830,7 @@ let rec disconnect_fallthrough_blocks t =
     let successors_labels = successor_labels block in
     if (t.cfg.entry_label <> label) &&             (* not entry block *)
        List.length successors_labels = 1 &&       (* single successor *)
-       (not (is_live_trap_handler t label)) &&      (* not trap label *)
+       (not (is_trap_handler t label)) &&      (* not trap label *)
        List.length block.body = 0                       (* empty body *)
     then begin
       let target_label = List.hd successors_labels in
