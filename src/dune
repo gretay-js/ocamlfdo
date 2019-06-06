@@ -12,6 +12,7 @@
           intervals
           ocaml_locations
           options
+          clusters
           report)
  (libraries
         owee
