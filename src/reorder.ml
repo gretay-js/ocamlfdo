@@ -147,21 +147,27 @@ let reorder_rel_layout cfg ~layout =
 
 (* Basic block layout using clustering algorihtm. *)
 let reorder_opt func cfg =
-  (* Initialize each block in its own cluster:
-     cluster id is block label,
-     execution weight is blocks execution counts.
-  *)
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
   print_list "orig" orig_cfg_layout;
   let t = Clusters.init_layout orig_cfg_layout in
   let add block =
+    (* Initialize each block in its own cluster:
+       cluster id is block label,
+       execution weight is block's execution count.
+       Initialize edges*)
     Clusters.add_node t ~data:block.start ~weight:block.data;
-    List.iter block.terminator.data
-      ~f:(fun d ->
-        if d.intra then
-          Cluster.add_edge t ~src:block.start ~dst:d.label ~weight:taken)
+    match block.terminator.data with
+    | None -> ()
+    | Some data ->
+      List.iter data
+        ~f:(fun d ->
+          if d.intra then
+            Cluster.add_edge t
+              ~srcdata:block.start
+              ~dstdata:d.label
+              ~weight:d.taken)
   in
-  Hashtbl.iter func.cfg.blocks ~f:add in
+  Hashtbl.iter func.cfg.blocks ~f:add;
   let new_cfg_layout = Clusters.optimize_layout t in
   print_list "new" new_cfg_layout;
   validate cfg new_cfg_layout;
@@ -169,7 +175,7 @@ let reorder_opt func cfg =
 
 let reorder_profile cfg linearid_profile options =
   let name = Cfg_builder.get_name cfg in
-  let func = Profiles.compute_cfg_execounts lin earid_profile fun_name cfg in
+  let func = Profiles.compute_cfg_execounts linearid_profile fun_name cfg in
   match options.reorder_basic_blocks with
   | None -> cfg
   | Opt -> match func with

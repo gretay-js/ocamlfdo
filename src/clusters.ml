@@ -53,8 +53,8 @@ let entry_pos = 0
 (* Invariant: position of the cluster is the smallest position
    of any item it represents. This is a heuristic, see [Note1] *)
 type 'd cluster = {
-  id : clusterid; (* unique id of the cluster *)
-  pos : int (* the smallest, index in the original layout *)
+  id : clusterid;  (* unique id of the cluster *)
+  pos : int;       (* the smallest, index in the original layout *)
   weight : weight; (* weight *)
   items : 'd list; (* data items represented by this cluster. *)
   mutable can_be_merged : bool;
@@ -67,7 +67,7 @@ type edge = {
 }
 
 (* Directed graph whose nodes are clusters. *)
-type t = {
+type 'd t = {
   next_id : clusterid; (* used to create unique cluster ids *)
   clusters : 'd cluster list;
   edges : edge list;
@@ -82,21 +82,15 @@ let init_layout original_layout =
     original_layout;
   }
 
-(* Invariant: next id is bigger than any cluster id in t *)
-let get_fresh_id t =
-  let id = t.next_id in
-  t.next_id <- id + 1;
-  id
-
 (* Makes a singleton cluster, and adds it to the list,
    but does not preserve the order of the list.
    This function is intended only for construction of initial clusters. *)
 let add_node t ~data ~weight =
-  assert (weight >= 0);
+  assert (weight >= 0L);
   let id = t.next_id in
   let next_id = id+1 in
   (* Find the position of this item the original layout *)
-  let r = List.findi orig_cfg_layout ~f:(fun i l -> l = block.start) in
+  let r = List.findi t.original_layout ~f:(fun i l -> l = data) in
   let (pos,_) = Option.value_exn r in
   (* Cluster that contains the entry position of
      the original layout cannot be merged *after* another cluster. *)
@@ -108,9 +102,17 @@ let add_node t ~data ~weight =
             can_be_merged; } in
   { t with clusters=c::t.clusters; next_id; }
 
-let add_edge t ~src ~dst ~weight =
-  assert (weight >= 0);
-  { with edges={ src; dst; weight; }::t.edges }
+let find t data =
+  List.find t.clusters
+    ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
+
+let add_edge t ~srcdata ~dstdata ~weight =
+  assert (weight >= 0L);
+  (* clusters must already exist containing the src and dst nodes. *)
+  let s = Option.value_exn (find t srcdata) in
+  let d = Option.value_exn (find t dstdata) in
+  let e = { src=s.id; dst=d.id; weight; } in
+  { t with edges=e::t.edges }
 
 (* Compare clusters using their weight, in descending order.
    Tie breaker using their position in the orginal layout,
@@ -139,6 +141,7 @@ let cluster_compare_pos c1 c2 =
       compare c1.id c2.id
     end else res
   end else res
+
 let get_cluster t id =
   List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
@@ -147,8 +150,8 @@ let get_cluster t id =
 let edge_compare t e1 e2 =
   let res = compare e2.weight e1.weight in
   if res = 0 then begin
-    let res = compare (t.get_cluster e1.src) (t.get_cluster e2.src) in
-    if res = 0 then compare (t.get_cluster e1.dst) (t.cluster e2.dst)
+    let res = compare (get_cluster t e1.src) (get_cluster t e2.src) in
+    if res = 0 then compare (get_cluster t e1.dst) (get_cluster t e2.dst)
     else res
   end else res
 
@@ -156,11 +159,14 @@ let edge_compare t e1 e2 =
 let merge t c1 c2 =
   let id = t.next_id in
   let next_id = id + 1 in
+  (* The new pos is the minimal pos of the two clusters we merged. *)
+  let pos = min c1.pos c2.pos in
+  let can_be_merged = not (pos = entry_pos) in
   let c = {
     id;
-    pos = min c1.pos c2.pos;
-    (* The new pos is the minimal pos of the two clusters we merged. *)
-    weight=c1.weight + c2.weight;
+    pos;
+    can_be_merged;
+    weight = Int64.(c1.weight + c2.weight);
     (* For layout, preserve the order of the input items lists. *)
     items = c1.items@c2.items;
   } in
@@ -175,15 +181,15 @@ let merge t c1 c2 =
         let s = edge.src in
         let d = edge.dst in
         let src =
-          if s = c1.id || s = c2.id then c
+          if s = c1.id || s = c2.id then c.id
           else s in
         let dst =
-          if d = c1.id || d = c2.id then c
+          if d = c1.id || d = c2.id then c.id
           else d in
-        if src.id != edge.src || dst.id != edge.dst then
-          `Fst {src;dst;weight=edge.weight}
-        else
+        if src = edge.src && dst = edge.dst then
           `Snd edge
+        else
+          `Fst {src;dst;weight=edge.weight}
       ) in
   (* Update the weights of the edges whose endpoints were updated. *)
   (* Preserve the invariant that the edges are unique pairs of (src,dst).
@@ -200,11 +206,14 @@ let merge t c1 c2 =
         else
           match acc with
           | e2::rest when e2.src = e1.src && e2.dst = e1.dst ->
-            let e = {e1.src;e1.dst;weight=e1.weight+e2.weight} in
+            let e = {src = e1.src;
+                     dst = e1.dst;
+                     weight=Int64.(e1.weight+e2.weight)
+                    } in
             e::rest
           | _ -> e1::acc
       ) in
-  let edges = updated::preserved in
+  let edges = updated@preserved in
   { t with edges;clusters;next_id; }
 
 let find_max_pred t c =
@@ -253,7 +262,7 @@ let optimize_layout t  =
        cluster cur and adds a non-negative weight of pred to it.
        If a cluster has no predecessors, it is moved to the end.
     *)
-    let clusters =  = List.sort t.clusters ~compare:cluster_compare_frozen in
+    let clusters = List.sort t.clusters ~compare:cluster_compare_frozen in
     let t = { t with clusters} in
     let rec loop t step =
       match clusters with
@@ -264,9 +273,10 @@ let optimize_layout t  =
             printf "Step %d: merging cluster %d\n" step cur.id;
           match find_max_pred t cur with
           | None ->
-            (* Cluster c is not reachable from within the function.
-               It may be a trap hanlder block reachable via raise from another
-               function. Move c to the end of the layout,
+            (* Cluster c is not reachable from within the function
+               using any of the edges that we have for clustering,
+               i.e., edges that have weights.
+               Move c to the end of the layout,
                after marking that it cannot be merged. *)
             if verbose then
               printf "No predecessor for %d\n" c.id;

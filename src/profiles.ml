@@ -42,55 +42,55 @@ end
 
 module Aggregated_perf = struct
 
-    module P = struct
-      type t = int64 * int64 [@@deriving compare, hash, sexp]
-    end
-    module ST = int64 Hashtbl.M(Int64); (* Single address counter Table *)
-    module PT = int64 Hashtbl.M(P); (* Pair of addresses counter Table *)
-    type t = {
-      instructions : ST.t;
-      branches : PT.t;
-      (* execution count: number of times the branch was taken. *)
-      mispredicts : PT.t;
-      (* number of times the branch was mispredicted:
-         branch target mispredicted or
-         branch direction was mispredicted. *)
-      traces : PT.t;
-      (* execution count: number of times the trace was taken. *)
-    } [@@deriving sexp]
+  module P = struct
+    (* Pair of addresses *)
+    type t = int64 * int64 [@@deriving compare, hash, sexp]
+  end
 
-    let empty =
-      { instructions = Hashtbl.create (module Int64);
-        branches = Hashtbl.create (module P);
-        mispredicts = Hashtbl.create (module P);
-        traces = Hashtbl.create (module P);
-      }
+  type t = {
+    instructions : int64 Hashtbl.M(Int64).t;
+    branches : int64 Hashtbl.M(P).t;
+    (* execution count: number of times the branch was taken. *)
+    mispredicts : int64 Hashtbl.M(P).t;
+    (* number of times the branch was mispredicted:
+       branch target mispredicted or
+       branch direction was mispredicted. *)
+    traces : PT.t;
+    (* execution count: number of times the trace was taken. *)
+  } [@@deriving sexp]
 
-    let read filename =
-      if !verbose then
-        printf "Reading aggregated perf profile from %s\n" filename;
-      let t =
-        match Parsexp_io.load (module Parsexp.Single) ~filename with
-        | Ok t_sexp -> t_of_sexp t_sexp
-        | Error error ->
-          Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-          failwith "Cannot parse aggregated profile file"
-      in
-      if !verbose then begin
-        Printf.printf !"Aggregated perf profile:\n%{sexp:t}\n" t;
-      end;
-      t
+  let empty =
+    { instructions = Hashtbl.create (module Int64);
+      branches = Hashtbl.create (module P);
+      mispredicts = Hashtbl.create (module P);
+      traces = Hashtbl.create (module P);
+    }
 
-    let write t filename =
-      if !verbose then
-        printf "Writing aggregated perf profile to %s\n" filename;
-      let chan = Out_channel.create filename in
-      Printf.fprintf chan !"%{sexp:t}\n" t;
-      Out_channel.close chan
+  let read filename =
+    if !verbose then
+      printf "Reading aggregated perf profile from %s\n" filename;
+    let t =
+      match Parsexp_io.load (module Parsexp.Single) ~filename with
+      | Ok t_sexp -> t_of_sexp t_sexp
+      | Error error ->
+        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
+        failwith "Cannot parse aggregated profile file"
+    in
+    if !verbose then begin
+      Printf.printf !"Aggregated perf profile:\n%{sexp:t}\n" t;
+    end;
+    t
+
+  let write t filename =
+    if !verbose then
+      printf "Writing aggregated perf profile to %s\n" filename;
+    let chan = Out_channel.create filename in
+    Printf.fprintf chan !"%{sexp:t}\n" t;
+    Out_channel.close chan
 end
 
 module Execount : Cfg.User_data = struct
-  type t = int64;
+  type t = int64
 
   let add d c =
     let d = Option.value d ~default:0L in
@@ -121,14 +121,14 @@ module Func = struct
   type t = {
     id : int;       (* Unique identifier we assign to this function *)
     name : string;  (* Name of the function symbol *)
-    start : int;    (* Raw start address of the function inthe original binary *)
-    mutable cfg : Cfg.Make(module Execount).t option;
+    start : int;    (* Raw start address of the function in original binary *)
+    mutable cfg : Cfg.Make(Execount).t option;
     (* Control flow graph annotated with execution counters *)
     (* CR gyorsh: this might grow too large, whole program cfgs
        collected through the entire compilation. *)
     mutable count : Execount.t;  (* Preliminary execution count *)
-    has_linearids : bool (* Does the function have any linearids? *)
-    agg : Aggregated_perf.t;  (* Counters that refer to this function *)
+    has_linearids : bool;        (* Does the function have any linearids? *)
+    agg : Aggregated_perf.t;     (* Counters that refer to this function *)
   }
 
   let mk id name start =
@@ -148,8 +148,7 @@ module Func = struct
   let compare f1 f2 =
     let res = Int.compare f2.count f1.count in
     if res = 0 then String.compare f1.name f2.name
-    else res)
-
+    else res
 end
 
 module Aggregated_decoded = struct
@@ -157,14 +156,14 @@ module Aggregated_decoded = struct
   type t = {
     addr2loc : Loc.t Hashtbl.M(Int64).t; (* map raw addresses to locations *)
     name2id : int Hashtbl.M(String).t; (* map func name to func id *)
-    functions : Func.t Hashtbl.M(int).t; (* map func id to func info *)
+    functions : Func.t Hashtbl.M(Int).t; (* map func id to func info *)
   }  [@@deriving sexp]
 
   let mk size =
     { addr2loc = Hashtbl.create ~size (module Int64);
       name2id = Hashtbl.create (module String);
       functions = Hashtbl.create (module Int);
-    } in
+    }
 
   let get_func t addr =
     let loc = Hashtbl.find_exn t.addr2loc addr in
@@ -183,141 +182,149 @@ module Aggregated_decoded = struct
   let get_loc t addr =
     Hashtbl.find_exn t.addr2loc addr
 
-  (* Translate linear ids of this function's locations to cfg labels
-     within this function, find the corresponding basic block
-     and update its counters. *)
-  let compute_execounts t func cfg =
-    let get_linearid addr =
-      let loc = get_loc addr in
+  (* Get linear id that corresponds to [addr] or exception *)
+  let get_linearid t addr =
+      let loc = get_loc t addr in
       let dbg = Option.value_exn loc.dbg in
-      dbg.line in
-    let get_basic_instr linearid block =
-      List.find block.body ~f:(fun instr -> instr.id = linearid) in
-    let get_block addr =
-      let loc = get_loc key in
-      match loc.rel with
-      | None -> assert false;
-      | Some rel when rel.id = func.id ->
-        begin
-          match loc.dbg with
+      dbg.line
+
+  (* Find basic instruction whose id=[linearid] in [block] *)
+  let get_basic_instr linearid block =
+    List.find block.body ~f:(fun instr -> instr.id = linearid)
+
+  (* Find the block in func that contains addr *)
+  let get_block addr func =
+    let loc = get_loc addr in
+    match loc.rel with
+    | None -> assert false;
+    | Some rel when rel.id = func.id ->
+      begin
+        match loc.dbg with
+        | None ->
+          if verbose then
+            printf "No linearid for 0x%Lx in func (%d) %s at offsets %d\n"
+              addr rel.id func.name rel.offset;
+          None
+        | Some dbg ->
+          match Cfg_builder.id_to_label cfg dbg.line with
           | None ->
-            if verbose then
-              printf "No linearid for 0x%Lx in func (%d) %s at offsets %d\n"
-                addr rel.id func.name rel.offset;
-            None
-          | Some dbg ->
-            match Cfg_builder.id_to_label cfg dbg.line with
-            | None ->
-              failwith "No cfg label for linearid %d"
-                dbg.line dbg.file ()
-            | Some label ->
-              match Cfg_builder.get_block_exn cfg label with
-              | block -> Some block
-              | exception Not_found ->
-                failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
-                  label dbg.line dbg.file ()
-        end
-      | Some rel ->
-        if verbose then
-          printf "Ignore address at 0x%Lx in func %d not in %d"
-            addr rel.id func.id;
-        None
-    in
-    let record_exit from_block =
-      (* Branch going outside of this function. Find the corresponding
-           instruction and update its counters. The instruction
-           is either a terminator or a call.*)
-        let linearid = get_linearid f in
-        let terminator = from_block.terminator in
-        let loc = get_loc to_addr in
-        let rel = Option.value_exn loc.rel in
-        if terminator.id = linearid then begin
-          terminator.data <-
-            Execount.Instr_data.add terminator.data loc count mispredict;
-          match terminator.desc with
-          | Branch _ | Switch _ | Tailcall _  ->
-            (* can't branch outside the current function *)
-            (* linearids must be missing. *)
-            assert (rel.id = func.id);
-            assert (Option.is_none func.dbg);
-          | Return ->
-            (* return target is known and outside this function *)
-            assert (not (loc.rel.id = func.id));
-          | Raise _ ->
-            (* catch outside this function or linearid is missing *)
-            assert ((not (loc.rel.id = func.id))
-                    || (Option.is_none loc.dbg));
-        end else begin
-          (* Call *)
-          let instr = get_basic_instr addr in
-          match instr.desc with
-          | Call cop ->
-            instr.data <-
-              Execount.Instr_data.add instr.data loc count mispredict
-          | _ -> assert false
-        end
-    in
-    let record_entry to_block =
-      (* Branch into this function from another function,
-         which may be unknown. One of the following situations:
-         Callee: branch target is the first instr in the entry block.
-         Return from call: branch target is a label after the call site.
-         Exception handler: branch target is a trap handler.
-      *)
-      to_block.data <- Execount.add to_block.data count;
-      let linearid = get_linearid t in
-      let first_instr = List.hd_exn to_block.body in
-      if first_instr.linearid = linearid then begin
-        let valid =
-          (* Callee *)
-          to_block.label = Cfg_builder.entry_label cfg ||
-          (* Exception handler *)
-          Cfg_builder.is_trap_handler t to_block.label in
-        if not valid then begin
-          (* Return from a call that terminates a previous block.
-             Make sure there is such a predecessor.
-             There could be more than one predecessor, and we have enough
-             information to find which one in some cases, but
-             it is not implemented because we don't have use it yet. *)
-          let loc = get_loc from_addr in
-          let rel = Option.value_exn loc.rel in
-          if (rel.id = func.id) then
-            (* return from a recursive call that's not a tailcall,
-               and call site's linearid is missing. *)
-            assert (is_non loc.dbg)
-          else begin
-            (* return from a call to another function. *)
-            let callsites =
-              LabelSet.fold ~init:[] to_block.predecessors
-                ~f:(fun acc pred_label ->
-                  let pred = Cfg_builder.get_block pred_label in
-                  List.find block.body ...
-                              ~f:(fun instr -> instr.id = linearid)... in
-            match get_basic_instr linearid pred with
-            | None -> acc
-            | Some instr -> acc
-            (* if call *)
-);
-end
-end
-end
-in
-    let record_intra from_block to_block count mispredicts =
+            failwith "No cfg label for linearid %d"
+              dbg.line dbg.file ()
+          | Some label ->
+            match Cfg_builder.get_block_exn cfg label with
+            | block -> Some block
+            | exception Not_found ->
+              failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
+                label dbg.line dbg.file ()
+      end
+    | Some rel ->
+      if verbose then
+        printf "Ignore address at 0x%Lx in func %d not in %d"
+          addr rel.id func.id;
+      None
+
+  let record_intra
+        from_address to_address
+        from_block to_block
+        count mispredicts =
       let from_linearid = get_linearid from_addr in
       let to_linearid = get_linearid from_addr in
-      if from_block.terminator.id  = from_linearid then
+      from_block.data <- Execount.add from_block.data count;
+      to_block.data <- Execount.add to_block.data count;
+      if from_block.terminator.id  = from_linearid then begin
         (* Find the corresponding successor *)
         match from_block.terminator with
-        | Return -> (* return from a recursive call *)
-
-        | Tailcall _ -> (* return from a recursive call *)
-          from_block.data <- Execount.add block.data data
-        | Raise _ ->
-      else
+        | Return  (* return from a recursive call *)
+        | Tailcall _  (* tailcall  *)
+        | Raise _ -> failwith "Not implemented"
+        | _ -> failwith "Not implemented"
+      end
+      else begin
         (* recursive call, find the instruction *)
-        find_call from_block
+        failwith "Not implemented" (* find_call from_block *)
+      end
 
-    let record_branch from_addr to_addr count mispredicts =
+  let record_exit t func from_block =
+    (* Branch going outside of this function. Find the corresponding
+       instruction and update its counters. The instruction
+       is either a terminator or a call.*)
+    let linearid = get_linearid f in
+    let terminator = from_block.terminator in
+    let loc = get_loc to_addr in
+    let rel = Option.value_exn loc.rel in
+    if terminator.id = linearid then begin
+      terminator.data <-
+        Execount.Instr_data.add terminator.data loc count mispredict;
+      match terminator.desc with
+      | Branch _ | Switch _ | Tailcall _  ->
+        (* can't branch outside the current function *)
+        (* linearids must be missing. *)
+        assert (rel.id = func.id);
+        assert (Option.is_none func.dbg);
+      | Return ->
+        (* return target is known and outside this function *)
+        assert (not (loc.rel.id = func.id));
+      | Raise _ ->
+        (* catch outside this function or linearid is missing *)
+        assert ((not (loc.rel.id = func.id))
+                || (Option.is_none loc.dbg));
+    end else begin
+      (* Call *)
+      let instr = get_basic_instr addr in
+      match instr.desc with
+      | Call cop ->
+        instr.data <-
+          Execount.Instr_data.add instr.data loc count mispredict
+      | _ -> assert false
+    end
+
+  let record_entry t func cfg to_block =
+    (* Branch into this function from another function,
+       which may be unknown. One of the following situations:
+       Callee: branch target is the first instr in the entry block.
+       Return from call: branch target is a label after the call site.
+       Exception handler: branch target is a trap handler.
+    *)
+    to_block.data <- Execount.add to_block.data count;
+    let linearid = get_linearid t in
+    let first_instr = List.hd_exn to_block.body in
+    if first_instr.linearid = linearid then begin
+      let valid =
+        (* Callee *)
+        to_block.label = Cfg_builder.entry_label cfg ||
+        (* Exception handler *)
+        Cfg_builder.is_trap_handler t to_block.label in
+      if not valid then begin
+        (* Return from a call that terminates a previous block.
+           Make sure there is such a predecessor.
+           There could be more than one predecessor, and we have enough
+           information to find which one in some cases, but
+           it is not implemented because we don't have use it yet. *)
+        let loc = get_loc from_addr in
+        let rel = Option.value_exn loc.rel in
+        if (rel.id = func.id) then
+          (* return from a recursive call that's not a tailcall,
+             and call site's linearid is missing. *)
+          assert (is_non loc.dbg)
+        else begin
+          (* return from a call to another function. *)
+          failwith "Not implemented"
+          (* let callsites =
+           *   LabelSet.fold ~init:[] to_block.predecessors
+           *     ~f:(fun acc pred_label ->
+           *       let pred = Cfg_builder.get_block pred_label in
+           *       List.find block.body ...
+           *                   ~f:(fun instr -> instr.id = linearid)... in
+           * match get_basic_instr linearid pred with
+           * | None -> acc
+           * | Some instr -> acc *)
+          (* if call *)
+          (* ); *)
+        end
+      end
+    end
+
+  let record_branch from_addr to_addr count mispredicts =
       match get_block from_addr, get_block to_addr with
       | None, None ->
         if verbose then
@@ -326,12 +333,16 @@ in
       | None, Some to_block -> record_entry to_block
       | Some from_block, None -> record_exit from_block
       | Some from_block, Some to_block -> record_intra from_block to_block
-        (* Find the corresponding successor *)
-        match block.terminator with
-        | Return | Tailcall _ -> (* return from a recursive call *)
-        from_block.data <- Execount.add block.data data
-    in
-    (* Associate execounts with basic blocks *)
+
+  let record_trace from_addr to_addr count =
+    failwith "Not implemented"
+
+  (* Translate linear ids of this function's locations to cfg labels
+     within this function, find the corresponding basic block
+     and update its data that stores execution counters.
+     Perform lots of sanity checks that to make sure the counts match cfg. *)
+  let compute_execounts t func cfg =
+    (* Associate instruction counts with basic blocks *)
     Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
       match get_block key with
       | None ->
@@ -340,17 +351,31 @@ in
       | Some block ->
         block.data <- Execount.add block.data data
     );
+    (* Associate fall-through trace counts with basic blocks *)
+    Hashtbl.iteri a.traces ~f:(fun ~key ~data ->
+      let (f,t) = key in
+      record_trace f t data
+    );
+    (* Associate branch counts with basic blocks *)
     Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
       let (f,t) = key in
       let mispredicts = Hashtbl.find_exn a.mispredicts key in
       record_branch f t data mispredicts
     );
     let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
-    cfg.data <- Execount.add cfg.data cfg.entry_block.data;
-    assert (func.counts = (Option.value_exn cfg.data));
+    (* CR gyorsh: propagate counts *)
+    if Option.is_none cfg.entry_block.data then begin
+      if verbose then "No execounts for entry block of %s\n" func.name;
+    end else begin
+      cfg.data <- Execount.add cfg.data cfg.entry_block.data;
+    end;
+    (* We may have less counts at cfg level if we can't map
+       some of the raw binary addresses to cfg because linearids
+       are missing (or cfg has changed?). *)
+    assert (func.counts >= (Option.value cfg.data ~default:0))
 
   (* Compute execution counts using CFG *)
-  let compute_cfg_execounts t name cfg_builder =
+  let compute_cfg_execounts t name cfg =
     let id = Hashtbl.find_exn t.name2id name in
     match Hashtbl.find t.functions id with
     | None ->
@@ -359,7 +384,7 @@ in
     | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       if func.count > 0 && func.has_linearids then
-        Some (compute_execounts t func cfg_builder)
+        Some (compute_execounts t func cfg)
       else
         None
 
@@ -549,8 +574,8 @@ let write_bolt t filename =
   Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
   Out_channel.close chan
 
-let compute_execounts t name cfg =
-  Aggregated_decoded.compute_execounts t name cfg
+let compute_cfg_execounts t name cfg =
+  Aggregated_decoded.compute_cfg_execounts t name cfg
 
 module Perf = struct
   (* Perf profile format as output of perf script -F pid,ip,brstack *)
