@@ -145,12 +145,37 @@ let reorder_rel_layout cfg ~layout =
       Cfg_builder.set_layout cfg new_cfg_layout;
     end
 
+(* Basic block layout using clustering algorihtm. *)
+let reorder_opt func cfg =
+  (* Initialize each block in its own cluster:
+     cluster id is block label,
+     execution weight is blocks execution counts.
+  *)
+  let orig_cfg_layout = Cfg_builder.get_layout cfg in
+  print_list "orig" orig_cfg_layout;
+  let t = Clusters.init_layout orig_cfg_layout in
+  let add block =
+    Clusters.add_node t ~data:block.start ~weight:block.data;
+    List.iter block.terminator.data
+      ~f:(fun d ->
+        if d.intra then
+          Cluster.add_edge t ~src:block.start ~dst:d.label ~weight:taken)
+  in
+  Hashtbl.iter func.cfg.blocks ~f:add in
+  let new_cfg_layout = Clusters.optimize_layout t in
+  print_list "new" new_cfg_layout;
+  validate cfg new_cfg_layout;
+  Cfg_builder.set_layout cfg new_cfg_layout
+
 let reorder_profile cfg linearid_profile options =
   let name = Cfg_builder.get_name cfg in
-  let func = Profiles.compute_cfg_execounts linearid_profile fun_name cfg in
+  let func = Profiles.compute_cfg_execounts lin earid_profile fun_name cfg in
   match options.reorder_basic_blocks with
   | None -> cfg
-  | Opt -> failwith "not implemented"
+  | Opt -> match func with
+    | None -> cfg
+    | Some func -> reorder_opt func cfg
+
 
 let reorder ~algo cfg =
   match algo with

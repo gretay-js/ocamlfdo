@@ -103,6 +103,8 @@ module Execount : Cfg.User_data = struct
   module Instr_data = struct
     type b = {
       target : Loc.t;
+      label : label option; (* cfg label that the target location translates to *)
+      intra : bool; (* is the target intraprocedural? *)
       taken : t;
       mispredict : t;
     }
@@ -221,59 +223,8 @@ module Aggregated_decoded = struct
             addr rel.id func.id;
         None
     in
-    let record_branch from_addr to_addr count mispredicts =
-      match get_block from_addr, get_block to_addr with
-      | None, None ->
-        if verbose then
-          "Ignore exec count %L at branch 0x%Lx,0x%Lx\n. Can't map to CFG.\n"
-            count from_addr to_addr
-      | None, Some to_block ->
-        (* Branch into this function from another function,
-           which may be unknown. One of the following situations:
-           Callee: branch target is the first instr in the entry block.
-           Return from call: branch target is a label after the call site.
-           Exception handler: branch target is a trap handler.
-        *)
-        to_block.data <- Execount.add to_block.data count;
-        let linearid = get_linearid t in
-        let first_instr = List.hd_exn to_block.body in
-        if first_instr.linearid = linearid then begin
-          let valid =
-            (* Callee *)
-            to_block.label = Cfg_builder.entry_label cfg ||
-            (* Exception handler *)
-            Cfg_builder.is_trap_handler t to_block.label in
-          if not valid then begin
-            (* Return from a call that terminates a previous block.
-               Make sure there is such a predecessor.
-               There could be more than one predecessor, and we have enough
-               information to find which one in some cases, but
-               it is not implemented because we don't have use it yet. *)
-            let loc = get_loc from_addr in
-            let rel = Option.value_exn loc.rel in
-            if (rel.id = func.id) then
-              (* return from a recursive call that's not a tailcall,
-                 and call site's linearid is missing. *)
-              assert (is_non loc.dbg)
-            else begin
-              (* return from a call to another function. *)
-              let callsites =
-                LabelSet.fold ~init:[] to_block.predecessors
-                  ~f:(fun acc pred_label ->
-                    let pred = Cfg_builder.get_block pred_label in
-                    List.find block.body ...
-                      ~f:(fun instr -> instr.id = linearid) in
-                    match get_basic_instr linearid pred with
-                    | None -> acc
-                    | Some instr ->
-                      if call
-                  );
-            end
-          end
-        end
-
-      | Some from_block, None ->
-        (* Branch going outside of this function. Find the corresponding
+    let record_exit from_block =
+      (* Branch going outside of this function. Find the corresponding
            instruction and update its counters. The instruction
            is either a terminator or a call.*)
         let linearid = get_linearid f in
@@ -305,8 +256,79 @@ module Aggregated_decoded = struct
               Execount.Instr_data.add instr.data loc count mispredict
           | _ -> assert false
         end
+    in
+    let record_entry to_block =
+      (* Branch into this function from another function,
+         which may be unknown. One of the following situations:
+         Callee: branch target is the first instr in the entry block.
+         Return from call: branch target is a label after the call site.
+         Exception handler: branch target is a trap handler.
+      *)
+      to_block.data <- Execount.add to_block.data count;
+      let linearid = get_linearid t in
+      let first_instr = List.hd_exn to_block.body in
+      if first_instr.linearid = linearid then begin
+        let valid =
+          (* Callee *)
+          to_block.label = Cfg_builder.entry_label cfg ||
+          (* Exception handler *)
+          Cfg_builder.is_trap_handler t to_block.label in
+        if not valid then begin
+          (* Return from a call that terminates a previous block.
+             Make sure there is such a predecessor.
+             There could be more than one predecessor, and we have enough
+             information to find which one in some cases, but
+             it is not implemented because we don't have use it yet. *)
+          let loc = get_loc from_addr in
+          let rel = Option.value_exn loc.rel in
+          if (rel.id = func.id) then
+            (* return from a recursive call that's not a tailcall,
+               and call site's linearid is missing. *)
+            assert (is_non loc.dbg)
+          else begin
+            (* return from a call to another function. *)
+            let callsites =
+              LabelSet.fold ~init:[] to_block.predecessors
+                ~f:(fun acc pred_label ->
+                  let pred = Cfg_builder.get_block pred_label in
+                  List.find block.body ...
+                              ~f:(fun instr -> instr.id = linearid)... in
+            match get_basic_instr linearid pred with
+            | None -> acc
+            | Some instr -> acc
+            (* if call *)
+);
+end
+end
+end
+in
+    let record_intra from_block to_block count mispredicts =
+      let from_linearid = get_linearid from_addr in
+      let to_linearid = get_linearid from_addr in
+      if from_block.terminator.id  = from_linearid then
+        (* Find the corresponding successor *)
+        match from_block.terminator with
+        | Return -> (* return from a recursive call *)
 
-      | Some from_block, Some to_block ->
+        | Tailcall _ -> (* return from a recursive call *)
+          from_block.data <- Execount.add block.data data
+        | Raise _ ->
+      else
+        (* recursive call, find the instruction *)
+        find_call from_block
+
+    let record_branch from_addr to_addr count mispredicts =
+      match get_block from_addr, get_block to_addr with
+      | None, None ->
+        if verbose then
+          "Ignore exec count %L at branch 0x%Lx,0x%Lx\n. Can't map to CFG.\n"
+            count from_addr to_addr
+      | None, Some to_block -> record_entry to_block
+      | Some from_block, None -> record_exit from_block
+      | Some from_block, Some to_block -> record_intra from_block to_block
+        (* Find the corresponding successor *)
+        match block.terminator with
+        | Return | Tailcall _ -> (* return from a recursive call *)
         from_block.data <- Execount.add block.data data
     in
     (* Associate execounts with basic blocks *)
@@ -337,7 +359,9 @@ module Aggregated_decoded = struct
     | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       if func.count > 0 && func.has_linearids then
-        compute_execounts t func cfg_builder
+        Some (compute_execounts t func cfg_builder)
+      else
+        None
 
   (* Partition aggregated_perf to functions and calculate total execution counts
      of each function.
