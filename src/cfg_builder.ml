@@ -534,7 +534,7 @@ let linearize_terminator terminator ~next =
       | [(Test cond_p,label_p); (Test cond_q,label_q)] ->
         if not (cond_p = invert_test cond_q) then begin
           Printf.fprintf stderr "Cannot linearize branch with non-invert:\n";
-          Printcfg.terminator
+          Cfg.print_terminator
             (Format.formatter_of_out_channel stderr)
             terminator;
           failwith "Illegal successors"
@@ -638,7 +638,7 @@ let to_linear t =
   !next.insn
 
 let print oc t =
-  Printcfg.cfg oc t.cfg t.layout
+  Cfg.print oc t.cfg t.layout
       ~basic_to_linear
       ~linearize_terminator:(linearize_terminator ~next:labelled_insn_end)
 

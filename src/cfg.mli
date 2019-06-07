@@ -118,4 +118,18 @@ module Make(U : User_data) : sig
 
   val successors : block -> successor list
   val successor_labels : block -> label list
+
+  (* Debug printing *)
+  (* CR gyorsh: add dot format output *)
+  val print
+    : out_channel
+    -> t
+    -> label list
+    -> basic_to_linear :
+         (basic instruction -> Linearize.instruction -> Linearize.instruction)
+    -> linearize_terminator : (terminator instruction -> Linearize.instruction)
+    -> unit
+
+  val print_terminator : Format.formatter -> terminator instruction -> unit
+
 end
