@@ -20,24 +20,30 @@ module Layout : sig
   type t = label list
 end
 
-val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
-val to_linear : t -> Linearize.instruction
+module Make(U : User_data_intf.S) : sig
+  module Cfg : module type of struct
+    include Cfg.Make(U)
+  end
 
-(* [get_block] raises [Not_found] if label does not exist *)
-val get_block_exn : t -> label -> Cfg.block
-val get_layout : t -> Layout.t
-val set_layout : t -> Layout.t -> t
-val is_trap_handler : t -> label -> bool
+  val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
+  val to_linear : t -> Linearize.instruction
 
-val get_name : t -> string
-val preserve_orig_labels : t -> bool
+  (* [get_block] raises [Not_found] if label does not exist *)
+  val get_block_exn : t -> label -> Cfg.block
+  val get_layout : t -> Layout.t
+  val set_layout : t -> Layout.t -> t
+  val is_trap_handler : t -> label -> bool
 
-val id_to_label : t -> int -> label option
-val entry_label : t -> label
+  val get_name : t -> string
+  val preserve_orig_labels : t -> bool
 
-val print : out_channel -> t -> unit
+  val id_to_label : t -> int -> label option
+  val entry_label : t -> label
 
-(* Mutates t inplace *)
-val eliminate_dead_blocks : t -> unit
-(* Mutates t inplace and also eliminate dead blocks *)
-val eliminate_fallthrough_blocks : t -> unit
+  val print : out_channel -> t -> unit
+
+  (* Mutates t inplace *)
+  val eliminate_dead_blocks : t -> unit
+  (* Mutates t inplace and also eliminate dead blocks *)
+  val eliminate_fallthrough_blocks : t -> unit
+end

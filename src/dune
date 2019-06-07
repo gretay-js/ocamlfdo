@@ -12,6 +12,7 @@
           ocaml_locations
           options
           clusters
+          user_data_intf
           report)
  (libraries
         owee

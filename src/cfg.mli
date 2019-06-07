@@ -63,13 +63,7 @@ type condition =
 
 type successor = condition * label
 
-module type User_data = sig
-  module Func_data : sig type t end
-  module Block_data : sig type t end
-  module Instr_data : sig type t end
-end
-
-module Make(U : User_data) : sig
+module Make(U : User_data_intf.S) : sig
   (* CR gyorsh: Switch has successors but currently no way to
      attach User_data to them. Can be fixed by translating Switch to Branch. *)
 
