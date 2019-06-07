@@ -11,6 +11,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+[@@@ocaml.warning "+a-4-30-40-41-42"]
 open Core
 
 let verbose = ref true

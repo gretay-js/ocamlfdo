@@ -20,11 +20,7 @@
 [@@@ocaml.warning "+a-4-30-40-41-42"]
 type label = Linearize.label
 
-module LabelSet = Set.Make(
-struct
-  type t = label
-  let compare (x:t) y = compare x y
-end)
+module LabelSet : Set.S with type elt = label
 
 (* CR gyorsh: store label after separately and update after reordering. *)
 type func_call_operation =
@@ -61,7 +57,6 @@ type call_operation =
   | P of prim_call_operation
   | F of func_call_operation
 
-
 type condition =
   | Always
   | Test of Mach.test
@@ -74,8 +69,7 @@ module type User_data = sig
   module Instr_data : sig type t end
 end
 
-module Make(U : User_data) = struct
-
+module Make(U : User_data) : sig
   (* CR gyorsh: Switch has successors but currently no way to
      attach User_data to them. Can be fixed by translating Switch to Branch. *)
 
@@ -122,20 +116,6 @@ module Make(U : User_data) = struct
     mutable data : U.Func_data.t option;
   }
 
-
-  let successors block =
-    match block.terminator.desc with
-    | Branch successors -> successors
-    | Return -> []
-    | Raise _ -> []
-    | Tailcall _ -> []
-    | Switch labels ->
-      Array.mapi (fun i label ->
-        (Test(Iinttest_imm(Iunsigned Ceq, i)), label))
-        labels
-      |> Array.to_list
-
-  let successor_labels block =
-    let (_, labels) = List.split (successors block) in
-    labels
+  val successors : block -> successor list
+  val successor_labels : block -> label list
 end
