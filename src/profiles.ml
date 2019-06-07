@@ -105,7 +105,7 @@ end
 
 module Block_info = struct
 
-  (* For successors and calls *)
+  (* Successor info  *)
   type b = {
     target : Loc.t;
     target_label : Cfg_label.t option;
@@ -114,6 +114,12 @@ module Block_info = struct
     taken : t;
     mispredict : t;
   } [@@deriving sexp]
+
+  (* call site info *)
+  type c = {
+    callsite : Loc.t;
+    targets : b list;
+  }
 
   (* Execution counts for a basic block *)
   type t = {
@@ -132,16 +138,17 @@ module Block_info = struct
 
   let add t ~count = t.count <- Int64.(t.count + count)
 
-  let add_b d c m t l intra =
-    let d = Option.value d ~default:[] in
-    assert (Option.is_none (List.find d ~f:(fun b -> b.target = t)));
-    let b = {
-      target = t;
-      taken = c;
-      mispredict = m;
-      label = l;
-      intra; } in
-    b::d
+  let add_call t b =
+    (* Check unique call target. *)
+    assert (Option.is_none (List.find t.branches
+                              ~f:(fun b1 -> b1.target = b.target)));
+    t.branches <- b::t.branches
+
+  let add_branch t b =
+    (* Check unique branches target. *)
+    assert (Option.is_none (List.find t.branches
+                              ~f:(fun b1 -> b1.target = b.target)));
+    t.branches <- b::t.branches
 end
 
 module Func = struct
@@ -177,11 +184,13 @@ module Func = struct
     if res = 0 then compare f1.name f2.name
     else res
 
-  let record t ~label ~count =
-    let b = Hashtbl.find_or_add t.blocks label
-              ~default:(fun () -> Block_info.mk ~label) in
-    Block_info.add b ~count
+  let get_block_info t label =
+    Hashtbl.find_or_add t.blocks label
+      ~default:(fun () -> Block_info.mk ~label)
 
+  let record t ~label ~count =
+    let b = get_block_info t label in
+    Block_info.add b ~count
 end
 
 module Aggregated_decoded = struct
@@ -210,20 +219,24 @@ module Aggregated_decoded = struct
       let func = Hashtbl.find_exn t.functions id in
       Some func
 
-  (* Get linear id that corresponds to [addr] or exception *)
-  let get_linearid t addr =
-      let loc = get_loc t addr in
-      let dbg = Option.value_exn loc.dbg in
-      dbg.line
+  let get_linearid t loc =
+    let dbg = Option.value_exn loc.dbg in
+    dbg.line
 
   (* Find basic instruction whose id=[linearid] in [block] *)
   let get_basic_instr linearid (block:Cfg.block) =
     List.find block.body ~f:(fun instr -> instr.id = linearid)
 
-  (* Find the block in func that contains addr *)
+  (* Find the block in [cfg] that contains [loc] using its linearid *)
   let get_block loc cfg =
     match loc.dbg with
-    | None -> None
+    | None ->
+      if !verbose then begin
+        let rel = Option.value_exn loc.rel in
+        printf "No linearid for 0x%Lx in func %d at offsets %d\n"
+          addr rel.id rel.offset
+      end;
+      None
     | Some dbg ->
       match Cfg_builder.id_to_label cfg dbg.line with
       | None ->
@@ -236,45 +249,40 @@ module Aggregated_decoded = struct
           failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
             label dbg.line dbg.file ()
 
-  (* Find the block in func that contains addr *)
-  let get_block_x t addr func cfg =
-    let loc = get_loc t addr in
-    match loc.rel with
-    | None -> assert false;
-    | Some rel when rel.id = func.id ->
-      begin
-        match loc.dbg with
-        | None ->
-          if !verbose then
-            printf "No linearid for 0x%Lx in func (%d) %s at offsets %d\n"
-              addr rel.id func.name rel.offset;
-          None
-        | Some dbg ->
-          match Cfg_builder.id_to_label cfg dbg.line with
-          | None ->
-            failwith "No cfg label for linearid %d"
-              dbg.line dbg.file ()
-          | Some label ->
-            match Cfg_builder.get_block_exn cfg label with
-            | block -> Some block
-            | exception Not_found ->
-              failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
-                label dbg.line dbg.file ()
-      end
-    | Some rel ->
+  let record_intra from_loc to_loc t count mispredicts func cfg =
+    let from_block = get_block from_loc cfg in
+    let to_block = get_block to_loc cfg in
+    match from_block, to_block with
+    | None, None ->
       if !verbose then
-        printf "Ignore address at 0x%Lx in func %d not in %d"
-          addr rel.id func.id;
-      None
-
-  let record_intra
-        from_address to_address
-        from_block to_block
-        count mispredicts =
-      let from_linearid = get_linearid from_addr in
+        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, can't map to CFG\n"
+          count from_loc.addr to_loc.addr;
+    | Some from_block, None ->
+      if !verbose then
+        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, \
+                can't map target to CFG\n"
+          count from_loc.addr to_loc.addr;
+      Func.record func ~label:from_block.start ~count:count
+    | None, Some to_block ->
+      if !verbose then
+        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, \
+                can't map source to CFG\n"
+          count from_loc.addr to_loc.addr;
+      Func.record func ~label:to_block.start ~count:count
+    | Some from_block, Some to_block ->
+      Func.record func ~label:from_block.start ~count:count;
+      Func.record func ~label:to_block.start ~count:count;
+      let from_linearid = get_linearid from_loc in
       let to_linearid = get_linearid from_addr in
-      from_block.data <- Execount.add from_block.data count;
-      to_block.data <- Execount.add to_block.data count;
+      let bi = Func.get_block_info func from_block.start in
+      let b = { target=to_loc;
+                target_label=to_block.start;
+                intra=true;
+                taken=count;
+                mispredict=mispredict;
+              } in
+      Block_info.add_branch bi b;
+
       if from_block.terminator.id  = from_linearid then begin
         (* Find the corresponding successor *)
         match from_block.terminator with
@@ -322,7 +330,7 @@ module Aggregated_decoded = struct
       | _ -> assert false
     end
 
-  let record_entry t func cfg to_block =
+  let record_entry t to_loc count mispredicts func cfg  =
     (* Branch into this function from another function,
        which may be unknown. One of the following situations:
        Callee: branch target is the first instr in the entry block.
@@ -368,17 +376,21 @@ module Aggregated_decoded = struct
       end
     end
 
-  let record_branch t from_addr to_addr count mispredicts =
-    let from_block = get_block t from_addr cfg in
-    let to_block = get_block t to_addr cfg in
-    match from_block, to_block with
-    | None, None ->
-      if !verbose then
-        "Ignore exec count %L at branch 0x%Lx,0x%Lx\n. Can't map to CFG.\n"
-          count from_addr to_addr
-    | None, Some to_block -> record_entry to_block
-    | Some from_block, None -> record_exit from_block
-    | Some from_block, Some to_block -> record_intra from_block to_block
+
+  (* Depending on the settings of perf record and the corresponding CPU
+     configuration, LBR may capture different kinds of branches,
+     including function calls and returns. *)
+  let record_branch t from_loc to_loc count mispredicts func cfg =
+    (* at least one of the locations is known to be in this function *)
+    match from_loc.rel, to_loc.rel with
+    | Some from_rel, Some to_rel
+      when from_rel.id = func.id && to_rel.id = func.id ->
+      record_intra from_loc to_loc t count mispredicts func cfg
+    | Some from_rel, _ when (from_rel.id = func.id) ->
+      record_exit from_loc t count mispredicts func cfg
+    | _, Some to_rel when to_rel.id = func.id ->
+      record_entry to_loc t count mispredicts func cfg
+    | _ -> assert false
 
   let record_trace from_addr to_addr count =
     failwith "Not implemented"
@@ -389,14 +401,13 @@ module Aggregated_decoded = struct
      Perform lots of sanity checks to make sure the location of the
      execounts match the instructions in the cfg. *)
   let compute_execounts t func cfg =
-    let execounts = func.blocks in
     (* Associate instruction counts with basic blocks *)
     Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
       let loc = get_loc t key in
       match get_block loc cfg with
       | None ->
         if !verbose then
-          "Cfg can't use exec count %L at 0x%Lx\n" data key
+          "Ignore exec count at 0x%Lx\n, can't map to cfg\n" loc.add
       | Some block ->
         Func.record func ~label:block.start ~count:data
     );
@@ -405,27 +416,18 @@ module Aggregated_decoded = struct
       let (from_addr,to_addr) = key in
       let from_loc = get_loc t from_addr in
       let to_addr = get_loc t to_addr in
-      record_trace from_loc to_loc data func cfg
+      record_trace t from_loc to_loc data func cfg
     );
     (* Associate branch counts with basic blocks *)
     Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
       let mispredicts = Hashtbl.find_exn a.mispredicts key in
       let (from_addr,to_addr) = key in
       let from_loc = get_loc t from_addr in
-      let to_addr = get_loc t to_addr in
-      record_branch from_loc to_loc data mispredicts func cfg
-    );
-    let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
-    (* CR gyorsh: propagate counts *)
-    match Hashtbl.find func.blocks cfg.entry_label with
-    | None ->
-      if !verbose then
-        "No execounts for entry block of %s\n" func.name;
-    | Some block_info ->
-      (* We may have less counts at cfg level if we can't map
-         some of the raw binary addresses to cfg because linearids
-         are missing (or cfg has changed?). *)
-      assert (func.counts >= block_info.counts)
+      let to_loc = get_loc t to_addr in
+      record_branch t from_loc to_loc data mispredicts func cfg
+    )
+    (* CR gyorsh: propagate counts to compute missing fallthroughs? *)
+
 
   (* Compute detailed execution counts for function [name] using its CFG *)
   let compute_cfg_execounts t name cfg =
