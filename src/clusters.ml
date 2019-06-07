@@ -81,46 +81,24 @@ let find t data =
   List.find t.clusters
     ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
 
-(* Makes a singleton cluster. data, id and pos must be unique  *)
-let km_node ~data ~weight ~pos ~id =
-  assert (weight >= 0L);
-  (* Cluster that contains the entry position of
-     the original layout cannot be merged *after* another cluster. *)
-  let can_be_merged = not (pos = entry_pos) in
-  { id;
-    weight;
-    items = [data];
-    pos;
-    can_be_merged;
-  }
-
-let mk_edge ~src ~dst ~weight =
-  assert (weight >= 0L);
-  { src; dst; weight; }
-
-let add block =
-
-  match Hashtbl.find func.blocks block.start with
-  | None ->
-    Clusters.add_node t ~data:block.start ~weight:0L;
-  | Some block_info ->
-    Clusters.add_node t ~data:block.start ~weight:block_info.count;
-
-    match block.terminator.data with
-    | None -> ()
-    | Some data ->
-      List.iter data
-        ~f:(fun d ->
-          if d.intra then begin
-            let weight =
-              Cluster.add_edge t
-                ~srcdata:block.start
-                ~dstdata:d.label
-                ~weight:d.taken
-          end)
-in
-
-let init_layout original_layout blocks =
+let init_layout original_layout execounts =
+  (* Makes a singleton cluster. data, id and pos must be unique  *)
+  let km_node ~data ~weight ~pos ~id =
+    assert (weight >= 0L);
+    (* Cluster that contains the entry position of
+       the original layout cannot be merged *after* another cluster. *)
+    let can_be_merged = not (pos = entry_pos) in
+    { id;
+      weight;
+      items = [data];
+      pos;
+      can_be_merged;
+    }
+  in
+  let mk_edge ~src ~dst ~weight =
+    assert (weight >= 0L);
+    { src; dst; weight; }
+  in
   (* Initialize each block in its own cluster:
      cluster id is block's position in the original layout,
      data is block label,
@@ -129,7 +107,7 @@ let init_layout original_layout blocks =
     List.mapi original_layout
       ~f:(fun pos data ->
         let weight =
-          match Hashtbl.find blocks data with
+          match Hashtbl.find execounts data with
           | None -> 0L
           | Some block_info -> block_info.count;
         in
@@ -144,7 +122,7 @@ let init_layout original_layout blocks =
   let find_pos label =
     Map.find_exn label2pos label in
   let edges =
-    Hashtbl.fold blocks ~init:[]
+    Hashtbl.fold execounts ~init:[]
       ~f:(fun acc block_info ->
         let src = find_pos block_info.label in
         List.fold block_info.branches ~init:acc
@@ -293,7 +271,8 @@ let find_max_pred t c =
    Repeat untill all clusters are merged into a single cluster.
    Return its data.
 *)
-let optimize_layout t  =
+let optimize_layout original_layout execounts =
+  let t = init_layout original_layout blocks in
   let len_clusters = List.length t.clusters in
   let len_layout = List.length t.original_layout in
   if not (len_layout = len_clusters) then begin

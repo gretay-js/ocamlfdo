@@ -149,8 +149,7 @@ let reorder_rel_layout cfg ~layout =
 let reorder_opt execounts cfg =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
   print_list "orig" orig_cfg_layout;
-  let t = Clusters.init_layout orig_cfg_layout execounts in
-  let new_cfg_layout = Clusters.optimize_layout t in
+  let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout execounts in
   print_list "new" new_cfg_layout;
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
