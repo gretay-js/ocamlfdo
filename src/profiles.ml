@@ -108,13 +108,14 @@ module Block_info = struct
   (* For successors and calls *)
   type b = {
     target : Loc.t;
-    label : Cfg_label.t option; (* cfg label that the target location translates to *)
+    target_label : Cfg_label.t option;
+    (* cfg label that the target location translates to *)
     intra : bool; (* is the target intraprocedural? *)
     taken : t;
     mispredict : t;
   } [@@deriving sexp]
 
-  (* Control flow graph annotated with execution counters *)
+  (* Execution counts for a basic block *)
   type t = {
     label : Cfg_label.t;
     mutable count : Execount.t; (* Number of times this block was executed. *)

@@ -74,14 +74,6 @@ type 'd t = {
   original_layout : 'd list;
 }
 
-let init_layout original_layout block_info =
-  {
-    next_id = 0;
-    clusters = [];
-    edges = [];
-    original_layout;
-  }
-
 let id_to_cluster t id =
   List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
@@ -89,34 +81,87 @@ let find t data =
   List.find t.clusters
     ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
 
-(* Makes a singleton cluster, and adds it to the list,
-   but does not preserve the order of the list.
-   This function is intended only for construction of initial clusters. *)
-let add_node t ~data ~weight =
+(* Makes a singleton cluster. data, id and pos must be unique  *)
+let km_node ~data ~weight ~pos ~id =
   assert (weight >= 0L);
-  assert (is_none (find data)); (* data must be unique, and must exist *)
-  let id = t.next_id in
-  let next_id = id+1 in
-  (* Find the position of this item the original layout *)
-  let r = List.findi t.original_layout ~f:(fun _ l -> l = data) in
-  let (pos,_) = Option.value_exn r in
   (* Cluster that contains the entry position of
      the original layout cannot be merged *after* another cluster. *)
   let can_be_merged = not (pos = entry_pos) in
-  let c = { id;
-            weight;
-            items = [data];
-            pos;
-            can_be_merged; } in
-  { t with clusters=c::t.clusters; next_id; }
+  { id;
+    weight;
+    items = [data];
+    pos;
+    can_be_merged;
+  }
 
-let add_edge t ~srcdata ~dstdata ~weight =
+let mk_edge ~src ~dst ~weight =
   assert (weight >= 0L);
-  (* clusters must already exist containing the src and dst nodes. *)
-  let s = Option.value_exn (find t srcdata) in
-  let d = Option.value_exn (find t dstdata) in
-  let e = { src=s.id; dst=d.id; weight; } in
-  { t with edges=e::t.edges }
+  { src; dst; weight; }
+
+let add block =
+
+  match Hashtbl.find func.blocks block.start with
+  | None ->
+    Clusters.add_node t ~data:block.start ~weight:0L;
+  | Some block_info ->
+    Clusters.add_node t ~data:block.start ~weight:block_info.count;
+
+    match block.terminator.data with
+    | None -> ()
+    | Some data ->
+      List.iter data
+        ~f:(fun d ->
+          if d.intra then begin
+            let weight =
+              Cluster.add_edge t
+                ~srcdata:block.start
+                ~dstdata:d.label
+                ~weight:d.taken
+          end)
+in
+
+let init_layout original_layout blocks =
+  (* Initialize each block in its own cluster:
+     cluster id is block's position in the original layout,
+     data is block label,
+     weight is block's execution count, or 0 if there is no info. *)
+  let clusters =
+    List.mapi original_layout
+      ~f:(fun pos data ->
+        let weight =
+          match Hashtbl.find blocks data with
+          | None -> 0L
+          | Some block_info -> block_info.count;
+        in
+        mk_node ~pos ~id:pos ~data ~weight
+      )
+  in
+  (* Add all branch info *)
+  let label2pos =
+    List.foldi original_layout
+      ~init:Map.empty
+      ~f:(fun i acc data -> Map.add acc data i) in
+  let find_pos label =
+    Map.find_exn label2pos label in
+  let edges =
+    Hashtbl.fold blocks ~init:[]
+      ~f:(fun acc block_info ->
+        let src = find_pos block_info.label in
+        List.fold block_info.branches ~init:acc
+          ~f:(fun acc b ->
+            if b.intra then begin
+              let dst = find_pos b.target_label in
+              let e = mk_edge ~src ~dst ~weight:b.taken in
+              e::acc
+            end else acc))
+  in
+  {
+    next_id = List.length clusters;
+    clusters;
+    edges;
+    original_layout;
+  }
+
 
 (* Compare clusters using their weight, in descending order.
    Tie breaker using their position in the orginal layout,
