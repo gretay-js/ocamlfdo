@@ -123,10 +123,14 @@ module Block_info = struct
     mutable calls : b list (* Info about call targets *)
   }
 
-  (* Do we need these add functions?  *)
-  let add_t d c =
-    let d = Option.value d ~default:0L in
-    Some Int64.(d + c)
+  let mk ~label =
+    { label;
+      count = 0L;
+      branches = [];
+      calls = [];
+    }
+
+  let add t ~count = t.count <- Int64.(t.count + count)
 
   let add_b d c m t l intra =
     let d = Option.value d ~default:[] in
@@ -172,6 +176,12 @@ module Func = struct
     let res = compare f2.count f1.count in
     if res = 0 then compare f1.name f2.name
     else res
+
+  let record t ~label ~count =
+    let b = Hashtbl.find_or_add t.blocks label
+              ~default:(fun () -> Block_info.mk ~label) in
+    Block_info.add b ~count
+
 end
 
 module Aggregated_decoded = struct
@@ -209,7 +219,6 @@ module Aggregated_decoded = struct
   (* Find basic instruction whose id=[linearid] in [block] *)
   let get_basic_instr linearid (block:Cfg.block) =
     List.find block.body ~f:(fun instr -> instr.id = linearid)
-
 
   (* Find the block in func that contains addr *)
   let get_block loc cfg =
@@ -375,47 +384,52 @@ module Aggregated_decoded = struct
     failwith "Not implemented"
 
   (* Translate linear ids of this function's locations to cfg labels
-     within this function, find the corresponding basic block
-     and update its data that stores execution counters.
-     Perform lots of sanity checks that to make sure the counts match cfg. *)
+     within this function, find the corresponding basic blocks
+     and update their block_info.
+     Perform lots of sanity checks to make sure the location of the
+     execounts match the instructions in the cfg. *)
   let compute_execounts t func cfg =
+    let execounts = func.blocks in
     (* Associate instruction counts with basic blocks *)
     Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
-      match get_block t key with
+      let loc = get_loc t key in
+      match get_block loc cfg with
       | None ->
         if !verbose then
           "Cfg can't use exec count %L at 0x%Lx\n" data key
       | Some block ->
-        func.cfg_counts
-        block.data <- Execount.add block.data data
+        Func.record func ~label:block.start ~count:data
     );
     (* Associate fall-through trace counts with basic blocks *)
     Hashtbl.iteri a.traces ~f:(fun ~key ~data ->
-      let (f,t) = key in
-      record_trace f t data
+      let (from_addr,to_addr) = key in
+      let from_loc = get_loc t from_addr in
+      let to_addr = get_loc t to_addr in
+      record_trace from_loc to_loc data func cfg
     );
     (* Associate branch counts with basic blocks *)
     Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
-      let (f,t) = key in
       let mispredicts = Hashtbl.find_exn a.mispredicts key in
-      record_branch f t data mispredicts
+      let (from_addr,to_addr) = key in
+      let from_loc = get_loc t from_addr in
+      let to_addr = get_loc t to_addr in
+      record_branch from_loc to_loc data mispredicts func cfg
     );
     let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
     (* CR gyorsh: propagate counts *)
-    if Option.is_none cfg.entry_block.data then begin
-      if !verbose then "No execounts for entry block of %s\n" func.name;
-    end else begin
-      cfg.data <- Execount.add cfg.data cfg.entry_block.data;
-    end;
-    (* We may have less counts at cfg level if we can't map
-       some of the raw binary addresses to cfg because linearids
-       are missing (or cfg has changed?). *)
-    assert (func.counts >= (Option.value cfg.data ~default:0))
+    match Hashtbl.find func.blocks cfg.entry_label with
+    | None ->
+      if !verbose then
+        "No execounts for entry block of %s\n" func.name;
+    | Some block_info ->
+      (* We may have less counts at cfg level if we can't map
+         some of the raw binary addresses to cfg because linearids
+         are missing (or cfg has changed?). *)
+      assert (func.counts >= block_info.counts)
 
-  (* Compute execution counts using CFG *)
+  (* Compute detailed execution counts for function [name] using its CFG *)
   let compute_cfg_execounts t name cfg =
-    let id = Hashtbl.find_exn t.name2id name in
-    match Hashtbl.find t.functions id with
+    match Hashtbl.find t.name2id name with
     | None ->
       if !verbose then
         printf "Not found profile for %s with cfg.\n" name;
