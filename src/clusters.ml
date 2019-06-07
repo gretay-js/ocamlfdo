@@ -67,9 +67,6 @@ type edge = {
 }
 
 (* Directed graph whose nodes are clusters. *)
-(* CR gyorsh: this initial implementation is expected to be too slow.
-   It can be improved by replacing clusters list with two data-structres:
-   map ids to clusters and priority queue. *)
 type 'd t = {
   next_id : clusterid; (* used to create unique cluster ids *)
   clusters : 'd cluster list;
@@ -77,7 +74,7 @@ type 'd t = {
   original_layout : 'd list;
 }
 
-let init_layout original_layout =
+let init_layout original_layout block_info =
   {
     next_id = 0;
     clusters = [];
@@ -85,11 +82,19 @@ let init_layout original_layout =
     original_layout;
   }
 
+let id_to_cluster t id =
+  List.find_exn t.clusters ~f:(fun c -> c.id = id)
+
+let find t data =
+  List.find t.clusters
+    ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
+
 (* Makes a singleton cluster, and adds it to the list,
    but does not preserve the order of the list.
    This function is intended only for construction of initial clusters. *)
 let add_node t ~data ~weight =
   assert (weight >= 0L);
+  assert (is_none (find data)); (* data must be unique, and must exist *)
   let id = t.next_id in
   let next_id = id+1 in
   (* Find the position of this item the original layout *)
@@ -104,13 +109,6 @@ let add_node t ~data ~weight =
             pos;
             can_be_merged; } in
   { t with clusters=c::t.clusters; next_id; }
-
-let id_to_cluster t id =
-  List.find_exn t.clusters ~f:(fun c -> c.id = id)
-
-let find t data =
-  List.find t.clusters
-    ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
 
 let add_edge t ~srcdata ~dstdata ~weight =
   assert (weight >= 0L);

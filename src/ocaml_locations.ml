@@ -54,7 +54,7 @@ let decode_line_ir locations ~program_counter func t =
         failwithf "func_name_dwarf = %s func = %s\n"
           func_name_dwarf func ()
 
-let decode_line locations ~program_counter t =
+let decode_line locations ~program_counter func t =
   match Elf_locations.resolve ~program_counter locations with
   | None ->
     if !verbose then
@@ -69,8 +69,9 @@ let decode_line locations ~program_counter t =
     | None ->
       Report.log (sprintf "Ignoring %s in %s\n" func file);
       None
-    | Some name_dwarf -> Some (file,line)
+    | Some _ -> Some (file,line)
 
-let decode_line locations ~program_counter func = function
+let decode_line locations ~program_counter func t =
+  match t with
   | Linearid -> decode_line_ir locations ~program_counter func t
-  | Source -> decode_line locations ~program_counter t
+  | Source -> decode_line locations ~program_counter func t

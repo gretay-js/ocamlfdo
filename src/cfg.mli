@@ -17,7 +17,6 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-[@@@ocaml.warning "+a-4-30-40-41-42"]
 type label = Linearize.label
 
 module LabelSet : Set.S with type elt = label
@@ -63,67 +62,58 @@ type condition =
 
 type successor = condition * label
 
-module Make(U : User_data_intf.S) : sig
-  (* CR gyorsh: Switch has successors but currently no way to
-     attach User_data to them. Can be fixed by translating Switch to Branch. *)
+(* basic block *)
+type block = {
+  start : label;
+  mutable body : basic instruction list;
+  mutable terminator : terminator instruction;
+  mutable predecessors : LabelSet.t;
+}
 
-  (* basic block *)
-  type block = {
-    start : label;
-    mutable body : basic instruction list;
-    mutable terminator : terminator instruction;
-    mutable predecessors : LabelSet.t;
-    mutable data : U.Block_data.t option;
-  }
+and 'a instruction = {
+  desc : 'a;
+  arg : Reg.t array;
+  res : Reg.t array;
+  dbg : Debuginfo.t;
+  live : Reg.Set.t;
+  trap_depth : int;
+  id : int;
+}
 
-  and 'a instruction = {
-    desc : 'a;
-    arg : Reg.t array;
-    res : Reg.t array;
-    dbg : Debuginfo.t;
-    live : Reg.Set.t;
-    trap_depth : int;
-    id : int;
-    mutable data : U.Instr_data.t option;
-  }
+and basic =
+  | Op of operation
+  | Call of call_operation
+  | Reloadretaddr
+  | Entertrap
+  | Pushtrap of { lbl_handler : label }
+  | Poptrap
 
-  and basic =
-    | Op of operation
-    | Call of call_operation
-    | Reloadretaddr
-    | Entertrap
-    | Pushtrap of { lbl_handler : label }
-    | Poptrap
+and terminator =
+  | Branch of successor list
+  | Switch of label array
+  | Return
+  | Raise of Cmm.raise_kind
+  | Tailcall of func_call_operation
 
-  and terminator =
-    | Branch of successor list
-    | Switch of label array
-    | Return
-    | Raise of Cmm.raise_kind
-    | Tailcall of func_call_operation
+(* CR gyorsh: Switch can be translated to Branch. *)
+(* Control Flow Graph of a function. *)
+type t = {
+  blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
+  fun_name : string;             (* Function name, used for printing messages *)
+  entry_label : label;           (* Must be first in all layouts of this cfg. *)
+}
 
-  (* Control Flow Graph of a function. *)
-  type t = {
-    blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
-    fun_name : string;             (* Function name, used for printing messages *)
-    entry_label : label;           (* Must be first in all layouts of this cfg. *)
-    mutable data : U.Func_data.t option;
-  }
+val successors : block -> successor list
+val successor_labels : block -> label list
 
-  val successors : block -> successor list
-  val successor_labels : block -> label list
+(* Debug printing *)
+val print
+  : out_channel
+  -> t
+  -> label list
+  -> basic_to_linear :
+       (basic instruction -> Linearize.instruction -> Linearize.instruction)
+  -> linearize_terminator : (terminator instruction -> Linearize.instruction)
+  -> unit
 
-  (* Debug printing *)
-  (* CR gyorsh: add dot format output *)
-  val print
-    : out_channel
-    -> t
-    -> label list
-    -> basic_to_linear :
-         (basic instruction -> Linearize.instruction -> Linearize.instruction)
-    -> linearize_terminator : (terminator instruction -> Linearize.instruction)
-    -> unit
-
-  val print_terminator : Format.formatter -> terminator instruction -> unit
-
-end
+val print_terminator : Format.formatter -> terminator instruction -> unit

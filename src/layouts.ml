@@ -78,11 +78,11 @@ end = struct
 
   type p = t list [@@deriving sexp]
 
-  let print_t ~t outc =
+  let print_t t outc =
     fprintf outc !"%{sexp:t}\n" t
 
   let print_p p outc =
-    List.iter p ~f:(fun t -> print_t ~t outc)
+    List.iter p ~f:(fun t -> print_t t outc)
 
   let read filename =
     if !verbose then
@@ -111,7 +111,7 @@ end = struct
         Out_channel.close (Out_channel.create filename);
         (fun func labels ->
            let chan = Out_channel.create filename ~append:true in
-           print_t chan {func;labels;};
+           print_t {func;labels;} chan;
            Out_channel.close chan)
 
 end
@@ -224,7 +224,7 @@ module Func_layout = struct
       printf "Writing function layout to %s\n" filename;
     let chan = Out_channel.create filename in
     List.iter t ~f:(fun name ->
-      fprintf chan "%s\n" filename);
+      fprintf chan "%s\n" name);
     Out_channel.close chan
 
   let write_linker_script t filename =
@@ -232,7 +232,7 @@ module Func_layout = struct
       printf "Writing linker script hot to %s\n" filename;
     let chan = Out_channel.create filename in
     List.iter t ~f:(fun name ->
-      fprintf chan "*(.text.%s)\n" filename);
+      fprintf chan "*(.text.%s)\n" name);
     Out_channel.close chan
 
   let read filename =
@@ -247,5 +247,5 @@ module Func_layout = struct
       if t = [] then printf "Empty function layout!\n"
       else printf "Layout size = %d" (List.length t)
     end;
-    p
+    t
 end

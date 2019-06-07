@@ -149,25 +149,32 @@ let reorder_rel_layout cfg ~layout =
 let reorder_opt func cfg =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
   print_list "orig" orig_cfg_layout;
-  let t = Clusters.init_layout orig_cfg_layout in
+  let t = Clusters.init_layout orig_cfg_layout func.blocks in
   let add block =
     (* Initialize each block in its own cluster:
        cluster id is block label,
        execution weight is block's execution count.
-       Initialize edges*)
-    Clusters.add_node t ~data:block.start ~weight:block.data;
-    match block.terminator.data with
-    | None -> ()
-    | Some data ->
-      List.iter data
-        ~f:(fun d ->
-          if d.intra then
-            Cluster.add_edge t
-              ~srcdata:block.start
-              ~dstdata:d.label
-              ~weight:d.taken)
+       Initialize edges *)
+    match Hashtbl.find func.blocks block.start with
+    | None ->
+      Clusters.add_node t ~data:block.start ~weight:0L;
+    | Some block_info ->
+      Clusters.add_node t ~data:block.start ~weight:block_info.count;
+
+      match block.terminator.data with
+      | None -> ()
+      | Some data ->
+        List.iter data
+          ~f:(fun d ->
+            if d.intra then begin
+              let weight =
+                Cluster.add_edge t
+                  ~srcdata:block.start
+                  ~dstdata:d.label
+                  ~weight:d.taken
+            end)
   in
-  Hashtbl.iter func.cfg.blocks ~f:add;
+  Hashtbl.iter cfg.blocks ~f:add;
   let new_cfg_layout = Clusters.optimize_layout t in
   print_list "new" new_cfg_layout;
   validate cfg new_cfg_layout;
@@ -175,7 +182,8 @@ let reorder_opt func cfg =
 
 let reorder_profile cfg linearid_profile options =
   let name = Cfg_builder.get_name cfg in
-  let func = Profiles.compute_cfg_execounts linearid_profile fun_name cfg in
+  let func = Profiles.Aggregated_decoded.compute_cfg_execounts
+               linearid_profile fun_name cfg in
   match options.reorder_basic_blocks with
   | None -> cfg
   | Opt -> match func with

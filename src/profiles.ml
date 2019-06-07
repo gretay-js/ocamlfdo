@@ -11,10 +11,16 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-[@@@ocaml.warning "+a-4-30-40-41-42"]
 open Core
 
 let verbose = ref true
+
+module Addr = struct
+  type t = int64 [@@deriving sexp,hash]
+end
+module Execount = struct
+  type t = int64 [@@deriving sexp]
+end
 
 module Loc = struct
   (* Dwarf info associated with a location *)
@@ -29,15 +35,15 @@ module Loc = struct
   } [@@deriving compare, sexp, hash]
 
   type t = {
-    addr : int64;     (* Raw address in the original binary *)
+    addr : addr;     (* Raw address in the original binary *)
     rel : rel option; (* Containing function info and relative offset *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
 
   let to_bolt_string t =
-    match t.func with
+    match t.rel with
     | None -> "0 [unknown] 0"
-    | Some func -> sprintf "1 %s %x" func.name func.offset
+    | Some rel -> sprintf "1 %d %x" rel.id rel.offset
 
 end
 
@@ -45,23 +51,23 @@ module Aggregated_perf = struct
 
   module P = struct
     (* Pair of addresses *)
-    type t = int64 * int64 [@@deriving compare, hash, sexp]
+    type t = Addr.t * Addr.t [@@deriving compare, hash, sexp]
   end
 
   type t = {
-    instructions : int64 Hashtbl.M(Int64).t;
-    branches : int64 Hashtbl.M(P).t;
+    instructions : Execount.t Hashtbl.M(Addr).t;
+    branches : Execount.t Hashtbl.M(P).t;
     (* execution count: number of times the branch was taken. *)
-    mispredicts : int64 Hashtbl.M(P).t;
+    mispredicts : Execount.t Hashtbl.M(P).t;
     (* number of times the branch was mispredicted:
        branch target mispredicted or
        branch direction was mispredicted. *)
-    traces : PT.t;
+    traces : Execount.t Hashtbl.M(P).t;
     (* execution count: number of times the trace was taken. *)
   } [@@deriving sexp]
 
   let empty =
-    { instructions = Hashtbl.create (module Int64);
+    { instructions = Hashtbl.create (module Addr);
       branches = Hashtbl.create (module P);
       mispredicts = Hashtbl.create (module P);
       traces = Hashtbl.create (module P);
@@ -90,32 +96,47 @@ module Aggregated_perf = struct
     Out_channel.close chan
 end
 
-module Execount : Cfg.User_data = struct
-  type t = int64
+(* It should be Cfg.label, but we can't add sexp to Cfg.
+   because the intent is to eventually integrate Cfg in the compiler, which
+   doesn't currently use sexp. We use sexp to convert to/from file. *)
+module Cfg_label = struct
+  type t = int [@@deriving sexp]
+end
 
-  let add d c =
+module Block_info = struct
+
+  (* For successors and calls *)
+  type b = {
+    target : Loc.t;
+    label : Cfg_label.t option; (* cfg label that the target location translates to *)
+    intra : bool; (* is the target intraprocedural? *)
+    taken : t;
+    mispredict : t;
+  } [@@deriving sexp]
+
+  (* Control flow graph annotated with execution counters *)
+  type t = {
+    label : Cfg_label.t;
+    mutable count : Execount.t; (* Number of times this block was executed. *)
+    mutable branches : b list; (* Info about branch targets  *)
+    mutable calls : b list (* Info about call targets *)
+  }
+
+  (* Do we need these add functions?  *)
+  let add_t d c =
     let d = Option.value d ~default:0L in
     Some Int64.(d + c)
 
-  module Func_data = struct type t = t end
-  module Block_data = struct type t = t end
-
-  (* For successors and calls *)
-  module Instr_data = struct
-    type b = {
-      target : Loc.t;
-      label : label option; (* cfg label that the target location translates to *)
-      intra : bool; (* is the target intraprocedural? *)
-      taken : t;
-      mispredict : t;
-    }
-    type t = b list
-    let add d c m l =
-      let d = Option.value d ~default:[] in
-      assert (Option.is_none List.find d ~f:(fun b -> b.target = l));
-      let b = { target = l; taken = t; mispredict = m; } in
-      b::d
-  end
+  let add_b d c m t l intra =
+    let d = Option.value d ~default:[] in
+    assert (Option.is_none (List.find d ~f:(fun b -> b.target = t)));
+    let b = {
+      target = t;
+      taken = c;
+      mispredict = m;
+      label = l;
+      intra; } in
+    b::d
 end
 
 module Func = struct
@@ -123,22 +144,22 @@ module Func = struct
     id : int;       (* Unique identifier we assign to this function *)
     name : string;  (* Name of the function symbol *)
     start : int;    (* Raw start address of the function in original binary *)
-    mutable cfg : Cfg.Make(Execount).t option;
-    (* Control flow graph annotated with execution counters *)
-    (* CR gyorsh: this might grow too large, whole program cfgs
-       collected through the entire compilation. *)
     mutable count : Execount.t;  (* Preliminary execution count *)
+    blocks : Execount.block_info Hashtbl.M(Cfg_label);
+    (* Map basic blocks of this function to breakdown of execution counts *)
     has_linearids : bool;        (* Does the function have any linearids? *)
-    agg : Aggregated_perf.t;     (* Counters that refer to this function *)
-  }
+    agg : Aggregated_perf.t;
+    (* Counters that refer to this function, uses raw addresses.
+       This can be dropped after cfg_count is constructed, to save memory. *)
+  } [@@deriving sexp]
 
   let mk id name start =
     {
       id; name; start;
-      cfg=None;
       has_linearids=false;
       count=0L;
-      agg=Aggregate_perf.empty;
+      blocks = Hashtbl.create (module Cfg_label);
+      agg = Aggregated_perf.empty;
     }
   (* descending order of execution counts (reverse order of compare) *)
   (* Tie breaker using name.
@@ -147,41 +168,36 @@ module Func = struct
      and decodes locations.
      Change to tie breaker using id if speed becomes a problem. *)
   let compare f1 f2 =
-    let res = Int.compare f2.count f1.count in
-    if res = 0 then String.compare f1.name f2.name
+    let res = compare f2.count f1.count in
+    if res = 0 then compare f1.name f2.name
     else res
 end
 
 module Aggregated_decoded = struct
   open Func
   type t = {
-    addr2loc : Loc.t Hashtbl.M(Int64).t; (* map raw addresses to locations *)
+    addr2loc : Loc.t Hashtbl.M(Addr).t; (* map raw addresses to locations *)
     name2id : int Hashtbl.M(String).t; (* map func name to func id *)
     functions : Func.t Hashtbl.M(Int).t; (* map func id to func info *)
   }  [@@deriving sexp]
 
   let mk size =
-    { addr2loc = Hashtbl.create ~size (module Int64);
+    { addr2loc = Hashtbl.create ~size (module Addr);
       name2id = Hashtbl.create (module String);
       functions = Hashtbl.create (module Int);
     }
 
+  let get_loc t addr =
+    Hashtbl.find_exn t.addr2loc addr
+
   let get_func t addr =
-    let loc = Hashtbl.find_exn t.addr2loc addr in
+    let loc = get_loc t addr in
     match loc.rel with
     | None -> None
     | Some rel ->
-      let id = loc.rel.id in
-      let func = Hashtbl.find_exn t.functions func in
+      let id = rel.id in
+      let func = Hashtbl.find_exn t.functions id in
       Some func
-
-  let get_func_exn t addr =
-    match get_func t addr with
-    | None -> raise Not_found
-    | Some func -> func
-
-  let get_loc t addr =
-    Hashtbl.find_exn t.addr2loc addr
 
   (* Get linear id that corresponds to [addr] or exception *)
   let get_linearid t addr =
@@ -190,19 +206,36 @@ module Aggregated_decoded = struct
       dbg.line
 
   (* Find basic instruction whose id=[linearid] in [block] *)
-  let get_basic_instr linearid block =
+  let get_basic_instr linearid (block:Cfg.block) =
     List.find block.body ~f:(fun instr -> instr.id = linearid)
 
+
   (* Find the block in func that contains addr *)
-  let get_block addr func =
-    let loc = get_loc addr in
+  let get_block loc cfg =
+    match loc.dbg with
+    | None -> None
+    | Some dbg ->
+      match Cfg_builder.id_to_label cfg dbg.line with
+      | None ->
+        failwith "No cfg label for linearid %d"
+          dbg.line dbg.file ()
+      | Some label ->
+        match Cfg_builder.get_block_exn cfg label with
+        | block -> Some block
+        | exception Not_found ->
+          failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
+            label dbg.line dbg.file ()
+
+  (* Find the block in func that contains addr *)
+  let get_block_x t addr func cfg =
+    let loc = get_loc t addr in
     match loc.rel with
     | None -> assert false;
     | Some rel when rel.id = func.id ->
       begin
         match loc.dbg with
         | None ->
-          if verbose then
+          if !verbose then
             printf "No linearid for 0x%Lx in func (%d) %s at offsets %d\n"
               addr rel.id func.name rel.offset;
           None
@@ -219,7 +252,7 @@ module Aggregated_decoded = struct
                 label dbg.line dbg.file ()
       end
     | Some rel ->
-      if verbose then
+      if !verbose then
         printf "Ignore address at 0x%Lx in func %d not in %d"
           addr rel.id func.id;
       None
@@ -325,15 +358,17 @@ module Aggregated_decoded = struct
       end
     end
 
-  let record_branch from_addr to_addr count mispredicts =
-      match get_block from_addr, get_block to_addr with
-      | None, None ->
-        if verbose then
-          "Ignore exec count %L at branch 0x%Lx,0x%Lx\n. Can't map to CFG.\n"
-            count from_addr to_addr
-      | None, Some to_block -> record_entry to_block
-      | Some from_block, None -> record_exit from_block
-      | Some from_block, Some to_block -> record_intra from_block to_block
+  let record_branch t from_addr to_addr count mispredicts =
+    let from_block = get_block t from_addr cfg in
+    let to_block = get_block t to_addr cfg in
+    match from_block, to_block with
+    | None, None ->
+      if !verbose then
+        "Ignore exec count %L at branch 0x%Lx,0x%Lx\n. Can't map to CFG.\n"
+          count from_addr to_addr
+    | None, Some to_block -> record_entry to_block
+    | Some from_block, None -> record_exit from_block
+    | Some from_block, Some to_block -> record_intra from_block to_block
 
   let record_trace from_addr to_addr count =
     failwith "Not implemented"
@@ -345,11 +380,12 @@ module Aggregated_decoded = struct
   let compute_execounts t func cfg =
     (* Associate instruction counts with basic blocks *)
     Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
-      match get_block key with
+      match get_block t key with
       | None ->
-        if verbose then
+        if !verbose then
           "Cfg can't use exec count %L at 0x%Lx\n" data key
       | Some block ->
+        func.cfg_counts
         block.data <- Execount.add block.data data
     );
     (* Associate fall-through trace counts with basic blocks *)
@@ -366,7 +402,7 @@ module Aggregated_decoded = struct
     let entry_block = Hashtbl.find cfg.blocks cfg.entry_label in
     (* CR gyorsh: propagate counts *)
     if Option.is_none cfg.entry_block.data then begin
-      if verbose then "No execounts for entry block of %s\n" func.name;
+      if !verbose then "No execounts for entry block of %s\n" func.name;
     end else begin
       cfg.data <- Execount.add cfg.data cfg.entry_block.data;
     end;
@@ -380,13 +416,13 @@ module Aggregated_decoded = struct
     let id = Hashtbl.find_exn t.name2id name in
     match Hashtbl.find t.functions id with
     | None ->
-      if verbose then
+      if !verbose then
         printf "Not found profile for %s with cfg.\n" name;
     | Some id ->
       let func = Hashtbl.find_exn t.functions id in
-      if func.count > 0 && func.has_linearids then
+      if func.count > 0 && func.has_linearids then begin
         Some (compute_execounts t func cfg)
-      else
+      end else
         None
 
   (* Partition aggregated_perf to functions and calculate total execution counts
@@ -575,9 +611,6 @@ let write_bolt t filename =
   Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
   Out_channel.close chan
 
-let compute_cfg_execounts t name cfg =
-  Aggregated_decoded.compute_cfg_execounts t name cfg
-
 module Perf = struct
   (* Perf profile format as output of perf script -F pid,ip,brstack *)
 
@@ -589,8 +622,8 @@ module Perf = struct
     | _ -> false
 
   type br = {
-    from_addr : int64;
-    to_addr : int64;
+    from_addr : Addr.t;
+    to_addr : Addr.t;
     mispredict : mispredict_flag;
     index : int; (* Position on the stack, with 0 being the most recent branch.
                     This field is only used for only for validation. *)
@@ -598,7 +631,7 @@ module Perf = struct
   } [@@deriving compare, sexp]
 
   type sample = {
-    ip: int64;  (* instruction pointer where the sample was taken *)
+    ip: Addr.t;  (* instruction pointer where the sample was taken *)
     brstack: br list; (* branch stack is the last branch record (LBR) *)
   } [@@deriving compare, sexp]
 
