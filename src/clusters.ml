@@ -67,6 +67,9 @@ type edge = {
 }
 
 (* Directed graph whose nodes are clusters. *)
+(* CR gyorsh: this initial implementation is expected to be too slow.
+   It can be improved by replacing clusters list with two data-structres:
+   map ids to clusters and priority queue. *)
 type 'd t = {
   next_id : clusterid; (* used to create unique cluster ids *)
   clusters : 'd cluster list;
@@ -90,7 +93,7 @@ let add_node t ~data ~weight =
   let id = t.next_id in
   let next_id = id+1 in
   (* Find the position of this item the original layout *)
-  let r = List.findi t.original_layout ~f:(fun i l -> l = data) in
+  let r = List.findi t.original_layout ~f:(fun _ l -> l = data) in
   let (pos,_) = Option.value_exn r in
   (* Cluster that contains the entry position of
      the original layout cannot be merged *after* another cluster. *)
@@ -101,6 +104,9 @@ let add_node t ~data ~weight =
             pos;
             can_be_merged; } in
   { t with clusters=c::t.clusters; next_id; }
+
+let id_to_cluster t id =
+  List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
 let find t data =
   List.find t.clusters
@@ -213,7 +219,7 @@ let merge t c1 c2 =
             e::rest
           | _ -> e1::acc
       ) in
-  let edges = updated@preserved in
+  let edges = merged@preserved in
   { t with edges;clusters;next_id; }
 
 let find_max_pred t c =
@@ -222,16 +228,16 @@ let find_max_pred t c =
     ~f:(fun max e ->
       if e.dst = c.id then begin
         match max with
-        | None -> e
+        | None -> Some e
         | Some me->
-          if edge_compare me e < 0 then
+          if edge_compare t me e < 0 then
             Some e
           else
             max
       end else max) in
   match max with
   | None -> None
-  | Some -> Some max.src
+  | Some max -> Some max.src
 
 (*
    Order clusters by their execution counts, descending,
@@ -270,8 +276,8 @@ let optimize_layout t  =
       | c::rest ->
         if c.can_be_merged then begin
           if verbose then
-            printf "Step %d: merging cluster %d\n" step cur.id;
-          match find_max_pred t cur with
+            printf "Step %d: merging cluster %d\n" step c.id;
+          match find_max_pred t c with
           | None ->
             (* Cluster c is not reachable from within the function
                using any of the edges that we have for clustering,
@@ -283,10 +289,11 @@ let optimize_layout t  =
             c.can_be_merged <- false;
             let t = { t with clusters=rest@[c] } in
             loop t (step + 1)
-          | Some pred ->
+          | Some pred_id ->
+            let pred = id_to_cluster t pred_id in
             if verbose then
-              printf "Found pred %d weight=%d\n" pred.id pred.weight;
-            merge t pred c;
+              printf "Found pred %d weight=%Ld\n" pred.id pred.weight;
+            let t = merge t pred c in
             loop t (step + 1)
         end else begin
           (* Cannot merge any more clusters.

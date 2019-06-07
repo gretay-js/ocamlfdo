@@ -82,7 +82,7 @@ module Make(U : User_data) = struct
     mutable body : basic instruction list;
     mutable terminator : terminator instruction;
     mutable predecessors : LabelSet.t;
-    mutable data : U.Block_data.t option;
+    mutable bdata : U.Block_data.t option;
   }
 
   and 'a instruction = {
@@ -93,7 +93,7 @@ module Make(U : User_data) = struct
     live : Reg.Set.t;
     trap_depth : int;
     id : int;
-    mutable data : U.Instr_data.t option;
+    mutable idata : U.Instr_data.t option;
   }
 
   and basic =
@@ -116,7 +116,7 @@ module Make(U : User_data) = struct
     blocks : (label, block) Hashtbl.t;               (* Map labels to blocks *)
     fun_name : string;             (* Function name, used for printing messages *)
     entry_label : label;           (* Must be first in all layouts of this cfg. *)
-    mutable data : U.Func_data.t option;
+    mutable fdata : U.Func_data.t option;
   }
 
 
