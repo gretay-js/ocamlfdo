@@ -60,7 +60,7 @@ module Aggregated_perf = struct
     (* execution count: number of times the trace was taken. *)
   } [@@deriving sexp]
 
-  let empty =
+  let empty () =
     { instructions = Hashtbl.create (module Addr);
       branches = Hashtbl.create (module P);
       mispredicts = Hashtbl.create (module P);
@@ -150,8 +150,23 @@ module Block_info = struct
 
   let add_branch t b =
     (* Check unique branches target. *)
-    assert (Option.is_none (List.find t.branches
-                              ~f:(fun b1 -> b1.target = b.target)));
+    begin match b.target, b.target_label with
+    | _, Some target_label ->
+      assert (Option.is_none
+                (List.find t.branches
+                   ~f:(fun b1 ->
+                     match b1.target_label with
+                     | Some lbl when lbl = target_label -> true
+                     | _ -> false)))
+    | Some target, _ ->
+      assert (Option.is_none
+                (List.find t.branches
+                   ~f:(fun b1 ->
+                     match b1.target with
+                     | Some tr when tr = target -> true
+                     | _ -> false)))
+    | _ -> assert false
+    end;
     t.branches <- b::t.branches
 end
 
@@ -175,7 +190,7 @@ module Func = struct
       has_linearids=false;
       count=0L;
       blocks = Hashtbl.create (module Cfg_label);
-      agg = Aggregated_perf.empty;
+      agg = Aggregated_perf.empty ();
     }
   (* descending order of execution counts (reverse order of compare) *)
   (* Tie breaker using name.
@@ -576,6 +591,15 @@ module Aggregated_decoded = struct
       let to_loc = get_loc t to_addr in
       record_trace t from_loc to_loc data func cfg
     );
+    if !verbose then begin
+      let total_traces =
+        List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + ) in
+      let ratio = Int64.((t.malformed_traces * 100L) / total_traces) in
+      printf "Found %Ld malformed traces out of %Ld (%Ld)\n"
+        t.malformed_traces
+        total_traces
+        ratio
+    end;
     (* Associate branch counts with basic blocks *)
     Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
       let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
@@ -626,7 +650,7 @@ module Aggregated_decoded = struct
         | None, Some to_func -> update to_func
         | Some from_func, None -> update from_func
         | Some from_func, Some to_func ->
-          if from_func = to_func then begin
+          if from_func.id = to_func.id then begin
             update to_func
           end else begin
             (* interprocedural branch: add to both functions *)
@@ -636,7 +660,9 @@ module Aggregated_decoded = struct
     in
     Hashtbl.iteri agg.branches
       ~f:(fun ~key ~data ->
-        let mispredicts = Hashtbl.find_exn agg.mispredicts key in
+        let mispredicts = Option.value
+                            (Hashtbl.find agg.mispredicts key)
+                            ~default:0L in
         let update_br func =
           func.count <- Int64.(func.count + data);
           Hashtbl.add_exn func.agg.branches ~key ~data;
@@ -702,19 +728,23 @@ module Aggregated_decoded = struct
     (* Collect all addresses that need decoding. *)
     (* Mispredicts and traces use the same addresses as branches,
        so no need to add them *)
-    let len = Hashtbl.length aggregated_perf.instructions +
-              Hashtbl.length aggregated_perf.branches in
+    let len = (Hashtbl.length aggregated_perf.instructions) +
+              ((Hashtbl.length aggregated_perf.branches)*2) in
     (* Elf_locations does not use Core, so we need to create Caml.Hashtbl *)
     let addresses = Caml.Hashtbl.create len in
     let add key =
       if not (Caml.Hashtbl.mem addresses key) then
-        Caml.Hashtbl.add addresses key ();
+        Caml.Hashtbl.add addresses key ()
+      else
+        printf "Found key 0x%Lx\n" key
     in
     let add2 (fa,ta) = add fa; add ta in
     Hashtbl.iter_keys aggregated_perf.instructions ~f:add;
     Hashtbl.iter_keys aggregated_perf.branches ~f:add2;
     (* A key may appear in both t.instruction and t.branches *)
     let size = Caml.Hashtbl.length addresses in
+    if !verbose then
+      printf "size=%d,len=%d\n" size len;
     assert (size <= len);
     (* Resolve and cache all addresses we need in one pass over the binary. *)
     Elf_locations.resolve_all locations addresses ~reset:true;
@@ -762,7 +792,7 @@ module Aggregated_decoded = struct
   let write_bolt t (agg: Aggregated_perf.t) filename =
     let open Loc in
     if !verbose then
-      printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
+      printf "Writing aggregated decoded profile in bolt form to %s\n" filename;
     let chan = Out_channel.create filename in
     let to_bolt_string rel =
       match rel with
@@ -937,7 +967,7 @@ module Perf = struct
     let inc table key =
       Hashtbl.update table key
         ~f:(fun v -> Int64.(1L + Option.value ~default:0L v)) in
-    let aggregated = Aggregated_perf.empty in
+    let aggregated = Aggregated_perf.empty () in
     (* CR gyorsh: aggregate during parsing of perf profile *)
     let aggregate sample =
       inc aggregated.instructions sample.ip;

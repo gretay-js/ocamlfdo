@@ -20,8 +20,8 @@ type layout = (int list) String.Map.t
 
 
 module Config : sig
-  type reorder_basic_blocks =  None | Opt
-  type reorder_functions = None | Execounts | Hot_clusters
+  type reorder_basic_blocks =  No | Opt
+  type reorder_functions = No | Execounts | Hot_clusters
 
   type t = {
     gen_linearid_profile : string;
@@ -32,6 +32,7 @@ module Config : sig
   }
 
   val default : string -> t
+  val linker_script_filename : t -> string -> string
 end
 
 

@@ -24,8 +24,8 @@ let verbose = false
 type layout = (int list) String.Map.t
 
 module Config = struct
-  type reorder_basic_blocks =  None | Opt
-  type reorder_functions = None | Execounts | Hot_clusters
+  type reorder_basic_blocks = No | Opt
+  type reorder_functions = No | Execounts | Hot_clusters
 
   type t = {
     gen_linearid_profile : string;
@@ -39,9 +39,18 @@ module Config = struct
     gen_linearid_profile;
     write_bolt_fdata = true;
     write_linker_script = true;
-    reorder_functions = None;
-    reorder_basic_blocks = None;
+    reorder_functions = No;
+    reorder_basic_blocks = No;
   }
+
+  let linker_script_hot_extension = "linker-script-hot"
+
+  let linker_script_filename t stage =
+    sprintf "%s%s%s.%s"
+      t.gen_linearid_profile
+      (if String.is_empty stage then "" else ".")
+      stage
+      linker_script_hot_extension
 end
 
 type reorder_algo =
@@ -178,11 +187,11 @@ let reorder_opt execounts cfg =
 let write_profile linearid_profile config =
   let open Config in
   if config.write_linker_script then begin
-    let linker_script_hot = config.gen_linearid_profile^".linker-script-hot" in
+    let linker_script_hot = Config.linker_script_filename config "" in
     if verbose then
       printf "Writing linker script hot to %s\n" linker_script_hot;
     match config.reorder_functions with
-    | None ->
+    | No ->
       if verbose then printf "Reorder functions is not enabled.\
                               Cannot output linker script.\n"
     | Execounts ->
@@ -192,14 +201,14 @@ let write_profile linearid_profile config =
   end
 
 let reorder_profile cfg linearid_profile config =
+  let open Config in
   let name = Cfg_builder.get_name cfg in
   (* Compute cfg counts even if reordering is not enabled.
      The are stored in the linearid_profile for later use. *)
   let execounts = Profiles.Aggregated_decoded.compute_cfg_execounts
                     linearid_profile name cfg in
-  write_profile linearid_profile config;
   match config.reorder_basic_blocks with
-  | None -> cfg
+  | No -> cfg
   | Opt -> match execounts with
     | None -> cfg
     | Some execounts -> reorder_opt execounts cfg
@@ -213,10 +222,11 @@ let reorder ~algo cfg =
   | Profile (linearid_profile,config)
     -> reorder_profile cfg linearid_profile config
 
-let finish_profile _linearid_profile _config =
+let finish_profile linearid_profile config =
   (* Call write_profile here after all cfgs are processed.
      It will only be needed after we implement reorder that
      depends on the cfg.*)
+  write_profile linearid_profile config;
   ()
 
 let finish = function

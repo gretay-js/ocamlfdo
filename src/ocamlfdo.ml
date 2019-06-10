@@ -104,7 +104,17 @@ let setup_reorder ~binary_filename
                 in
                 Profiles.Aggregated_decoded.write_bolt
                   linearid_profile aggr_perf_profile gen_bolt_fdata;
-                let config = Reorder.Config.default gen_linearid_profile in
+                (* CR gyorsh: configuration shouldn't be hardcoded! *)
+                let config =
+                  let open Reorder.Config in
+                  { (default gen_linearid_profile) with
+                    reorder_functions = Reorder.Config.Execounts }
+                in
+                (* CR gyorsh: write_top is here just for testing! *)
+                (* Do we ever need the cfg to decide on function order? *)
+                Profiles.Aggregated_decoded.write_top_functions
+                  linearid_profile
+                  (Reorder.Config.linker_script_filename config "prelim");
                 Reorder.Profile (linearid_profile, config)
               end
           end
