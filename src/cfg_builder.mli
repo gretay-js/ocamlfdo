@@ -24,7 +24,7 @@ val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
 val to_linear : t -> Linearize.instruction
 
 (* [get_block] raises [Not_found] if label does not exist *)
-val get_block_exn : t -> label -> Cfg.block
+val get_block : t -> label -> Cfg.block option
 val get_layout : t -> Layout.t
 val set_layout : t -> Layout.t -> t
 val is_trap_handler : t -> label -> bool

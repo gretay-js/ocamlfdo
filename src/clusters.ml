@@ -81,7 +81,8 @@ let find t data =
   List.find t.clusters
     ~f:(fun c -> List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
 
-let init_layout original_layout execounts =
+let init_layout original_layout execounts  =
+  let open Profiles.Block_info in
   (* Makes a singleton cluster. data, id and pos must be unique  *)
   let km_node ~data ~weight ~pos ~id =
     assert (weight >= 0L);

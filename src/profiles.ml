@@ -16,7 +16,7 @@ open Core
 let verbose = ref true
 
 module Addr = struct
-  type t = int64 [@@deriving sexp,hash]
+  type t = int64 [@@deriving compare,sexp,hash]
 end
 module Execount = struct
   type t = int64 [@@deriving sexp]
@@ -35,7 +35,7 @@ module Loc = struct
   } [@@deriving compare, sexp, hash]
 
   type t = {
-    addr : addr;     (* Raw address in the original binary *)
+    addr : Addr.t;     (* Raw address in the original binary *)
     rel : rel option; (* Containing function info and relative offset *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
@@ -100,7 +100,7 @@ end
    because the intent is to eventually integrate Cfg in the compiler, which
    doesn't currently use sexp. We use sexp to convert to/from file. *)
 module Cfg_label = struct
-  type t = int [@@deriving sexp]
+  type t = int [@@deriving compare,sexp,hash]
 end
 
 module Block_info = struct
@@ -111,23 +111,23 @@ module Block_info = struct
     target_label : Cfg_label.t option;
     (* cfg label that the target location translates to *)
     intra : bool; (* is the target intraprocedural? *)
-    taken : t;
-    mispredict : t;
+    taken : Execount.t;
+    mispredicts : Execount.t;
   } [@@deriving sexp]
 
   (* call site info *)
   type c = {
     callsite : Loc.t;
-    targets : b list;
-  }
+    mutable callees : b list;
+  } [@@deriving sexp]
 
   (* Execution counts for a basic block *)
   type t = {
     label : Cfg_label.t;
     mutable count : Execount.t; (* Number of times this block was executed. *)
     mutable branches : b list; (* Info about branch targets  *)
-    mutable calls : b list (* Info about call targets *)
-  }
+    mutable calls : c list (* Info about call targets *)
+  } [@@deriving sexp]
 
   let mk ~label =
     { label;
@@ -138,11 +138,18 @@ module Block_info = struct
 
   let add t ~count = t.count <- Int64.(t.count + count)
 
-  let add_call t b =
-    (* Check unique call target. *)
-    assert (Option.is_none (List.find t.branches
-                              ~f:(fun b1 -> b1.target = b.target)));
-    t.branches <- b::t.branches
+  let add_call t callsite callee =
+    (* Find the callsite's info *)
+    match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
+    | None ->
+      let c = { callsite; callees=[callee] } in
+      t.calls <- c::t.calls;
+    | Some c ->
+      (* Check unique call target. *)
+      assert (Option.is_none
+                (List.find c.callees
+                   ~f:(fun b -> b.target = callee.target)));
+      c.callees <- callee::c.callees
 
   let add_branch t b =
     (* Check unique branches target. *)
@@ -157,7 +164,7 @@ module Func = struct
     name : string;  (* Name of the function symbol *)
     start : int;    (* Raw start address of the function in original binary *)
     mutable count : Execount.t;  (* Preliminary execution count *)
-    blocks : Execount.block_info Hashtbl.M(Cfg_label);
+    blocks : Block_info.t Hashtbl.M(Cfg_label).t;
     (* Map basic blocks of this function to breakdown of execution counts *)
     has_linearids : bool;        (* Does the function have any linearids? *)
     agg : Aggregated_perf.t;
@@ -219,7 +226,7 @@ module Aggregated_decoded = struct
       let func = Hashtbl.find_exn t.functions id in
       Some func
 
-  let get_linearid t loc =
+  let get_linearid t (loc:Loc.t) =
     let dbg = Option.value_exn loc.dbg in
     dbg.line
 
@@ -227,65 +234,83 @@ module Aggregated_decoded = struct
   let get_basic_instr linearid (block:Cfg.block) =
     List.find block.body ~f:(fun instr -> instr.id = linearid)
 
+  (* Find basic instruction right before the one with [linearid] in [block].
+     If not found linearid then return none. Assumes that
+     linearid is not the first instruction. *)
+  exception Found_prev of basic instruction
+  let prev_instr linearid block =
+    try
+      ignore (List.fold block.body
+                ~init:None
+                ~f:(fun prev instr ->
+                  if instr.id = linearid then
+                    raise Found_prev prev
+                  else
+                    Some instr
+                ):basic instruction);
+      None
+    with Found_prev prev ->
+      Some prev
+
   (* Find the block in [cfg] that contains [loc] using its linearid *)
-  let get_block loc cfg =
+  let get_block (loc:Loc.t) cfg =
     match loc.dbg with
     | None ->
       if !verbose then begin
         let rel = Option.value_exn loc.rel in
         printf "No linearid for 0x%Lx in func %d at offsets %d\n"
-          addr rel.id rel.offset
+          loc.addr rel.id rel.offset
       end;
       None
     | Some dbg ->
       match Cfg_builder.id_to_label cfg dbg.line with
       | None ->
-        failwith "No cfg label for linearid %d"
-          dbg.line dbg.file ()
+        failwithf "No cfg label for linearid %d in %s" dbg.line dbg.file ()
       | Some label ->
-        match Cfg_builder.get_block_exn cfg label with
-        | block -> Some block
-        | exception Not_found ->
+        match Cfg_builder.get_block cfg label with
+        | Some block -> Some block
+        | None ->
           failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
             label dbg.line dbg.file ()
 
-  let record_intra from_loc to_loc t count mispredicts func cfg =
+  let record_intra (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg =
     let from_block = get_block from_loc cfg in
     let to_block = get_block to_loc cfg in
     match from_block, to_block with
     | None, None ->
       if !verbose then
-        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, can't map to CFG\n"
+        printf "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map to CFG\n"
           count from_loc.addr to_loc.addr;
     | Some from_block, None ->
       if !verbose then
-        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, \
+        printf "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, \
                 can't map target to CFG\n"
           count from_loc.addr to_loc.addr;
       Func.record func ~label:from_block.start ~count:count
     | None, Some to_block ->
       if !verbose then
-        printf "Ignore intra branch count %Ld from 0xLx to 0xLx, \
+        printf "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, \
                 can't map source to CFG\n"
           count from_loc.addr to_loc.addr;
       Func.record func ~label:to_block.start ~count:count
     | Some from_block, Some to_block ->
       Func.record func ~label:from_block.start ~count:count;
       Func.record func ~label:to_block.start ~count:count;
-      let from_linearid = get_linearid from_loc in
-      let to_linearid = get_linearid from_addr in
+      let from_linearid = get_linearid t from_loc in
+      let to_linearid = get_linearid t to_loc in
       let bi = Func.get_block_info func from_block.start in
-      let b = { target=to_loc;
-                target_label=to_block.start;
+      let b = { Block_info.
+                target=to_loc;
+                target_label=Some to_block.start;
                 intra=true;
                 taken=count;
-                mispredict=mispredict;
+                mispredicts;
               } in
       Block_info.add_branch bi b;
 
-      if from_block.terminator.id  = from_linearid then begin
+      if from_block.terminator.id = from_linearid then begin
         (* Find the corresponding successor *)
-        match from_block.terminator with
+        match from_block.terminator.desc with
         | Return  (* return from a recursive call *)
         | Tailcall _  (* tailcall  *)
         | Raise _ -> failwith "Not implemented"
@@ -296,85 +321,123 @@ module Aggregated_decoded = struct
         failwith "Not implemented" (* find_call from_block *)
       end
 
-  let record_exit t func from_block =
-    (* Branch going outside of this function. Find the corresponding
-       instruction and update its counters. The instruction
-       is either a terminator or a call.*)
-    let linearid = get_linearid f in
-    let terminator = from_block.terminator in
-    let loc = get_loc to_addr in
-    let rel = Option.value_exn loc.rel in
-    if terminator.id = linearid then begin
-      terminator.data <-
-        Execount.Instr_data.add terminator.data loc count mispredict;
-      match terminator.desc with
-      | Branch _ | Switch _ | Tailcall _  ->
-        (* can't branch outside the current function *)
-        (* linearids must be missing. *)
-        assert (rel.id = func.id);
-        assert (Option.is_none func.dbg);
-      | Return ->
-        (* return target is known and outside this function *)
-        assert (not (loc.rel.id = func.id));
-      | Raise _ ->
-        (* catch outside this function or linearid is missing *)
-        assert ((not (loc.rel.id = func.id))
-                || (Option.is_none loc.dbg));
-    end else begin
-      (* Call *)
-      let instr = get_basic_instr addr in
-      match instr.desc with
-      | Call cop ->
-        instr.data <-
-          Execount.Instr_data.add instr.data loc count mispredict
-      | _ -> assert false
-    end
+  let record_exit (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg =
+    (* Branch going outside of this function. *)
+    match get_block from_loc cfg with
+    | None ->
+      if !verbose then
+        printf "Ignore inter branch count %Ld from 0x%Lx. Can't map to CFG.\n"
+          count from_loc.addr;
+    | Some from_block ->
+      Func.record func ~label:from_block.start ~count:count;
+      (* Find the corresponding instruction and update its counters.
+         The instruction is either a terminator or a call.*)
+      let linearid = get_linearid t from_loc in
+      let terminator = from_block.terminator in
+      let bi = Func.get_block_info func from_block.start in
+      if terminator.id = linearid then begin
+        (* terminator *)
+        match terminator.desc with
+        | Branch _ | Switch _ | Tailcall _  ->
+          (* can't branch outside the current function *)
+          assert false;
+        | Return | Raise _ ->
+          let b = { Block_info.
+                    target=to_loc;
+                    target_label=None;
+                    intra=false;
+                    taken=count;
+                    mispredicts;
+                  } in
+          Block_info.add_branch bi b;
+      end else begin
+        (* Call *)
+        match get_basic_instr linearid from_block with
+        | None -> assert false; (* we've checked before for presence of dbg info *)
+        | Some instr ->
+          match instr.desc with
+          | Call cop ->
+            let b = { Block_info.
+                      target=to_loc;
+                      target_label=None;
+                      intra=false;
+                      taken=count;
+                      mispredicts;
+                    } in
+            Block_info.add_call bi from_loc b
+          | _ -> assert false
+      end
 
-  let record_entry t to_loc count mispredicts func cfg  =
+  let record_entry (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg  =
     (* Branch into this function from another function,
        which may be unknown. One of the following situations:
        Callee: branch target is the first instr in the entry block.
        Return from call: branch target is a label after the call site.
        Exception handler: branch target is a trap handler.
     *)
-    to_block.data <- Execount.add to_block.data count;
-    let linearid = get_linearid t in
-    let first_instr = List.hd_exn to_block.body in
-    if first_instr.linearid = linearid then begin
-      let valid =
-        (* Callee *)
-        to_block.label = Cfg_builder.entry_label cfg ||
-        (* Exception handler *)
-        Cfg_builder.is_trap_handler t to_block.label in
-      if not valid then begin
-        (* Return from a call that terminates a previous block.
-           Make sure there is such a predecessor.
-           There could be more than one predecessor, and we have enough
-           information to find which one in some cases, but
-           it is not implemented because we don't have use it yet. *)
-        let loc = get_loc from_addr in
-        let rel = Option.value_exn loc.rel in
-        if (rel.id = func.id) then
-          (* return from a recursive call that's not a tailcall,
-             and call site's linearid is missing. *)
-          assert (is_non loc.dbg)
-        else begin
-          (* return from a call to another function. *)
-          failwith "Not implemented"
-          (* let callsites =
-           *   LabelSet.fold ~init:[] to_block.predecessors
-           *     ~f:(fun acc pred_label ->
-           *       let pred = Cfg_builder.get_block pred_label in
-           *       List.find block.body ...
-           *                   ~f:(fun instr -> instr.id = linearid)... in
-           * match get_basic_instr linearid pred with
-           * | None -> acc
-           * | Some instr -> acc *)
-          (* if call *)
-          (* ); *)
+    match get_block to_loc cfg with
+    | None ->
+      if !verbose then
+        printf "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
+          count to_loc.addr;
+    | Some to_block ->
+      Func.record func ~label:to_block.start ~count:count;
+      (* Find the corresponding instruction and update its counters.*)
+      let linearid = get_linearid t to_loc in
+      let bi = Func.get_block_info func to_block.start in
+      let first_instr =
+        match to_block.body with
+        | [] -> to_block.terminator
+        | hd::tl -> hd in
+      (* We could infer call targets from this info, but its not implemented
+         yet because we don't have much use for it and it would
+         change the way Block_info.add_call maps callsites using locations
+         because we don't necessarily have a location for the caller.
+         Also note that add_call currently checks that each callee can
+         be installed at most once, as guaranteed by the aggregated profile. *)
+      if first_instr.linearid = linearid &&
+         (* Callee *)
+         (to_block.label = Cfg_builder.entry_label cfg ||
+          (* Exception handler *)
+          Cfg_builder.is_trap_handler t to_block.label) then begin
+        (*  Block_info of potential callers can be updated *)
+      end else begin
+        (* Return from a call. Find predecessor instruction
+           and check that it is a call.
+           There could be more than one predecessor.
+           We have enough information to find which one in some cases. *)
+        let record_call instr =
+          match instr.desc with
+          | Call _ -> ()
+          | _ -> assert false
+        in
+        let find_prev_block_call () =
+          (* find a predecessor block that must end in a call
+             and fallthrough. *)
+          List.iter to_block.predecessors
+            ~f:(fun pred_label ->
+              let pred = Cfg_builder.get_block pred_label in
+              match pred.terminator.desc with
+              | Branch [(Always,label)] when label=to_block.start ->
+                let last_instr = List.last_exn to_block.body in
+                record_call last_instr;
+              | assert false)
+        in
+        if first_instr.linearid = linearid then begin
+          find_prev_block_call ()
+        end else begin
+          match prev_instr linearid to_block with
+          | Some instr ->
+            record_call instr;
+          | None -> (* instr must be the terminator *)
+            assert (to_block.terminator.id = linearid);
+            match to_block.body with
+            | [] -> find_prev_block_call ()
+            | _ ->
+              let last_instr = List.last_exn to_block.body in
+              record_call last_instr
         end
       end
-    end
 
 
   (* Depending on the settings of perf record and the corresponding CPU

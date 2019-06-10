@@ -162,7 +162,7 @@ let reorder_profile cfg linearid_profile options =
                     linearid_profile fun_name cfg in
   match options.reorder_basic_blocks with
   | None -> cfg
-  | Opt -> match  with
+  | Opt -> match execounts  with
     | None -> cfg
     | Some func -> reorder_opt execounts cfg
 
