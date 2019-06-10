@@ -10,7 +10,6 @@
           profiles
           intervals
           ocaml_locations
-          options
           clusters
           report)
  (libraries

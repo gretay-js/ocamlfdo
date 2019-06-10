@@ -39,6 +39,7 @@ let setup_reorder ~binary_filename
       ~gen_linearid_layout
       ~gen_linearid_profile
       ~linearid_profile_filename
+      ~gen_bolt_fdata
   =
   if random_order then begin
     (* let random_state = Random.State.make [ deterministic seed ]; *)
@@ -75,8 +76,8 @@ let setup_reorder ~binary_filename
               | Some linearid_profile_filename ->
                 let linearid_profile =
                   Profiles.Aggregated_decoded.read linearid_profile_filename in
-                let options = Options.mk linearid_profile_filename in
-                Reorder.Profile (linearid_profile, options)
+                let config = Reorder.Config.set_default linearid_profile_filename in
+                Reorder.Profile (linearid_profile, config)
               end
             | Some perf_profile_filename -> begin
                 (* CR gyorsh: decoding raw perf data should be separate from
@@ -96,8 +97,15 @@ let setup_reorder ~binary_filename
                 Profiles.Aggregated_decoded.write
                   linearid_profile
                   gen_linearid_profile;
-                let options = Options.mk gen_linearid_profile in
-                Reorder.Profile (linearid_profile, options)
+                let gen_bolt_fdata =
+                  match gen_bolt_fdata with
+                  | None -> gen_linearid_profile^".fdata"
+                  | Some  -> f
+                in
+                Profiles.Aggregated_decoded.write_bolt
+                  linearid_profile aggregated gen_bolt_fdata;
+                let config = Reorder.Config.default gen_linearid_profile in
+                Reorder.Profile (linearid_profile, config)
               end
           end
       end
@@ -337,6 +345,9 @@ match the build of ocamlopt used above.
       and gen_linearid_profile =
         flag "-gen-linearid-profile" (optional Filename.arg_type)
           ~doc:"filename output decoded perf profile"
+      and gen_bolt_fdata =
+        flag "-gen-bolt-fdata" (optional Filename.arg_type)
+          ~doc:"filename output aggregated perf profile in bolt fdata format"
       and linearid_profile_filename =
         flag "-linearid-profile" (optional Filename.arg_type)
           ~doc:"filename use decoded perf profile"
@@ -409,6 +420,7 @@ match the build of ocamlopt used above.
                   ~preserve_orig_labels
                   ~gen_linearid_profile
                   ~linearid_profile_filename
+                  ~gen_bolt_fdata
                   args)
 
 let () = Command.run command

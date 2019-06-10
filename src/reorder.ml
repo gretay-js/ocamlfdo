@@ -23,12 +23,33 @@ let verbose = false
 
 type layout = (int list) String.Map.t
 
+module Config = struct
+  type reorder_basic_blocks =  None | Opt
+  type reorder_functions = None | Exec_counts | Hot_clusters
+
+  type t = {
+    gen_linearid_profile : string;
+    write_bolt_fdata : bool;
+    write_linker_script : bool;
+    reorder_basic_blocks : reorder_basic_blocks;
+    reorder_functions : reorder_functions;
+  }
+
+  let default gen_linearid_profile = {
+    gen_linearid_profile;
+    write_bolt_fdata = true;
+    write_linker_script = true;
+    reorder_functions = None;
+    reorder_basic_blocks = None;
+  }
+end
+
 type reorder_algo =
   | Identity
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Profiles.t * Options.t
+  | Profile of Profile.Aggregate_decoded.t * Config.t
 
 let validate cfg new_cfg_layout  =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
@@ -154,34 +175,8 @@ let reorder_opt execounts cfg =
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 
-let reorder_profile cfg linearid_profile options =
-  let name = Cfg_builder.get_name cfg in
-  (* Compute cfg counts even if reordering is not enabled.
-     The are stored in the linearid_profile for later use. *)
-  let execounts = Profiles.Aggregated_decoded.compute_cfg_execounts
-                    linearid_profile fun_name cfg in
-  match options.reorder_basic_blocks with
-  | None -> cfg
-  | Opt -> match execounts  with
-    | None -> cfg
-    | Some func -> reorder_opt execounts cfg
-
-
-let reorder ~algo cfg =
-  match algo with
-  | Identity -> cfg
-  | Random random_state -> reorder_random cfg ~random_state
-  | Cfg layout -> reorder_rel_layout cfg ~layout
-  | Linear layout -> reorder_layout cfg ~layout
-  | Profile (linearid_profile,options)
-    -> reorder_profile cfg linearid_profile options
-
-let finish_profile linearid_profile options =
-  let open Options in
-  if options.write_bolt_fdata then begin
-    Profiles.write_bolt linearid_profile
-      options.gen_linearid_profile^".bolt.fdata"
-  end;
+let write_profile =
+  let open Config in
   if options.write_linker_script then begin
     let linker_script_hot = options.gen_linearid_profile^".linker-script-hot" in
     if verbose then
@@ -194,7 +189,33 @@ let finish_profile linearid_profile options =
       Profiles.Aggregated_decoded.write_top_functions
         linearid_profile linker_script_hot
     | Hot_clusters -> failwith "Not implemented"
-  end;
+  end
+
+let reorder_profile cfg linearid_profile options =
+  let name = Cfg_builder.get_name cfg in
+  (* Compute cfg counts even if reordering is not enabled.
+     The are stored in the linearid_profile for later use. *)
+  let execounts = Profiles.Aggregated_decoded.compute_cfg_execounts
+                    linearid_profile fun_name cfg in
+  match options.reorder_basic_blocks with
+  | None -> cfg
+  | Opt -> match execounts  with
+    | None -> cfg
+    | Some func -> reorder_opt execounts cfg
+
+let reorder ~algo cfg =
+  match algo with
+  | Identity -> cfg
+  | Random random_state -> reorder_random cfg ~random_state
+  | Cfg layout -> reorder_rel_layout cfg ~layout
+  | Linear layout -> reorder_layout cfg ~layout
+  | Profile (linearid_profile,options)
+    -> reorder_profile cfg linearid_profile options
+
+let finish_profile linearid_profile options =
+  (* Call write_profile here after all cfgs are processed.
+     It will only be needed after we implement reorder that
+     depends on the cfg.*)
   ()
 
 let finish = function

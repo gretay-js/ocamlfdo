@@ -18,12 +18,29 @@ open Core
    Sparse, i.e., only contains functions whose layout changed. *)
 type layout = (int list) String.Map.t
 
+
+module Config : sig
+  type reorder_basic_blocks =  None | Opt
+  type reorder_functions = None | Exec_counts | Hot_clusters
+
+  type t = {
+    gen_linearid_profile : string;
+    write_bolt_fdata : bool;
+    write_linker_script : bool;
+    reorder_basic_blocks : reorder_basic_blocks;
+    reorder_functions : reorder_functions;
+  }
+
+  val default : string -> t
+end
+
+
 type reorder_algo =
   | Identity
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Profiles.t * Options.t
+  | Profile of Profile.Aggregate_decoded.t * Config.t
 
 val reorder
   : algo:reorder_algo

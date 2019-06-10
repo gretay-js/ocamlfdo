@@ -671,7 +671,7 @@ module Aggregated_decoded = struct
     let fl = List.map sorted ~f:(fun func -> func.name) in
     Layouts.Func_layout.write_linker_script fl filename
 
-  let write_bolt t filename =
+  let write_bolt t (agg: Aggregated_perf.t) filename =
     let open Loc in
     if !verbose then
       printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
@@ -693,7 +693,6 @@ module Aggregated_decoded = struct
           data in
     Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
     Out_channel.close chan
-
 end
 
 module Perf = struct
@@ -889,7 +888,7 @@ module Perf = struct
       Printf.printf "Found pids:\n";
       Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid)
     end;
-      aggregated
+    aggregated
 
 end
 
