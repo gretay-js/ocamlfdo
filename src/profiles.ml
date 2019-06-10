@@ -162,17 +162,17 @@ module Func = struct
   type t = {
     id : int;       (* Unique identifier we assign to this function *)
     name : string;  (* Name of the function symbol *)
-    start : int;    (* Raw start address of the function in original binary *)
+    start : Addr.t; (* Raw start address of the function in original binary *)
     mutable count : Execount.t;  (* Preliminary execution count *)
     blocks : Block_info.t Hashtbl.M(Cfg_label).t;
     (* Map basic blocks of this function to breakdown of execution counts *)
-    has_linearids : bool;        (* Does the function have any linearids? *)
+    mutable has_linearids : bool; (* Does the function have any linearids? *)
     agg : Aggregated_perf.t;
     (* Counters that refer to this function, uses raw addresses.
        This can be dropped after cfg_count is constructed, to save memory. *)
   } [@@deriving sexp]
 
-  let mk id name start =
+  let mk ~id ~name ~start =
     {
       id; name; start;
       has_linearids=false;
@@ -235,22 +235,23 @@ module Aggregated_decoded = struct
     List.find block.body ~f:(fun instr -> instr.id = linearid)
 
   (* Find basic instruction right before the one with [linearid] in [block].
-     If not found linearid then return none. Assumes that
-     linearid is not the first instruction. *)
-  exception Found_prev of basic instruction
+     If not found linearid or linearid is the first
+     instruction, then return None. *)
+  exception Found_prev of Cfg.basic Cfg.instruction option
   let prev_instr linearid block =
+    let open Cfg in
     try
       ignore (List.fold block.body
                 ~init:None
                 ~f:(fun prev instr ->
                   if instr.id = linearid then
-                    raise Found_prev prev
+                    raise (Found_prev prev)
                   else
                     Some instr
-                ):basic instruction);
+                ):Cfg.basic Cfg.instruction option);
       None
     with Found_prev prev ->
-      Some prev
+      prev
 
   (* Find the block in [cfg] that contains [loc] using its linearid *)
   let get_block (loc:Loc.t) cfg =
@@ -385,28 +386,30 @@ module Aggregated_decoded = struct
       (* Find the corresponding instruction and update its counters.*)
       let linearid = get_linearid t to_loc in
       let bi = Func.get_block_info func to_block.start in
-      let first_instr =
+      let first_instr_linearid =
         match to_block.body with
-        | [] -> to_block.terminator
-        | hd::tl -> hd in
+        | [] -> to_block.terminator.id
+        | hd::tl -> hd.id in
       (* We could infer call targets from this info, but its not implemented
          yet because we don't have much use for it and it would
          change the way Block_info.add_call maps callsites using locations
          because we don't necessarily have a location for the caller.
          Also note that add_call currently checks that each callee can
          be installed at most once, as guaranteed by the aggregated profile. *)
-      if first_instr.linearid = linearid &&
-         (* Callee *)
-         (to_block.label = Cfg_builder.entry_label cfg ||
+      if first_instr_linearid = linearid &&
+         (to_block.start = Cfg_builder.entry_label cfg
+          (* Callee *)
+          || Cfg_builder.is_trap_handler cfg to_block.start
           (* Exception handler *)
-          Cfg_builder.is_trap_handler t to_block.label) then begin
+         )
+      then begin
         (*  Block_info of potential callers can be updated *)
       end else begin
         (* Return from a call. Find predecessor instruction
            and check that it is a call.
            There could be more than one predecessor.
            We have enough information to find which one in some cases. *)
-        let record_call instr =
+        let record_call (instr:Cfg.basic Cfg.instruction) =
           match instr.desc with
           | Call _ -> ()
           | _ -> assert false
@@ -414,25 +417,28 @@ module Aggregated_decoded = struct
         let find_prev_block_call () =
           (* find a predecessor block that must end in a call
              and fallthrough. *)
-          List.iter to_block.predecessors
-            ~f:(fun pred_label ->
-              let pred = Cfg_builder.get_block pred_label in
+          Cfg.LabelSet.iter
+            (fun pred_label ->
+              let pred = Option.value_exn (Cfg_builder.get_block cfg pred_label) in
               match pred.terminator.desc with
               | Branch [(Always,label)] when label=to_block.start ->
                 let last_instr = List.last_exn to_block.body in
                 record_call last_instr;
-              | assert false)
+              | _ -> assert false)
+            to_block.predecessors
         in
-        if first_instr.linearid = linearid then begin
+        if first_instr_linearid = linearid then begin
           find_prev_block_call ()
         end else begin
           match prev_instr linearid to_block with
           | Some instr ->
             record_call instr;
-          | None -> (* instr must be the terminator *)
+          | None -> (* instr with linearid must be the terminator *)
             assert (to_block.terminator.id = linearid);
             match to_block.body with
-            | [] -> find_prev_block_call ()
+            | [] ->
+              (* empty body means the call was in one of the pred blocks *)
+              find_prev_block_call ()
             | _ ->
               let last_instr = List.last_exn to_block.body in
               record_call last_instr
@@ -443,19 +449,20 @@ module Aggregated_decoded = struct
   (* Depending on the settings of perf record and the corresponding CPU
      configuration, LBR may capture different kinds of branches,
      including function calls and returns. *)
-  let record_branch t from_loc to_loc count mispredicts func cfg =
+  let record_branch t from_loc to_loc count mispredicts (func:Func.t) cfg =
+    let open Loc in
     (* at least one of the locations is known to be in this function *)
     match from_loc.rel, to_loc.rel with
     | Some from_rel, Some to_rel
       when from_rel.id = func.id && to_rel.id = func.id ->
       record_intra from_loc to_loc t count mispredicts func cfg
     | Some from_rel, _ when (from_rel.id = func.id) ->
-      record_exit from_loc t count mispredicts func cfg
+      record_exit from_loc to_loc t count mispredicts func cfg
     | _, Some to_rel when to_rel.id = func.id ->
-      record_entry to_loc t count mispredicts func cfg
+      record_entry from_loc to_loc t count mispredicts func cfg
     | _ -> assert false
 
-  let record_trace from_addr to_addr count =
+  let record_trace t from_addr to_addr count func cfg =
     failwith "Not implemented"
 
   (* Translate linear ids of this function's locations to cfg labels
@@ -470,20 +477,20 @@ module Aggregated_decoded = struct
       match get_block loc cfg with
       | None ->
         if !verbose then
-          "Ignore exec count at 0x%Lx\n, can't map to cfg\n" loc.add
+          printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n" loc.addr
       | Some block ->
         Func.record func ~label:block.start ~count:data
     );
     (* Associate fall-through trace counts with basic blocks *)
-    Hashtbl.iteri a.traces ~f:(fun ~key ~data ->
+    Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
       let (from_addr,to_addr) = key in
       let from_loc = get_loc t from_addr in
-      let to_addr = get_loc t to_addr in
+      let to_loc = get_loc t to_addr in
       record_trace t from_loc to_loc data func cfg
     );
     (* Associate branch counts with basic blocks *)
-    Hashtbl.iteri a.branches ~f:(fun ~key ~data ->
-      let mispredicts = Hashtbl.find_exn a.mispredicts key in
+    Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
+      let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
       let (from_addr,to_addr) = key in
       let from_loc = get_loc t from_addr in
       let to_loc = get_loc t to_addr in
@@ -498,10 +505,12 @@ module Aggregated_decoded = struct
     | None ->
       if !verbose then
         printf "Not found profile for %s with cfg.\n" name;
+      None
     | Some id ->
       let func = Hashtbl.find_exn t.functions id in
-      if func.count > 0 && func.has_linearids then begin
-        Some (compute_execounts t func cfg)
+      if func.count > 0L && func.has_linearids then begin
+        compute_execounts t func cfg;
+        Some func.blocks
       end else
         None
 
@@ -514,13 +523,13 @@ module Aggregated_decoded = struct
      It does not use the CFG.
      In particular, it does not count instructions that can be traced using LBR.
      The advantage is that we can compute it for non-OCaml functions. *)
-  let create_func_execounts t agg =
+  let create_func_execounts t (agg:Aggregated_perf.t) =
     Hashtbl.iteri agg.instructions
       ~f:(fun ~key ~data ->
         match get_func t key with
         | None -> ()
         | Some func ->
-          func.counts <- func.counts + data;
+          func.count <- Int64.(func.count + data);
           Hashtbl.add_exn func.agg.instructions ~key ~data);
 
     let process (from_addr, to_addr) update =
@@ -539,9 +548,9 @@ module Aggregated_decoded = struct
     in
     Hashtbl.iteri agg.branches
       ~f:(fun ~key ~data ->
-        let mispredicts = Hashtbl.find_exn t.mispredicts key in
+        let mispredicts = Hashtbl.find_exn agg.mispredicts key in
         let update_br func =
-          func.counts <- func.counts + data;
+          func.count <- Int64.(func.count + data);
           Hashtbl.add_exn func.agg.branches ~key ~data;
           Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts in
         process key update_br);
@@ -551,16 +560,17 @@ module Aggregated_decoded = struct
            is account for in branches. *)
         let update_tr func =
           Hashtbl.add_exn func.agg.traces ~key ~data in
-        process update_tr)
+        process key update_tr)
 
   (* Find or add the function and return its id *)
   let get_func_id t ~name ~start =
     match Hashtbl.find t.name2id name with
     | None ->
-      let id = Hashtbl.length functions in
+      let id = Hashtbl.length t.functions in
       let func = Func.mk ~id ~name ~start in
-      Hashtbl.add_exn t.functions ~key:id ~data:func
+      Hashtbl.add_exn t.functions ~key:id ~data:func;
       Hashtbl.add_exn t.name2id ~key:name ~data:id;
+      func.id
     | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       assert (func.id = id);
@@ -583,7 +593,7 @@ module Aggregated_decoded = struct
         match Int64.(to_int (addr - start)) with
         | None -> failwithf "Offset too big: 0x%Lx" (Int64.(addr - start)) ()
         | Some offset -> assert (offset >= 0); offset in
-      let id = get_func_id t name start in
+      let id = get_func_id t ~name ~start in
       let rel = Some { id; offset; } in
       let dbg =
         match Ocaml_locations.(decode_line locations
@@ -591,13 +601,13 @@ module Aggregated_decoded = struct
         | None -> None
         | Some (file,line) ->
           (* Set has_linearids of this function *)
-          let func = get_func id in
+          let func = Hashtbl.find_exn t.functions id  in
           func.has_linearids <- true;
           Some {Loc.file;line;}
       in
       { addr; rel; dbg; }
 
-  let decode_aggregated locations aggregated_perf =
+  let decode_aggregated locations (aggregated_perf:Aggregated_perf.t) =
     if !verbose then
       printf "Decoding perf profile.\n";
 
@@ -612,12 +622,12 @@ module Aggregated_decoded = struct
       if not (Caml.Hashtbl.mem addresses key) then
         Caml.Hashtbl.add addresses key ();
     in
-    let add2 (f,t) = add f; add t in
-    Hashtbl.iter_keys t.instructions ~f:add;
-    Hashtbl.iter_keys t.branches ~f:add2;
+    let add2 (fa,ta) = add fa; add ta in
+    Hashtbl.iter_keys aggregated_perf.instructions ~f:add;
+    Hashtbl.iter_keys aggregated_perf.branches ~f:add2;
     (* A key may appear in both t.instruction and t.branches *)
-    assert (size <= len);
     let size = Caml.Hashtbl.length addresses in
+    assert (size <= len);
     (* Resolve and cache all addresses we need in one pass over the binary. *)
     Elf_locations.resolve_all locations addresses ~reset:true;
     (* Decode all locations: map addresses to locations *)
@@ -652,34 +662,27 @@ module Aggregated_decoded = struct
     Printf.fprintf chan !"%{sexp:t}\n" t;
     Out_channel.close chan
 
-end
+  let write_top_functions t filename =
+    if !verbose then
+      printf "Writing top functions to %s\n" filename;
+    (* Sort functions using preliminary function-level execution counts
+       in descending order. *)
+    let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
+    let fl = List.map sorted ~f:(fun func -> func.name) in
+    Layouts.Func_layout.write_linker_script fl filename
 
-type t = Aggregated_decoded.t
-
-let write_top_functions t filename =
-  if !verbose then
-    printf "Writing top functions to %s\n" filename;
-  let open Aggregated_decoded in
-  (* Sort functions using preliminary function-level execution counts
-     in descending order. *)
-  let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
-  let fl = List.map sorted ~f:(fun func -> Func.func.id) in
-  Func_layout.write_linker_script fl filename
-
-let write_bolt t filename =
-  let open Loc in
-  let open Aggregated_perf in
-  let open Aggregated_decoded in
-  if !verbose then
-    printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
-  let chan = Out_channel.create filename in
-  let write_bolt_count ~key ~data =
+  let write_bolt t filename =
+    let open Loc in
+    if !verbose then
+      printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
+    let chan = Out_channel.create filename in
+    let write_bolt_count ~key ~data =
       let mis = Option.value
-                  (Hashtbl.find t.counts.mispredicts key)
+                  (Hashtbl.find agg.mispredicts key)
                   ~default:0L in
       let (from_addr, to_addr) = key in
-      let from_loc = loc t from_addr  in
-      let to_loc = loc t to_addr in
+      let from_loc = get_loc t from_addr  in
+      let to_loc = get_loc t to_addr in
       match from_loc.func, to_loc.func with
       | None, None -> ()
       | _ ->
@@ -688,8 +691,10 @@ let write_bolt t filename =
           (to_bolt_string to_loc)
           mis
           data in
-  Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
-  Out_channel.close chan
+    Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
+    Out_channel.close chan
+
+end
 
 module Perf = struct
   (* Perf profile format as output of perf script -F pid,ip,brstack *)

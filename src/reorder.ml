@@ -191,7 +191,8 @@ let finish_profile linearid_profile options =
       if verbose then printf "Reorder functions is not enabled.\
                               Cannot output linker script.\n"
     | Exec_count ->
-      Profiles.write_top_functions linearid_profile linker_script_hot
+      Profiles.Aggregated_decoded.write_top_functions
+        linearid_profile linker_script_hot
     | Hot_clusters -> failwith "Not implemented"
   end;
   ()

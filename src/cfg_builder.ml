@@ -54,7 +54,7 @@ type t = {
 }
 
 let entry_label t = t.cfg.entry_label
-let get_block_exn t label =
+let get_block t label =
   Hashtbl.find_opt t.cfg.blocks label
 let get_layout t = t.layout
 let set_layout t new_layout =
