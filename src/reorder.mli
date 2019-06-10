@@ -21,7 +21,7 @@ type layout = (int list) String.Map.t
 
 module Config : sig
   type reorder_basic_blocks =  None | Opt
-  type reorder_functions = None | Exec_counts | Hot_clusters
+  type reorder_functions = None | Execounts | Hot_clusters
 
   type t = {
     gen_linearid_profile : string;
@@ -40,7 +40,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Profile.Aggregate_decoded.t * Config.t
+  | Profile of Profiles.Aggregated_decoded.t * Config.t
 
 val reorder
   : algo:reorder_algo

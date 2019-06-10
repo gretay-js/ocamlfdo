@@ -76,7 +76,7 @@ let setup_reorder ~binary_filename
               | Some linearid_profile_filename ->
                 let linearid_profile =
                   Profiles.Aggregated_decoded.read linearid_profile_filename in
-                let config = Reorder.Config.set_default linearid_profile_filename in
+                let config = Reorder.Config.default linearid_profile_filename in
                 Reorder.Profile (linearid_profile, config)
               end
             | Some perf_profile_filename -> begin
@@ -87,7 +87,7 @@ let setup_reorder ~binary_filename
                 (* First aggregate raw profile and then decode it. *)
                 let aggr_perf_profile = Profiles.Perf.read_and_aggregate
                                           perf_profile_filename in
-                let linearid_profile = Profiles.decode_aggregated
+                let linearid_profile = Profiles.Aggregated_decoded.decode_aggregated
                                          locations aggr_perf_profile in
                 let gen_linearid_profile =
                   match gen_linearid_profile with
@@ -100,10 +100,10 @@ let setup_reorder ~binary_filename
                 let gen_bolt_fdata =
                   match gen_bolt_fdata with
                   | None -> gen_linearid_profile^".fdata"
-                  | Some  -> f
+                  | Some f -> f
                 in
                 Profiles.Aggregated_decoded.write_bolt
-                  linearid_profile aggregated gen_bolt_fdata;
+                  linearid_profile aggr_perf_profile gen_bolt_fdata;
                 let config = Reorder.Config.default gen_linearid_profile in
                 Reorder.Profile (linearid_profile, config)
               end
@@ -231,6 +231,7 @@ let main ~binary_filename
       ~preserve_orig_labels
       ~gen_linearid_profile
       ~linearid_profile_filename
+      ~gen_bolt_fdata
       args =
 
   let algo = setup_reorder ~binary_filename
@@ -242,6 +243,7 @@ let main ~binary_filename
                ~gen_linearid_layout
                ~gen_linearid_profile
                ~linearid_profile_filename
+               ~gen_bolt_fdata
   in
   let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in

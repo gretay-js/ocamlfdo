@@ -39,12 +39,6 @@ module Loc = struct
     rel : rel option; (* Containing function info and relative offset *)
     dbg : dbg option;
   } [@@deriving compare, sexp, hash]
-
-  let to_bolt_string t =
-    match t.rel with
-    | None -> "0 [unknown] 0"
-    | Some rel -> sprintf "1 %d %x" rel.id rel.offset
-
 end
 
 module Aggregated_perf = struct
@@ -107,7 +101,10 @@ module Block_info = struct
 
   (* Successor info  *)
   type b = {
-    target : Loc.t;
+    (* Must have at least one of target or target_label *)
+    target : Loc.t option;
+    (* fallthrough blocks that were inferred from LBR but not directly sampled
+       don't have a corresponding raw address. We don't define their target location. *)
     target_label : Cfg_label.t option;
     (* cfg label that the target location translates to *)
     intra : bool; (* is the target intraprocedural? *)
@@ -206,13 +203,19 @@ module Aggregated_decoded = struct
     addr2loc : Loc.t Hashtbl.M(Addr).t; (* map raw addresses to locations *)
     name2id : int Hashtbl.M(String).t; (* map func name to func id *)
     functions : Func.t Hashtbl.M(Int).t; (* map func id to func info *)
+    mutable malformed_traces : Execount.t
+    (* number of fallthrough traces between functions *)
   }  [@@deriving sexp]
 
   let mk size =
     { addr2loc = Hashtbl.create ~size (module Addr);
       name2id = Hashtbl.create (module String);
       functions = Hashtbl.create (module Int);
+      malformed_traces = 0L;
     }
+
+  let mal t count =
+    t.malformed_traces <- Int64.(t.malformed_traces + count)
 
   let get_loc t addr =
     Hashtbl.find_exn t.addr2loc addr
@@ -226,7 +229,7 @@ module Aggregated_decoded = struct
       let func = Hashtbl.find_exn t.functions id in
       Some func
 
-  let get_linearid t (loc:Loc.t) =
+  let get_linearid (loc:Loc.t) =
     let dbg = Option.value_exn loc.dbg in
     dbg.line
 
@@ -274,7 +277,7 @@ module Aggregated_decoded = struct
           failwithf "Can't find cfg basic block labeled %d for linearid %d in %s\n"
             label dbg.line dbg.file ()
 
-  let record_intra (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg =
+  let record_intra (from_loc:Loc.t) (to_loc:Loc.t) _t count mispredicts func cfg =
     let from_block = get_block from_loc cfg in
     let to_block = get_block to_loc cfg in
     match from_block, to_block with
@@ -297,32 +300,46 @@ module Aggregated_decoded = struct
     | Some from_block, Some to_block ->
       Func.record func ~label:from_block.start ~count:count;
       Func.record func ~label:to_block.start ~count:count;
-      let from_linearid = get_linearid t from_loc in
-      let to_linearid = get_linearid t to_loc in
+      let from_linearid = get_linearid from_loc in
+      let to_linearid = get_linearid to_loc in
+      let first_instr_id =
+        match to_block.body with
+        | [] -> to_block.terminator.id
+        | hd::_ -> hd.id in
+      assert (first_instr_id = to_linearid);
+
       let bi = Func.get_block_info func from_block.start in
       let b = { Block_info.
-                target=to_loc;
+                target=Some to_loc;
                 target_label=Some to_block.start;
                 intra=true;
                 taken=count;
                 mispredicts;
               } in
-      Block_info.add_branch bi b;
-
       if from_block.terminator.id = from_linearid then begin
         (* Find the corresponding successor *)
         match from_block.terminator.desc with
         | Return  (* return from a recursive call *)
-        | Tailcall _  (* tailcall  *)
-        | Raise _ -> failwith "Not implemented"
-        | _ -> failwith "Not implemented"
+          (* target must be right after a call *)
+        | Tailcall _  ->  (* tailcall  *)
+          failwith "Check not implemented"
+        | Raise _ -> (* target must be a hanlder block *)
+          assert (Cfg_builder.is_trap_handler cfg to_block.start)
+        | Branch _ | Switch _ ->
+          let successors = Cfg.successor_labels from_block in
+          assert (List.mem successors to_block.start ~equal:Int.equal);
+          Block_info.add_branch bi b;
       end
       else begin
-        (* recursive call, find the instruction *)
-        failwith "Not implemented" (* find_call from_block *)
+        (* recursive call, find the call instruction *)
+        let instr = Option.value_exn (get_basic_instr from_linearid from_block) in
+        match instr.desc with
+        | Call _ ->
+          Block_info.add_call bi from_loc b;
+        | _ -> assert false
       end
 
-  let record_exit (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg =
+  let record_exit (from_loc:Loc.t) (to_loc:Loc.t) _ count mispredicts func cfg =
     (* Branch going outside of this function. *)
     match get_block from_loc cfg with
     | None ->
@@ -333,7 +350,7 @@ module Aggregated_decoded = struct
       Func.record func ~label:from_block.start ~count:count;
       (* Find the corresponding instruction and update its counters.
          The instruction is either a terminator or a call.*)
-      let linearid = get_linearid t from_loc in
+      let linearid = get_linearid from_loc in
       let terminator = from_block.terminator in
       let bi = Func.get_block_info func from_block.start in
       if terminator.id = linearid then begin
@@ -344,7 +361,7 @@ module Aggregated_decoded = struct
           assert false;
         | Return | Raise _ ->
           let b = { Block_info.
-                    target=to_loc;
+                    target=Some to_loc;
                     target_label=None;
                     intra=false;
                     taken=count;
@@ -357,9 +374,9 @@ module Aggregated_decoded = struct
         | None -> assert false; (* we've checked before for presence of dbg info *)
         | Some instr ->
           match instr.desc with
-          | Call cop ->
+          | Call _ ->
             let b = { Block_info.
-                      target=to_loc;
+                      target=Some to_loc;
                       target_label=None;
                       intra=false;
                       taken=count;
@@ -369,7 +386,7 @@ module Aggregated_decoded = struct
           | _ -> assert false
       end
 
-  let record_entry (from_loc:Loc.t) (to_loc:Loc.t) t count mispredicts func cfg  =
+  let record_entry (_from_loc:Loc.t) (to_loc:Loc.t) _t count _mispredicts func cfg  =
     (* Branch into this function from another function,
        which may be unknown. One of the following situations:
        Callee: branch target is the first instr in the entry block.
@@ -384,12 +401,12 @@ module Aggregated_decoded = struct
     | Some to_block ->
       Func.record func ~label:to_block.start ~count:count;
       (* Find the corresponding instruction and update its counters.*)
-      let linearid = get_linearid t to_loc in
-      let bi = Func.get_block_info func to_block.start in
+      let linearid = get_linearid to_loc in
+      let _bi = Func.get_block_info func to_block.start in
       let first_instr_linearid =
         match to_block.body with
         | [] -> to_block.terminator.id
-        | hd::tl -> hd.id in
+        | hd::_ -> hd.id in
       (* We could infer call targets from this info, but its not implemented
          yet because we don't have much use for it and it would
          change the way Block_info.add_call maps callsites using locations
@@ -462,8 +479,79 @@ module Aggregated_decoded = struct
       record_entry from_loc to_loc t count mispredicts func cfg
     | _ -> assert false
 
-  let record_trace t from_addr to_addr count func cfg =
-    failwith "Not implemented"
+  let record_trace t from_loc to_loc count (func:Func.t) cfg =
+    (* both locations must be in this function *)
+    let open Loc in
+    match from_loc.rel, to_loc.rel with
+    | Some from_rel, Some to_rel
+      when from_rel.id = func.id && to_rel.id = func.id ->
+      begin
+      match get_block from_loc cfg, get_block to_loc cfg with
+      | Some from_block, Some to_block ->
+        if from_block.start = to_block.start then begin
+          if !verbose then
+            printf "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:\
+                    from_block = to_block\n" count from_loc.addr to_loc.addr;
+          mal t count
+        end else begin
+          let rec record_fallthrough layout =
+            match layout with
+            | [] ->
+              (* reached the end of the layout without finding to_block *)
+              mal t count
+            | lbl::rest ->
+              let block = Option.value_exn (Cfg_builder.get_block cfg lbl) in
+              if block.start = to_block.start then begin
+                if !verbose then
+                  printf "recorded healthy trace from 0x%Lx to 0x%Lx count %Ld\n"
+                    from_loc.addr to_loc.addr count;
+                ()
+              end else begin
+                (* Account only for the intermediate blocks
+                   in the trace. Endpoint blocks of the trace
+                   are accounted for when we handled their LBR branches. *)
+                let next = List.hd_exn rest in
+                Func.record func ~label:next ~count:count;
+                match block.terminator.desc with
+                | Branch _ | Switch _ ->
+                  assert (List.mem
+                            (Cfg.successor_labels block)
+                            next
+                            ~equal:Int.equal);
+                  let bi = Func.get_block_info func block.start in
+                  let b = { Block_info.
+                            target=None;
+                            target_label=Some next;
+                            intra=true;
+                            taken=count;
+                            mispredicts=0L;
+                          } in
+                  Block_info.add_branch bi b;
+                  record_fallthrough rest
+                | _ -> assert false
+              end
+          in
+          (* get the suffix of the layout starting with from_block *)
+          let layout = Cfg_builder.get_layout cfg in
+          let layout =
+            List.drop_while layout
+              ~f:(fun lbl -> not (lbl = from_block.start)) in
+          assert (not (List.is_empty layout));
+          record_fallthrough layout
+        end
+      | _ ->
+        if !verbose then
+          printf "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:\
+                  cannot map to_loc or from_loc to cfg blocks.\n"
+            count from_loc.addr to_loc.addr;
+        mal t count
+    end
+    | _ ->
+      if !verbose then
+        printf "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:\
+                to and from function is not the same or not known.\n"
+          count from_loc.addr to_loc.addr;
+      mal t count
 
   (* Translate linear ids of this function's locations to cfg labels
      within this function, find the corresponding basic blocks
@@ -676,6 +764,13 @@ module Aggregated_decoded = struct
     if !verbose then
       printf "Writing aggregated decoded prfile in bolt form to %s\n" filename;
     let chan = Out_channel.create filename in
+    let to_bolt_string rel =
+      match rel with
+      | None -> "0 [unknown] 0"
+      | Some rel ->
+        let func = Hashtbl.find_exn t.functions rel.id in
+        sprintf "1 %s %x" func.name rel.offset
+    in
     let write_bolt_count ~key ~data =
       let mis = Option.value
                   (Hashtbl.find agg.mispredicts key)
@@ -683,15 +778,16 @@ module Aggregated_decoded = struct
       let (from_addr, to_addr) = key in
       let from_loc = get_loc t from_addr  in
       let to_loc = get_loc t to_addr in
-      match from_loc.func, to_loc.func with
-      | None, None -> ()
+      match from_loc.rel, to_loc.rel with
+      | None, None -> () (* don't print if both endpoints are unknown *)
       | _ ->
         Printf.fprintf chan "%s %s %Ld %Ld\n"
-          (to_bolt_string from_loc)
-          (to_bolt_string to_loc)
+          (to_bolt_string from_loc.rel)
+          (to_bolt_string to_loc.rel)
           mis
-          data in
-    Hashtbl.iteri t.counts.branches ~f:write_bolt_count;
+          data
+    in
+    Hashtbl.iteri agg.branches ~f:write_bolt_count;
     Out_channel.close chan
 end
 

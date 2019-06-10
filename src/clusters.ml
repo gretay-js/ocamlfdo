@@ -84,7 +84,7 @@ let find t data =
 let init_layout original_layout execounts  =
   let open Profiles.Block_info in
   (* Makes a singleton cluster. data, id and pos must be unique  *)
-  let km_node ~data ~weight ~pos ~id =
+  let mk_node ~data ~weight ~pos ~id =
     assert (weight >= 0L);
     (* Cluster that contains the entry position of
        the original layout cannot be merged *after* another cluster. *)
@@ -118,18 +118,18 @@ let init_layout original_layout execounts  =
   (* Add all branch info *)
   let label2pos =
     List.foldi original_layout
-      ~init:Map.empty
-      ~f:(fun i acc data -> Map.add acc data i) in
+      ~init:Int.Map.empty
+      ~f:(fun i acc data -> Int.Map.add_exn acc ~key:data ~data:i) in
   let find_pos label =
     Map.find_exn label2pos label in
   let edges =
     Hashtbl.fold execounts ~init:[]
-      ~f:(fun acc block_info ->
+      ~f:(fun ~key:_ ~data:block_info acc ->
         let src = find_pos block_info.label in
         List.fold block_info.branches ~init:acc
           ~f:(fun acc b ->
             if b.intra then begin
-              let dst = find_pos b.target_label in
+              let dst = find_pos (Option.value_exn b.target_label) in
               let e = mk_edge ~src ~dst ~weight:b.taken in
               e::acc
             end else acc))
@@ -273,7 +273,7 @@ let find_max_pred t c =
    Return its data.
 *)
 let optimize_layout original_layout execounts =
-  let t = init_layout original_layout blocks in
+  let t = init_layout original_layout execounts in
   let len_clusters = List.length t.clusters in
   let len_layout = List.length t.original_layout in
   if not (len_layout = len_clusters) then begin
