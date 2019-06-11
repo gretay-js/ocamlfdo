@@ -1,17 +1,5 @@
 (executable
  (name ocamlfdo)
- (modules ocamlfdo
-          elf_locations
-          reorder
-          cfg
-          cfg_builder
-          simplify
-          layouts
-          profiles
-          intervals
-          ocaml_locations
-          clusters
-          report)
  (libraries
         owee
         core

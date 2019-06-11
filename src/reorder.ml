@@ -23,23 +23,30 @@ let verbose = false
 type layout = int list String.Map.t
 
 module Config = struct
-  type reorder_basic_blocks = No | Opt
+  type reorder_basic_blocks =
+    | No
+    | Opt
 
-  type reorder_functions = No | Execounts | Hot_clusters
+  type reorder_functions =
+    | No
+    | Execounts
+    | Hot_clusters
 
-  type t =
-    { gen_linearid_profile: string
-    ; write_bolt_fdata: bool
-    ; write_linker_script: bool
-    ; reorder_basic_blocks: reorder_basic_blocks
-    ; reorder_functions: reorder_functions }
+  type t = {
+    gen_linearid_profile : string;
+    write_bolt_fdata : bool;
+    write_linker_script : bool;
+    reorder_basic_blocks : reorder_basic_blocks;
+    reorder_functions : reorder_functions
+  }
 
   let default gen_linearid_profile =
-    { gen_linearid_profile
-    ; write_bolt_fdata= true
-    ; write_linker_script= true
-    ; reorder_functions= No
-    ; reorder_basic_blocks= No }
+    { gen_linearid_profile;
+      write_bolt_fdata = true;
+      write_linker_script = true;
+      reorder_functions = No;
+      reorder_basic_blocks = No
+    }
 
   let linker_script_hot_extension = "linker-script-hot"
 
@@ -64,14 +71,14 @@ let validate cfg new_cfg_layout =
     let compare = Int.compare in
     let orig_len = List.length orig_cfg_layout in
     if Cfg_builder.preserve_orig_labels cfg then (
-      assert (List.length new_cfg_layout = orig_len) ;
-      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) ;
+      assert (List.length new_cfg_layout = orig_len);
+      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
       assert (
         List.sort new_cfg_layout ~compare
         = List.sort orig_cfg_layout ~compare ) )
     else (
-      assert (List.length new_cfg_layout <= orig_len) ;
-      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) ) ;
+      assert (List.length new_cfg_layout <= orig_len);
+      assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) );
     Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg)) )
 
 let reorder_random cfg ~random_state =
@@ -81,7 +88,7 @@ let reorder_random cfg ~random_state =
     List.hd_exn original_layout
     :: List.permute ~random_state (List.tl_exn original_layout)
   in
-  validate cfg new_layout ;
+  validate cfg new_layout;
   Cfg_builder.set_layout cfg new_layout
 
 let print_list msg l =
@@ -95,14 +102,14 @@ let reorder_layout cfg ~layout =
     match String.Map.find layout fun_name with
     | None -> cfg
     | Some sorted_fun_layout ->
-        if verbose then Cfg_builder.print stdout cfg ;
+        if verbose then Cfg_builder.print stdout cfg;
         let orig_cfg_layout = Cfg_builder.get_layout cfg in
-        print_list "orig" orig_cfg_layout ;
-        print_list "sorted_fun_layout" sorted_fun_layout ;
+        print_list "orig" orig_cfg_layout;
+        print_list "sorted_fun_layout" sorted_fun_layout;
         (* Convert linear_ids to labels *)
         let partial_cfg_layout =
           List.map sorted_fun_layout ~f:(fun id ->
-              if verbose then Printf.printf "%d\n" id ;
+              if verbose then Printf.printf "%d\n" id;
               match Cfg_builder.id_to_label cfg id with
               | None ->
                   failwithf "Cannot find label for linear id %d in %s\n" id
@@ -110,7 +117,7 @@ let reorder_layout cfg ~layout =
               | Some label -> label )
           |> List.remove_consecutive_duplicates ~equal:Int.equal
         in
-        print_list "partial:" partial_cfg_layout ;
+        print_list "partial:" partial_cfg_layout;
         let partial_cfg_map =
           List.foldi partial_cfg_layout ~init:Int.Map.empty
             ~f:(fun i m label ->
@@ -137,13 +144,13 @@ let reorder_layout cfg ~layout =
                  Int.compare index1 index2 )
           |> List.concat
         in
-        print_list "new:" new_cfg_layout ;
-        validate cfg new_cfg_layout ;
+        print_list "new:" new_cfg_layout;
+        validate cfg new_cfg_layout;
         Cfg_builder.set_layout cfg new_cfg_layout
   with KeyAlreadyPresent (id, pos) ->
     Report.log
       (sprintf "Ignoring %s: cannot add linear_id %d at position %d\n"
-         fun_name id pos) ;
+         fun_name id pos);
     cfg
 
 let reorder_rel_layout cfg ~layout =
@@ -151,20 +158,20 @@ let reorder_rel_layout cfg ~layout =
   match String.Map.find layout fun_name with
   | None -> cfg
   | Some new_cfg_layout ->
-      if verbose then Cfg_builder.print stdout cfg ;
+      if verbose then Cfg_builder.print stdout cfg;
       let orig_cfg_layout = Cfg_builder.get_layout cfg in
-      print_list "orig" orig_cfg_layout ;
-      print_list "new" new_cfg_layout ;
-      validate cfg new_cfg_layout ;
+      print_list "orig" orig_cfg_layout;
+      print_list "new" new_cfg_layout;
+      validate cfg new_cfg_layout;
       Cfg_builder.set_layout cfg new_cfg_layout
 
 (* Basic block layout using clustering algorihtm. *)
 let reorder_opt execounts cfg =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
-  print_list "orig" orig_cfg_layout ;
+  print_list "orig" orig_cfg_layout;
   let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout execounts in
-  print_list "new" new_cfg_layout ;
-  validate cfg new_cfg_layout ;
+  print_list "new" new_cfg_layout;
+  validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 
 let write_profile linearid_profile config =
@@ -172,7 +179,7 @@ let write_profile linearid_profile config =
   if config.write_linker_script then (
     let linker_script_hot = Config.linker_script_filename config "" in
     if verbose then
-      printf "Writing linker script hot to %s\n" linker_script_hot ;
+      printf "Writing linker script hot to %s\n" linker_script_hot;
     match config.reorder_functions with
     | No ->
         if verbose then
@@ -188,10 +195,7 @@ let reorder_profile cfg linearid_profile config =
   let name = Cfg_builder.get_name cfg in
   (* Compute cfg counts even if reordering is not enabled. The are stored in
      the linearid_profile for later use. *)
-  let execounts =
-    Profiles.Aggregated_decoded.compute_cfg_execounts linearid_profile name
-      cfg
-  in
+  let execounts = Block_info.create linearid_profile name cfg in
   match config.reorder_basic_blocks with
   | No -> cfg
   | Opt -> (
@@ -211,7 +215,7 @@ let reorder ~algo cfg =
 let finish_profile linearid_profile config =
   (* Call write_profile here after all cfgs are processed. It will only be
      needed after we implement reorder that depends on the cfg.*)
-  write_profile linearid_profile config ;
+  write_profile linearid_profile config;
   ()
 
 let finish = function

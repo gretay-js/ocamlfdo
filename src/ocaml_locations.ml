@@ -22,7 +22,10 @@ let suffix = function
   | Linearid -> [".linear"]
   | Source -> [".ml"; ".mli"; ".c"; ".h"]
 
-let unique_suffix t = match suffix t with [s] -> s | _ -> assert false
+let unique_suffix t =
+  match suffix t with
+  | [s] -> s
+  | _ -> assert false
 
 (* Checks that debug info is relative to the input function, i.e., the name
    of the "file" matches the name of the function. *)
@@ -70,3 +73,7 @@ let decode_line locations ~program_counter func t =
   match t with
   | Linearid -> decode_line_ir locations ~program_counter func t
   | Source -> decode_line locations ~program_counter func t
+
+let line locations func line =
+  let suffix = inque_s
+  Elf_locations.to_address locations func.name line
