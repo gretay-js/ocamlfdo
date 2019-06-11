@@ -22,31 +22,25 @@ val create : elf_executable:string -> t
 
 val resolve : t -> program_counter:Int64.t -> (string * int) option
 
-val resolve_from_cache : t -> program_counter:Int64.t -> (string * int) option
+val resolve_from_cache :
+  t -> program_counter:Int64.t -> (string * int) option
 
 val function_at_pc : t -> program_counter:Int64.t -> string option
 
-val resolve_function_containing
-  : t
-  -> program_counter:Int64.t
-  -> string Intervals.interval option
+val resolve_function_containing :
+  t -> program_counter:Int64.t -> string Intervals.interval option
 
-val resolve_function_starting_at
-  : t
+val resolve_function_starting_at :
+     t
   -> program_counter:Int64.t
   -> resolve_contents:bool
   -> reset:bool
   -> string option
 
-val resolve_function_offsets
-  : t
-  -> program_counter:Int64.t
-  -> int list
-  -> reset:bool
-  -> string option
+val resolve_function_offsets :
+  t -> program_counter:Int64.t -> int list -> reset:bool -> string option
 
 (* Resolves debug info in one pass and caches the results for addresses. *)
 val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> reset:bool -> unit
 
 val print_dwarf : t -> unit
-

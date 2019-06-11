@@ -11,7 +11,4 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-val disjunction
-  : Cfg.condition
-  -> Cfg.condition
-  -> Cfg.condition list
+val disjunction : Cfg.condition -> Cfg.condition -> Cfg.condition list
