@@ -25,7 +25,8 @@ type t = {
   functions : Func.t Hashtbl.M(Int).t;
   (* map func id to func info *)
   mutable malformed_traces : Execount.t
-      (* number of fallthrough traces between functions *)
+  (* number of fallthrough traces between functions *)
+                               locations : Elf_locations.t;
 }
 [@@deriving sexp]
 
@@ -107,7 +108,7 @@ let get_func_id t ~name ~start =
 let decode_loc t locations addr =
   let open Loc in
   match
-    Elf_locations.resolve_function_containing locations
+    Elf_locations.resolve_function_containing t.locations
       ~program_counter:addr
   with
   | None ->
@@ -167,7 +168,7 @@ let decode_aggregated locations (aggregated_perf : Aggregated_perf.t) =
   if !verbose then printf "size=%d,len=%d\n" size len;
   assert (size <= len);
   (* Resolve and cache all addresses we need in one pass over the binary. *)
-  Elf_locations.resolve_all locations addresses ~reset:true;
+  Elf_locations.resolve_all t.locations addresses ~reset:true;
   (* Decode all locations: map addresses to locations *)
   let t = mk size in
   Caml.Hashtbl.iter
