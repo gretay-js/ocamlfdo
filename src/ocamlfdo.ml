@@ -23,8 +23,7 @@ let time f x =
   let start = now () in
   let fx = f x in
   let stop = now () in
-  Printf.printf "Execution time: %s\n"
-    (Span.to_string (abs_diff stop start));
+  printf "Execution time: %s\n" (Span.to_string (abs_diff stop start));
   fx
 
 let load_locations binary_filename =
@@ -174,7 +173,7 @@ let check_equal f ~new_body =
 let print_linear msg f =
   if false then
     if !verbose then (
-      Printf.printf "%s processing %s\n" f.Linearize.fun_name msg;
+      printf "%s processing %s\n" f.Linearize.fun_name msg;
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let rec remove_discriminator = function
@@ -369,8 +368,8 @@ let command =
           preserve_orig_labels
           && (eliminate_dead_blocks || eliminate_fallthrough_blocks)
         then (
-          Printf.printf "Warning: Ignoring -preserve-orig-labels.\n";
-          Printf.printf "Incompatible with -edb and -efb\n" );
+          printf "Warning: Ignoring -preserve-orig-labels.\n";
+          printf "Incompatible with -edb and -efb\n" );
         if random_order then
           if
             (not (perf_profile_filename = None))
@@ -379,22 +378,21 @@ let command =
             || (not (linearid_layout_filename = None))
             || not (binary_filename = None)
           then (
-            Printf.printf
+            printf
               "Warning: Ignoring -perf-profile -raw-layout -layout \
                -linearid-layout -binary. ";
-            Printf.printf "Incompatible with -random\n" );
+            printf "Incompatible with -random\n" );
         if binary_filename = None then (
           if
             (not (perf_profile_filename = None))
             || not (raw_layout_filename = None)
           then (
-            Printf.printf
-              "Warning: ignoring -raw_layout and -perf-profile. ";
-            Printf.printf "Cannot use without -binary.\n" ) )
+            printf "Warning: ignoring -raw_layout and -perf-profile. ";
+            printf "Cannot use without -binary.\n" ) )
         else if perf_profile_filename = None && raw_layout_filename = None
         then (
-          Printf.printf "Warning: Ignoring -binary. ";
-          Printf.printf "Cannot use without -perf-profile or -raw-layout.\n" ) );
+          printf "Warning: Ignoring -binary. ";
+          printf "Cannot use without -perf-profile or -raw-layout.\n" ) );
       fun () ->
         main ~binary_filename ~perf_profile_filename ~raw_layout_filename
           ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout

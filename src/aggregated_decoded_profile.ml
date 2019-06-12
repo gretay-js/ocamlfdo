@@ -197,8 +197,7 @@ let read filename =
         Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
         failwith "Cannot parse aggregated decoded profile file"
   in
-  if !verbose then
-    Printf.printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
+  if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
   t
 
 let write t filename =

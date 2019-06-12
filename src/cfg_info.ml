@@ -136,7 +136,9 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
         (* target must be right after a call *)
         | Tailcall _ ->
             (* tailcall *)
-            failwith "Check not implemented"
+            if !verbose then
+              printf "Tailcall from linid=%d from_label=%d %Ld"
+                from_linearid from_block.start count
         | Raise _ ->
             (* target must be a hanlder block *)
             assert (Cfg_builder.is_trap_handler cfg to_block.start)

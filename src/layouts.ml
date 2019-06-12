@@ -53,12 +53,11 @@ end = struct
   type p = t list [@@deriving sexp]
 
   let print_t i =
-    Printf.printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position
-      i.position
+    printf "0x%Lx:0x%x:%d:%d\n" i.address i.offset i.position i.position
 
   let print l =
     (* List.iter l ~f:print_t; *)
-    Printf.printf !"%{sexp:p}\n" l
+    printf !"%{sexp:p}\n" l
 
   let read filename =
     if !verbose then printf "Reading raw layout from %s\n" filename;
@@ -105,7 +104,7 @@ end = struct
     (* let p = csv_load ~separator:':' filename in *)
     if !verbose then (
       print_p p Out_channel.stdout;
-      if p = [] then Printf.printf "Empty layout!\n" );
+      if p = [] then printf "Empty layout!\n" );
     p
 
   let writer filename =
@@ -126,10 +125,10 @@ let convert_layout (l : Rel_layout.p) =
       String.Map.add_exn layout ~key:p.func ~data:p.labels )
 
 let print_fun_layout_item (key, data) =
-  Printf.printf "position=%d linear_id=%d\n" key data
+  printf "position=%d linear_id=%d\n" key data
 
 let print_fun_layout ~key:name ~data:(fun_layout : (int, int) Hashtbl.t) =
-  Printf.printf "%s (%d)\n" name (Hashtbl.length fun_layout);
+  printf "%s (%d)\n" name (Hashtbl.length fun_layout);
   let sorted_fun_layout =
     List.sort (Hashtbl.to_alist fun_layout) ~compare:(fun (k1, _) (k2, _) ->
         Int.compare k1 k2 )
@@ -159,8 +158,7 @@ let decode_item ~func ~locations fun_layout (l : Raw_layout.t) =
         failwithf "Cannot add linear_id %d at position %d in function %s"
           line l.position func ()
     | `Ok fun_layout ->
-        if !verbose then
-          Printf.printf "Added %s %d %d\n" func l.position line;
+        if !verbose then printf "Added %s %d %d\n" func l.position line;
         fun_layout )
 
 (* Split raw layout into functions and decode each one in turn. *)
@@ -190,7 +188,7 @@ let decode_layout_all locations permutation writer =
             Report.log (sprintf "Not found function at 0x%Lx\n" func_start);
             decode_func_layout tl layout
         | Some func ->
-            if !verbose then Printf.printf "Function %s\n" func;
+            if !verbose then printf "Function %s\n" func;
             let l, rest =
               List.split_while permutation ~f:(fun r ->
                   r.address = func_start )

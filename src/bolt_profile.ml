@@ -65,7 +65,7 @@ module Bolt_branch = struct
   [@@deriving sexp]
 
   let print ~chan t =
-    fprintf chan "%s %s %Ld %Ld"
+    fprintf chan "%s %s %Ld %Ld\n"
       (Bolt_loc.to_string t.src)
       (Bolt_loc.to_string t.dst)
       t.mis t.count
@@ -91,7 +91,7 @@ end
 
 type t = Bolt_branch.t list [@@deriving sexp]
 
-let print t = Printf.printf !"%{sexp:t}\n" t
+let print t = printf !"%{sexp:t}\n" t
 
 let read ~filename =
   if !verbose then printf "Reading bolt fdata profile from %s\n" filename;

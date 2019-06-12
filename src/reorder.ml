@@ -92,7 +92,7 @@ let reorder_random cfg ~random_state =
   Cfg_builder.set_layout cfg new_layout
 
 let print_list msg l =
-  if verbose then Printf.printf !"%s: %{sexp:int list}\n" msg l
+  if verbose then printf !"%s: %{sexp:int list}\n" msg l
 
 exception KeyAlreadyPresent of int * int
 
@@ -109,7 +109,7 @@ let reorder_layout cfg ~layout =
         (* Convert linear_ids to labels *)
         let partial_cfg_layout =
           List.map sorted_fun_layout ~f:(fun id ->
-              if verbose then Printf.printf "%d\n" id;
+              if verbose then printf "%d\n" id;
               match Cfg_builder.id_to_label cfg id with
               | None ->
                   failwithf "Cannot find label for linear id %d in %s\n" id
