@@ -51,6 +51,8 @@ module Bolt_loc = struct
 
   let of_strings k name o =
     { kind = Kind.of_string k; name; offset = Int.of_string o }
+
+  let unknown = { kind = UnknownSymbol; name = "[unknown]"; offset = 0 }
 end
 
 module Bolt_branch = struct
@@ -103,7 +105,6 @@ let read ~filename =
   t
 
 let write t ~filename =
-  let open Loc in
   if !verbose then
     printf
       "Writing preliminary aggregated decoded profile in bolt form to %s\n"
@@ -112,105 +113,87 @@ let write t ~filename =
   List.iter t ~f:Bolt_branch.(print ~chan);
   Out_channel.close chan
 
-(* Try to get the raw address in the original binary and create Loc.t with
-   it. It's used for debugging to generating bolt fdata. *)
-let find_loc p locations func line =
-  let open Func in
-  let open Aggregated_decoded_profile in
-  (* Reverse lookup in t.addr2loc is probably more expensive, because we
-     have already cached inverse. *)
-  match Ocaml_locations.(to_address locations func.name line Linearid) with
-  | None -> None
-  | Some addr ->
-      let loc =
-        Hashtbl.find_or_add p.addr2loc addr ~default:(fun () ->
-            let rel =
-              Some
-                { id = func.id;
-                  offset = Int64.(to_int_trunc (addr - func.start));
-                  label = None
-                }
-            in
-            let dbg = Some { file = func.name; line } in
-            let loc = { addr; rel; dbg } in
-            Hashtbl.add_exn p.addr2loc ~key:addr ~data:loc;
-            loc )
-      in
-      Some loc
-
 (* For each function, check its execounts and collect inferred fallthrough
    edges. *)
 let fallthroughs locations (p : Aggregated_decoded_profile.t) =
+  (* Try to get the raw address in the original binary. We could try to
+     create Loc.t with it. Create Bolt_loc.t with it directly because it is
+     only used for debugging to generating bolt fdata. *)
+  let inverse name line =
+    Ocaml_locations.(to_address locations name line Linearid)
+  in
+  let make_bolt_loc (func : Func.t) linearid =
+    match inverse func.name linearid with
+    | None -> Bolt_loc.unknown
+    | Some addr ->
+        { kind = Symbol;
+          name = func.name;
+          offset = Int64.(to_int_trunc (addr - func.start))
+        }
+  in
   Hashtbl.fold p.functions ~init:[] ~f:(fun ~key:_ ~data:func acc ->
-      if not (List.is_empty func.fallthroughs) then (
-        (* This is expensive because we need to scan the entire original
-           binary to find the function. *)
-        match
-          Elf_locations.resolve inverse locations func.start func.finish
-        with
-        | None ->
-            if !verbose then
-              printf "Cannot find function symbol containing 0x%Lx\n" addr;
-            { addr; rel = None; dbg = None }
-        | Some interval ->
-            let name = interval.v in
-            let start = interval.l in
-            Elf_locations.resolve_function_starting_at locations
-              ~program_counter:func.start ~reset:true ~contents:true
-              ~create_inverse:true;
-            List.fold (Func.fallthroughs locations func) ~init:map
-              ~f:(fun acc ft ->
-                let src_addr = inverse func ft.src in
-                let dst_addr = inverse func ft.dst in
-                (src_addr, dst_addr, ft.count) :: acc ) )
-      else acc )
+      match Hashtbl.find p.execounts func.id with
+      | Some cfg_info when func.has_linearids ->
+          (* This is expensive because we need to scan the entire original
+             binary to find the function. *)
+          (* cache all addresses within this function with their mapping to
+             dwarf and its inverse. *)
+          Elf_locations.resolve_range locations ~start:func.start
+            ~finish:func.finish ~with_inverse:true;
+          Hashtbl.fold cfg_info ~init:acc ~f:(fun ~key:_ ~data:bi acc ->
+              List.fold bi.branches ~init:acc ~f:(fun acc b ->
+                  if b.fallthrough then
+                    let src = make_bolt_loc func bi.terminator_id in
+                    let target_id = Option.value_exn b.target_id in
+                    let dst = make_bolt_loc func target_id in
+                    let boltb =
+                      { Bolt_branch.src;
+                        dst;
+                        count = b.taken;
+                        mis = b.mispredicts
+                      }
+                    in
+                    boltb :: acc
+                  else acc ) )
+      | _ -> acc )
 
 (* Make and fold using init and f *)
-let mk
-    (p : Aggregated_decoded_profile.t)
-    (agg : Aggregated_perf_profile.t)
-    locations
-    ~init
-    ~f =
-  let get_loc addr = Hashtbl.find_exn p.addr2loc addr in
-  let get_bolt_loc loc =
+let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
+    locations ~init ~f =
+  let get_bolt_loc addr =
+    let loc = Hashtbl.find_exn p.addr2loc addr in
     match loc.rel with
-    | None -> { kind = UnknownSymbol; name = "[unknown]"; offset = 0 }
+    | None -> Bolt_loc.unknown
     | Some rel ->
         let func = Hashtbl.find_exn p.functions rel.id in
         { kind = Symbol; name = func.name; offset = rel.offset }
   in
-  let append_if_valid acc src_loc dst_loc count mis =
-    let src = get_bolt_loc src_loc in
-    let dst = get_bolt_loc dst_loc in
-    if src.kind = UnknownSymbol && dst.kind = UnkownSymbol then acc
-    else
-      let b = { src; dst; mis; count } in
-      f acc b
+  let append_if_valid acc b =
+    let open Bolt_branch in
+    if b.src.kind = UnknownSymbol && b.dst.kind = UnknownSymbol then acc
+    else f acc b
   in
   let t =
-    Hashtbl.fold agg.branches ~init
-      ~f:(fun acc ~key:(src, dst) ~data:count ->
+    Hashtbl.fold agg.branches ~init ~f:(fun ~key ~data:count acc ->
         let mis =
           Option.value (Hashtbl.find agg.mispredicts key) ~default:0L
         in
-        let src_loc = get_loc src in
-        let dst_loc = get_loc dst in
-        append_if_valid acc src_loc dst_loc count mis )
+        let src_addr, dst_addr = key in
+        let src = get_bolt_loc src_addr in
+        let dst = get_bolt_loc dst_addr in
+        let b = { Bolt_branch.src; dst; mis; count } in
+        append_if_valid acc b )
   in
-  List.fold (fallthroughs p) ~init:t ~f:(fun (src_loc, dst_loc, count) ->
-      append_if_valid acc src_loc dst_loc count 0L )
+  let ft = fallthroughs locations p in
+  List.fold ft ~init:t ~f:append_if_valid
 
-let create
-    (p : Aggregated_decoded_profile.t)
-    (agg : Aggregated_perf_profile.t)
-    locations =
+let create (p : Aggregated_decoded_profile.t)
+    (agg : Aggregated_perf_profile.t) locations =
   mk p agg locations ~init:[] ~f:(fun acc b -> b :: acc)
 
 (* If [t] uses too much memory and we don't need it other than for printing,
    then we can print during [mk] instead of "append_if" above *)
-let save p agg ~filename locations =
-  let open Loc in
+let save p agg locations ~filename =
   if !verbose then
     printf
       "Writing preliminary aggregated decoded profile in bolt form to %s\n"

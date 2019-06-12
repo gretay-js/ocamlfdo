@@ -6,5 +6,5 @@ wrap-comments = true
 break-cases = toplevel
 break-separators=after-and-docked
 field-space=loose
-break-fun-decl=smart
+# break-fun-decl=smart
 type-decl=sparse

@@ -166,10 +166,10 @@ let reorder_rel_layout cfg ~layout =
       Cfg_builder.set_layout cfg new_cfg_layout
 
 (* Basic block layout using clustering algorihtm. *)
-let reorder_opt execounts cfg =
+let reorder_opt cfg_info cfg =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
   print_list "orig" orig_cfg_layout;
-  let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout execounts in
+  let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout cfg_info in
   print_list "new" new_cfg_layout;
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
@@ -193,15 +193,15 @@ let write_profile linearid_profile config =
 let reorder_profile cfg linearid_profile config =
   let open Config in
   let name = Cfg_builder.get_name cfg in
-  (* Compute cfg counts even if reordering is not enabled. The are stored in
-     the linearid_profile for later use. *)
-  let execounts = Block_info.create linearid_profile name cfg in
+  (* Compute cfg execounts even if reordering is not enabled. They can be
+     saved to a file for later use. *)
+  let cfg_info = Aggregated_decoded_profile.add linearid_profile name cfg in
   match config.reorder_basic_blocks with
   | No -> cfg
   | Opt -> (
-    match execounts with
+    match cfg_info with
     | None -> cfg
-    | Some execounts -> reorder_opt execounts cfg )
+    | Some cfg_info -> reorder_opt cfg_info cfg )
 
 let reorder ~algo cfg =
   match algo with

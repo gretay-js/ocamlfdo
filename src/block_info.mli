@@ -11,13 +11,13 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
 open Loc
 
 (* Successor info *)
 type b = {
   target : Loc.t option;
   target_label : Cfg_label.t option;
+  target_id : int option;
   (* is the target intraprocedural? *)
   intra : bool;
   fallthrough : bool;
@@ -38,6 +38,10 @@ type c = {
 (* Execution counts for a basic block *)
 type t = {
   label : Cfg_label.t;
+  (* Instruction id for the first and last instruction. *)
+  (* [first_id] can be the same as terminator_id if body is empty *)
+  first_id : int;
+  terminator_id : int;
   mutable count : Execount.t;
   (* Number of times this block was executed. *)
   mutable branches : b list;
@@ -52,6 +56,6 @@ val mk : label:Cfg_label.t -> t
 val add : t -> count:Execount.t -> unit
 
 (* Maintain unique targets *)
-val add_call : t -> callsite:c -> callee:b -> unit
+val add_call : t -> callsite:Loc.t -> callee:b -> unit
 
 val add_branch : t -> b -> unit

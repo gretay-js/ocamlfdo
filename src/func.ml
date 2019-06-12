@@ -21,22 +21,27 @@ type t = {
   name : string;
   (* Raw start address of the function in original binary *)
   start : Addr.t;
+  finish : Addr.t;
   (* Preliminary execution count *)
   mutable count : Execount.t;
   (* Does the function have any linearids? *)
   mutable has_linearids : bool;
-  (* Counters that refer to this function, uses raw addresses. This can be
-     dropped after cfg_count is constructed, to save memory. *)
+  (* number of fallthrough traces that didn't correspond to the cfg *)
+  mutable malformed_traces : Execount.t;
+  (* Counters that refer to this function, uses raw addresses. *)
+  (* CR: This can be dropped after cfg_count is constructed, to save memory. *)
   agg : Aggregated_perf_profile.t
 }
 [@@deriving sexp]
 
-let mk ~id ~name ~start =
+let mk ~id ~name ~start ~finish =
   { id;
     name;
     start;
+    finish;
     has_linearids = false;
     count = 0L;
+    malformed_traces = 0L;
     agg = Aggregated_perf_profile.empty ()
   }
 

@@ -24,8 +24,12 @@ type t = {
   name2id : int Hashtbl.M(String).t;
   (* map func id to func info *)
   functions : Func.t Hashtbl.M(Int).t;
-  (* number of fallthrough traces between functions *)
-  mutable malformed_traces : Execount.t
+  (* map func id to cfg_info of that function. *)
+  execounts : Cfg_info.t Hashtbl.M(Int).t
+      (* sparse, only holds functions that have cfg *and* execounts. *)
+      (* logically it should be defined inside Func.t but it creates a
+         cyclic dependency between . The advantage of the current design is
+         smaller space that a Func takes if it doesn't have a cfg_info *)
 }
 [@@deriving sexp]
 
@@ -33,7 +37,7 @@ let mk size =
   { addr2loc = Hashtbl.create ~size (module Addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
-    malformed_traces = 0L
+    execounts = Hashtbl.create (module Int)
   }
 
 let get_func t addr =
@@ -89,11 +93,11 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       process key update_tr )
 
 (* Find or add the function and return its id *)
-let get_func_id t ~name ~start =
+let get_func_id t ~name ~start ~finish =
   match Hashtbl.find t.name2id name with
   | None ->
       let id = Hashtbl.length t.functions in
-      let func = Func.mk ~id ~name ~start in
+      let func = Func.mk ~id ~name ~start ~finish in
       Hashtbl.add_exn t.functions ~key:id ~data:func;
       Hashtbl.add_exn t.name2id ~key:name ~data:id;
       func.id
@@ -102,6 +106,7 @@ let get_func_id t ~name ~start =
       assert (func.id = id);
       assert (func.name = name);
       assert (func.start = start);
+      assert (func.finish = finish);
       func.id
 
 let decode_loc t locations addr =
@@ -117,6 +122,7 @@ let decode_loc t locations addr =
   | Some interval ->
       let name = interval.v in
       let start = interval.l in
+      let finish = interval.r in
       let offset =
         match Int64.(to_int (addr - start)) with
         | None -> failwithf "Offset too big: 0x%Lx" Int64.(addr - start) ()
@@ -124,7 +130,7 @@ let decode_loc t locations addr =
             assert (offset >= 0);
             offset
       in
-      let id = get_func_id t ~name ~start in
+      let id = get_func_id t ~name ~start ~finish in
       let rel = Some { id; offset; label = None } in
       let dbg =
         match
@@ -209,3 +215,18 @@ let write_top_functions t filename =
   let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
   let fl = List.map sorted ~f:(fun func -> func.name) in
   Layouts.Func_layout.write_linker_script fl filename
+
+(* Compute detailed execution counts for function [name] using its CFG *)
+let add t name cfg =
+  match Hashtbl.find t.name2id name with
+  | None ->
+      if !verbose then printf "Not found profile for %s with cfg.\n" name;
+      None
+  | Some id ->
+      let func = Hashtbl.find_exn t.functions id in
+      if func.count > 0L && func.has_linearids then (
+        if !verbose then printf "compute_cfg_execounts for %s\n" name;
+        let cfg_info = Cfg_info.create func cfg in
+        Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
+        Some cfg_info )
+      else None

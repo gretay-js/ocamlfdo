@@ -20,7 +20,6 @@ val create :
   Aggregated_decoded_profile.t ->
   Aggregated_perf_profile.t ->
   Elf_locations.t ->
-  filename:string ->
   t
 
 (* Writes directly to file without creating the entire profile in memory. *)

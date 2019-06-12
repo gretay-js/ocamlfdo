@@ -26,19 +26,20 @@ end
 
 (* Dwarf info associated with a location *)
 type dbg = {
-  file : string;
   (* filename *)
-  line : int (* line number *)
+  file : string;
+  (* line number *)
+  line : int
 }
 [@@deriving compare, sexp, hash]
 
 type rel = {
-  id : int;
   (* Unique id of the containing function symbol *)
-  offset : int;
+  id : int;
   (* Offset from the start of the function *)
+  offset : int;
+  (* cfg label of the block containing this location *)
   label : Cfg_label.t option
-      (* cfg label of the block containing this location *)
 }
 [@@deriving compare, sexp, hash]
 

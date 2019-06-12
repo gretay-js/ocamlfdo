@@ -11,13 +11,20 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
 open Loc
+
+(* CR: Improve different option fields. The reason for them is that we don't
+   always have all of the information: Loc.t, label, linearid. We can have
+   linearid from the cfg without having Loc.t if the the address didn't in
+   perf profile. We can reconstruct it but its expensive and we currently
+   only use it for debugging, see bolt_profile. Maybe use variant to
+   describe the kind of location we have? *)
 
 (* Successor info *)
 type b = {
   target : Loc.t option;
   target_label : Cfg_label.t option;
+  target_id : int;
   (* is the target intraprocedural? *)
   intra : bool;
   fallthrough : bool;
@@ -42,7 +49,12 @@ type c = {
 
 (* Execution counts for a basic block *)
 type t = {
+  (* Label of this block *)
   label : Cfg_label.t;
+  (* Instruction id for the first and last instruction. *)
+  (* [first_id] can be the same as terminator_id if body is empty *)
+  first_id : int;
+  terminator_id : int;
   mutable count : Execount.t;
   (* Number of times this block was executed. *)
   mutable branches : b list;
@@ -51,22 +63,14 @@ type t = {
 }
 [@@deriving sexp]
 
-let mk ~label = { label; count = 0L; branches = []; calls = [] }
+let mk ~label ~first_id ~terminator_id =
+  { label; count = 0L; branches = []; calls = [] }
 
 let add t ~count = t.count <- Int64.(t.count + count)
 
 let add_call t callsite callee =
-  (* Find the callsite's info *)
-  match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
-  | None ->
-      let c = { callsite; callees = [ callee ] } in
-      t.calls <- c :: t.calls
-  | Some c ->
-      (* Check unique call target. *)
-      assert (
-        Option.is_none
-          (List.find c.callees ~f:(fun b -> b.target = callee.target)) );
-      c.callees <- callee :: c.callees
+  c.callees <- callee :: c.callees;
+  failwith "not implemented"
 
 (* Merge maintain unique targets *)
 let add_branch t b =
@@ -101,3 +105,15 @@ let add_branch t b =
 (* | Some tr when tr = target -> true *)
 (* | _ -> false )) ) *)
 (* | _ -> assert false ) ; *)
+
+(*   (* Find the callsite's info *)
+ * ( match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
+ * | None ->
+ *     let c = { callsite; callees = [ callee ] } in
+ *     t.calls <- c :: t.calls
+ * | Some c ->
+ *     (* Check unique call target. *)
+ *     assert (
+ *       Option.is_none
+ *         (List.find c.callees ~f:(fun b -> b.target = callee.target)) );
+ *     c.callees <- callee :: c.callees ); *)

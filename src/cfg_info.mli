@@ -15,4 +15,6 @@ open Core
 open Loc
 
 (* Map basic blocks of this function to breakdown of execution counts *)
-type t = Block_info.t Hashtbl.M(Cfg_label).t
+type t = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
+
+val create : Func.t -> Cfg_builder.t -> t

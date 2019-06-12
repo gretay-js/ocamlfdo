@@ -34,17 +34,10 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-let setup_reorder
-    ~binary_filename
-    ~perf_profile_filename
-    ~raw_layout_filename
-    ~rel_layout_filename
-    ~linearid_layout_filename
-    ~random_order
-    ~gen_linearid_layout
-    ~gen_linearid_profile
-    ~linearid_profile_filename
-    ~gen_bolt_fdata =
+let setup_reorder ~binary_filename ~perf_profile_filename
+    ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
+    ~random_order ~gen_linearid_layout ~gen_linearid_profile
+    ~linearid_profile_filename ~gen_bolt_fdata =
   if random_order then
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -222,24 +215,12 @@ let write_reorder_report f cfg newf newcfg =
     Report.cfg ~name "Before-Reorder" cfg;
     Report.cfg ~name "After-Reorder" newcfg )
 
-let main
-    ~binary_filename
-    ~perf_profile_filename
-    ~raw_layout_filename
-    ~rel_layout_filename
-    ~linearid_layout_filename
-    ~gen_rel_layout
-    ~gen_linearid_layout
-    ~random_order
-    ~eliminate_dead_blocks
-    ~eliminate_fallthrough_blocks
-    ~remove_linear_ids
-    ~reorder_report
-    ~preserve_orig_labels
-    ~gen_linearid_profile
-    ~linearid_profile_filename
-    ~gen_bolt_fdata
-    args =
+let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
+    ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout
+    ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
+    ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
+    ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
+    ~gen_bolt_fdata args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
