@@ -11,69 +11,62 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+(* This is a little wrapper around Elf_locations to manage the file names
+   specific to ocaml source and compiler's IR. *)
 open Core
 
 let verbose = ref true
 
-type t = Source | Linearid
+type t =
+  | Source
+  | Linearid
 
 (* CR gyorsh: what are all the source file extensions we should support? *)
 let suffix = function
-  | Linearid -> [".linear"]
-  | Source -> [".ml"; ".mli"; ".c"; ".h"]
-
-let unique_suffix t =
-  match suffix t with
-  | [s] -> s
-  | _ -> assert false
-
-(* Checks that debug info is relative to the input function, i.e., the name
-   of the "file" matches the name of the function. *)
-let decode_line_ir locations ~program_counter func t =
-  match Elf_locations.resolve ~program_counter locations with
-  | None ->
-      if !verbose then
-        Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter ;
-      None
-  | Some (file, line) -> (
-      if !verbose then Printf.printf "%s:%d\n" file line ;
-      (* Check that the func symbol name from the binary where permutation
-         comes from matches the function name encoded as filename into our
-         special dwarf info. *)
-      let suffix = unique_suffix t in
-      match String.chop_suffix file ~suffix with
-      | None ->
-          Report.log (sprintf "Ignoring %s in %s\n" func file) ;
-          None
-      | Some func_name_dwarf ->
-          if func_name_dwarf = func then Some (file, line)
-          else
-            failwithf "func_name_dwarf = %s func = %s\n" func_name_dwarf
-              func () )
+  | Linearid -> [ ".linear" ]
+  | Source -> [ ".ml"; ".mli"; ".c"; ".h" ]
 
 let decode_line locations ~program_counter func t =
-  match Elf_locations.resolve ~program_counter locations with
+  let program_counter = Addr.to_int64 program_counter in
+  match Elf_locations.resolve_from_cache ~program_counter locations with
   | None ->
       if !verbose then
-        Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter ;
+        Printf.printf "Elf location NOT FOUND at 0x%Lx\n" program_counter;
       None
   | Some (file, line) -> (
-      if !verbose then Printf.printf "%s:%d\n" file line ;
-      (* Check that the filename is supported. *)
+      if !verbose then Printf.printf "%s:%d\n" file line;
       let suffixes = suffix t in
+      (* Check that the filename is supported. *)
       match
         List.find ~f:(fun s -> String.is_suffix file ~suffix:s) suffixes
       with
       | None ->
-          Report.log (sprintf "Ignoring %s in %s\n" func file) ;
+          Report.log (sprintf "Ignoring %s in %s\n" func file);
           None
-      | Some _ -> Some (file, line) )
+      | Some suffix -> (
+        match t with
+        | Source -> Some (file, line)
+        | Linearid -> (
+          (* Checks that debug info is relative to the input function, i.e.,
+             the name of the "file" matches the name of the function. We
+             check that the function symbol name from the binary matches the
+             function name encoded as filename into our special dwarf info. *)
+          match String.chop_suffix file ~suffix with
+          | None ->
+              Report.log (sprintf "Ignoring %s in %s\n" func file);
+              None
+          | Some func_name_dwarf ->
+              if func_name_dwarf = func then Some (file, line)
+              else
+                failwithf "func_name_dwarf = %s func = %s\n" func_name_dwarf
+                  func () ) ) )
 
-let decode_line locations ~program_counter func t =
-  match t with
-  | Linearid -> decode_line_ir locations ~program_counter func t
-  | Source -> decode_line locations ~program_counter func t
-
-let line locations func line =
-  let suffix = inque_s
-  Elf_locations.to_address locations func.name line
+let to_address locations name line t =
+  let file =
+    match t with
+    | Source -> name
+    | Linearid ->
+        let suffix = List.hd_exn (suffix t) in
+        name ^ suffix
+  in
+  Elf_locations.to_address locations file line

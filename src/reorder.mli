@@ -19,16 +19,22 @@ open Core
 type layout = int list String.Map.t
 
 module Config : sig
-  type reorder_basic_blocks = No | Opt
+  type reorder_basic_blocks =
+    | No
+    | Opt
 
-  type reorder_functions = No | Execounts | Hot_clusters
+  type reorder_functions =
+    | No
+    | Execounts
+    | Hot_clusters
 
-  type t =
-    { gen_linearid_profile: string
-    ; write_bolt_fdata: bool
-    ; write_linker_script: bool
-    ; reorder_basic_blocks: reorder_basic_blocks
-    ; reorder_functions: reorder_functions }
+  type t = {
+    gen_linearid_profile : string;
+    write_bolt_fdata : bool;
+    write_linker_script : bool;
+    reorder_basic_blocks : reorder_basic_blocks;
+    reorder_functions : reorder_functions
+  }
 
   val default : string -> t
 
@@ -40,7 +46,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Profiles.Aggregated_decoded.t * Config.t
+  | Profile of Aggregated_decoded_profile.t * Config.t
 
 val reorder : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
 

@@ -50,26 +50,32 @@ let entry_pos = 0
 (* Invariant: weights must be non-negative. *)
 (* Invariant: position of the cluster is the smallest position of any item
    it represents. This is a heuristic, see [Note1] *)
-type 'd cluster =
-  { id: clusterid
-  ; (* unique id of the cluster *)
-    pos: int
-  ; (* the smallest, index in the original layout *)
-    weight: weight
-  ; (* weight *)
-    items: 'd list
-  ; (* data items represented by this cluster. *)
-    mutable can_be_merged: bool }
+type 'd cluster = {
+  id : clusterid;
+  (* unique id of the cluster *)
+  pos : int;
+  (* the smallest, index in the original layout *)
+  weight : weight;
+  (* weight *)
+  items : 'd list;
+  (* data items represented by this cluster. *)
+  mutable can_be_merged : bool
+}
 
-type edge = {src: clusterid; dst: clusterid; weight: weight}
+type edge = {
+  src : clusterid;
+  dst : clusterid;
+  weight : weight
+}
 
 (* Directed graph whose nodes are clusters. *)
-type 'd t =
-  { next_id: clusterid
-  ; (* used to create unique cluster ids *)
-    clusters: 'd cluster list
-  ; edges: edge list
-  ; original_layout: 'd list }
+type 'd t = {
+  next_id : clusterid;
+  (* used to create unique cluster ids *)
+  clusters : 'd cluster list;
+  edges : edge list;
+  original_layout : 'd list
+}
 
 let id_to_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
@@ -78,18 +84,18 @@ let find t data =
       List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2) )
 
 let init_layout original_layout execounts =
-  let open Profiles.Block_info in
+  let open Block_info in
   (* Makes a singleton cluster. data, id and pos must be unique *)
   let mk_node ~data ~weight ~pos ~id =
-    assert (weight >= 0L) ;
+    assert (weight >= 0L);
     (* Cluster that contains the entry position of the original layout
        cannot be merged *after* another cluster. *)
     let can_be_merged = not (pos = entry_pos) in
-    {id; weight; items= [data]; pos; can_be_merged}
+    { id; weight; items = [ data ]; pos; can_be_merged }
   in
   let mk_edge ~src ~dst ~weight =
-    assert (weight >= 0L) ;
-    {src; dst; weight}
+    assert (weight >= 0L);
+    { src; dst; weight }
   in
   (* Initialize each block in its own cluster: cluster id is block's
      position in the original layout, data is block label, weight is block's
@@ -119,7 +125,7 @@ let init_layout original_layout execounts =
               e :: acc
             else acc ) )
   in
-  {next_id= List.length clusters; clusters; edges; original_layout}
+  { next_id = List.length clusters; clusters; edges; original_layout }
 
 (* Compare clusters using their weight, in descending order. Tie breaker
    using their position in the orginal layout, if available. Otherwise,
@@ -162,12 +168,13 @@ let merge t c1 c2 =
   let pos = min c1.pos c2.pos in
   let can_be_merged = not (pos = entry_pos) in
   let c =
-    { id
-    ; pos
-    ; can_be_merged
-    ; weight= Int64.(c1.weight + c2.weight)
-    ; (* For layout, preserve the order of the input items lists. *)
-      items= c1.items @ c2.items }
+    { id;
+      pos;
+      can_be_merged;
+      weight = Int64.(c1.weight + c2.weight);
+      (* For layout, preserve the order of the input items lists. *)
+      items = c1.items @ c2.items
+    }
   in
   (* Add the new cluster at the front and remove the c1 and c2. *)
   let clusters =
@@ -182,7 +189,7 @@ let merge t c1 c2 =
         let src = if s = c1.id || s = c2.id then c.id else s in
         let dst = if d = c1.id || d = c2.id then c.id else d in
         if src = edge.src && dst = edge.dst then `Snd edge
-        else `Fst {src; dst; weight= edge.weight} )
+        else `Fst { src; dst; weight = edge.weight } )
   in
   (* Update the weights of the edges whose endpoints were updated. *)
   (* Preserve the invariant that the edges are unique pairs of (src,dst).
@@ -198,15 +205,16 @@ let merge t c1 c2 =
           match acc with
           | e2 :: rest when e2.src = e1.src && e2.dst = e1.dst ->
               let e =
-                { src= e1.src
-                ; dst= e1.dst
-                ; weight= Int64.(e1.weight + e2.weight) }
+                { src = e1.src;
+                  dst = e1.dst;
+                  weight = Int64.(e1.weight + e2.weight)
+                }
               in
               e :: rest
           | _ -> e1 :: acc )
   in
   let edges = merged @ preserved in
-  {t with edges; clusters; next_id}
+  { t with edges; clusters; next_id }
 
 let find_max_pred t c =
   let max =
@@ -217,7 +225,9 @@ let find_max_pred t c =
           | Some me -> if edge_compare t me e < 0 then Some e else max
         else max )
   in
-  match max with None -> None | Some max -> Some max.src
+  match max with
+  | None -> None
+  | Some max -> Some max.src
 
 (* Order clusters by their execution counts, descending, tie breaker using
    original layout, as in cluster's compare function. Choose the cluster
@@ -232,7 +242,7 @@ let optimize_layout original_layout execounts =
   if not (len_layout = len_clusters) then
     failwith "layout length doesn't match cluster length."
   else if len_layout = 0 then (
-    if verbose then printf "Optimize layout called with empty layout.\n" ;
+    if verbose then printf "Optimize layout called with empty layout.\n";
     [] )
   else
     (* Invariant preserved: clusters that can be merged are ordered by
@@ -242,27 +252,27 @@ let optimize_layout original_layout execounts =
        non-negative weight of pred to it. If a cluster has no predecessors,
        it is moved to the end. *)
     let clusters = List.sort t.clusters ~compare:cluster_compare_frozen in
-    let t = {t with clusters} in
+    let t = { t with clusters } in
     let rec loop t step =
       match clusters with
       | [] -> []
       | c :: rest ->
           if c.can_be_merged then (
-            if verbose then printf "Step %d: merging cluster %d\n" step c.id ;
+            if verbose then printf "Step %d: merging cluster %d\n" step c.id;
             match find_max_pred t c with
             | None ->
                 (* Cluster c is not reachable from within the function using
                    any of the edges that we have for clustering, i.e., edges
                    that have weights. Move c to the end of the layout, after
                    marking that it cannot be merged. *)
-                if verbose then printf "No predecessor for %d\n" c.id ;
-                c.can_be_merged <- false ;
-                let t = {t with clusters= rest @ [c]} in
+                if verbose then printf "No predecessor for %d\n" c.id;
+                c.can_be_merged <- false;
+                let t = { t with clusters = rest @ [ c ] } in
                 loop t (step + 1)
             | Some pred_id ->
                 let pred = id_to_cluster t pred_id in
                 if verbose then
-                  printf "Found pred %d weight=%Ld\n" pred.id pred.weight ;
+                  printf "Found pred %d weight=%Ld\n" pred.id pred.weight;
                 let t = merge t pred c in
                 loop t (step + 1) )
           else
@@ -276,7 +286,7 @@ let optimize_layout original_layout execounts =
             let layout =
               List.map clusters ~f:(fun c -> c.items) |> List.concat
             in
-            if verbose then printf "Finished in %d steps\n" step ;
+            if verbose then printf "Finished in %d steps\n" step;
             layout
     in
     loop t 0

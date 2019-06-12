@@ -11,42 +11,18 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-(* It should be Cfg.label, but we can't add sexp to Cfg, because the intent
-   is to eventually integrate Cfg in the compiler, which doesn't currently
-   use sexp. We use sexp to convert to/from file. *)
-open Core
+(* This is a little wrapper around Elf_locations to manage the file names
+   specific to ocaml source and compiler's IR. *)
 
-module Cfg_label = struct
-  type t = int [@@deriving compare, sexp, hash]
-end
+type t =
+  | Source
+  | Linearid
 
-module Execount = struct
-  type t = int64 [@@deriving sexp]
-end
+val decode_line :
+  Elf_locations.t ->
+  program_counter:Addr.t ->
+  string ->
+  t ->
+  (string * int) option
 
-(* Dwarf info associated with a location *)
-type dbg = {
-  file : string;
-  (* filename *)
-  line : int (* line number *)
-}
-[@@deriving compare, sexp, hash]
-
-type rel = {
-  id : int;
-  (* Unique id of the containing function symbol *)
-  offset : int;
-  (* Offset from the start of the function *)
-  label : Cfg_label.t option
-      (* cfg label of the block containing this location *)
-}
-[@@deriving compare, sexp, hash]
-
-type t = {
-  addr : Addr.t;
-  (* Raw address in the original binary *)
-  rel : rel option;
-  (* Containing function info and relative offset *)
-  dbg : dbg option
-}
-[@@deriving sexp]
+val to_address : Elf_locations.t -> string -> int -> t -> Addr.t

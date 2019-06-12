@@ -15,7 +15,6 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-
 type t
 
 val create : elf_executable:string -> t
@@ -40,12 +39,12 @@ val resolve_function_starting_at :
   reset:bool ->
   string option
 
-val resolve_function_offsets :
-  t -> program_counter:Int64.t -> int list -> reset:bool -> string option
-
 (* Resolves debug info in one pass and caches the results for addresses. *)
-val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> reset:bool -> unit
+val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> unit
 
 val print_dwarf : t -> unit
 
 val to_address : t -> string -> int -> Int64.t option
+
+(* reset caches that store addresses, but not the function symbols cache *)
+val reset_cache : t -> unit

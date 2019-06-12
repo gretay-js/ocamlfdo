@@ -149,7 +149,9 @@ let _to_func file =
 
 (* Use addresses from permutation locations to find linear id layout. *)
 let decode_item ~func ~locations fun_layout (l : Raw_layout.t) =
-  let program_counter = Int64.(l.address + Int64.of_int l.offset) in
+  let program_counter =
+    Addr.of_int64 Int64.(l.address + Int64.of_int l.offset)
+  in
   let open Ocaml_locations in
   match decode_line locations ~program_counter func Linearid with
   | None -> fun_layout
@@ -173,7 +175,7 @@ let decode_layout_all locations permutation writer =
       let address = Int64.(r.address + of_int r.offset) in
       assert (not (Caml.Hashtbl.mem addresses address));
       Caml.Hashtbl.add addresses address () );
-  Elf_locations.resolve_all locations addresses ~reset:true;
+  Elf_locations.resolve_all locations addresses;
   (* Decode each function and record its layout. *)
   let rec decode_func_layout permutation layout =
     match permutation with

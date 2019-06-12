@@ -15,6 +15,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+(* CR gyorsh: cleanup the file, we don't use all of the functions in it. *)
 [@@@ocaml.warning "+a-4-9-30-40-41-42"]
 
 type t = {
@@ -316,19 +317,17 @@ let find_all ~t ~addresses cur prev =
       in
       loop prev.state.address
 
-let resolve_all t addresses ~reset =
+let resolve_all t addresses =
   let len = Hashtbl.length addresses in
   if len > 0 then (
     if verbose then
       Printf.printf "resolve_all: input size=%d unique addresses\n" len;
-    if reset then reset_cache t
-    else (
-      Hashtbl.filter_map_inplace
-        (fun k d -> if Hashtbl.mem t.resolved k then None else Some d)
-        addresses;
-      let l = Hashtbl.length addresses in
-      if verbose && l < len then
-        Printf.printf "resolve_all: input size=%d unresolved addresses\n" l );
+    Hashtbl.filter_map_inplace
+      (fun k d -> if Hashtbl.mem t.resolved k then None else Some d)
+      addresses;
+    let l = Hashtbl.length addresses in
+    if verbose && l < len then
+      Printf.printf "resolve_all: input size=%d unresolved addresses\n" l;
     let start = Hashtbl.length t.resolved in
     resolve_from_dwarf t ~f:(find_all ~t ~addresses);
     let stop = Hashtbl.length t.resolved in
@@ -510,7 +509,7 @@ let resolve_function_starting_at t ~program_counter ~resolve_contents ~reset
       Hashtbl.add t.resolved_fun program_counter name;
       name
 
-let resolve_function_offsets t ~program_counter offsets ~reset =
+let _resolve_function_offsets t ~program_counter offsets ~reset =
   if verbose then
     Printf.printf "Resolve function offsets, start=0x%Lx\n" program_counter;
   let syms =
