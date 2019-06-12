@@ -11,18 +11,8 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-(* This is a little wrapper around Elf_locations to manage the file names
-   specific to ocaml source and compiler's IR. *)
+open Core
+open Loc
 
-type t =
-  | Source
-  | Linearid
-
-val decode_line :
-  Elf_locations.t ->
-  program_counter:Addr.t ->
-  string ->
-  t ->
-  (string * int) option
-
-val to_address : Elf_locations.t -> string -> int -> t -> Addr.t option
+(* Map basic blocks of this function to breakdown of execution counts *)
+type t = Block_info.t Hashtbl.M(Cfg_label).t

@@ -155,7 +155,7 @@ let read_and_aggregate ?(expected_pid = None) filename =
     Hashtbl.update table key ~f:(fun v ->
         Int64.(1L + Option.value ~default:0L v) )
   in
-  let aggregated = Aggregated_perf.empty () in
+  let aggregated = Aggregated_perf_profile.empty () in
   (* CR gyorsh: aggregate during parsing of perf profile *)
   let aggregate sample =
     inc aggregated.instructions sample.ip;

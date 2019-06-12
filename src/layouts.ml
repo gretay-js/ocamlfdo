@@ -149,9 +149,7 @@ let _to_func file =
 
 (* Use addresses from permutation locations to find linear id layout. *)
 let decode_item ~func ~locations fun_layout (l : Raw_layout.t) =
-  let program_counter =
-    Addr.of_int64 Int64.(l.address + Int64.of_int l.offset)
-  in
+  let program_counter = Int64.(l.address + Int64.of_int l.offset) in
   let open Ocaml_locations in
   match decode_line locations ~program_counter func Linearid with
   | None -> fun_layout

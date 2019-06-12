@@ -27,7 +27,6 @@ let suffix = function
   | Source -> [ ".ml"; ".mli"; ".c"; ".h" ]
 
 let decode_line locations ~program_counter func t =
-  let program_counter = Addr.to_int64 program_counter in
   match Elf_locations.resolve_from_cache ~program_counter locations with
   | None ->
       if !verbose then

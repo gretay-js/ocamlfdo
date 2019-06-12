@@ -18,8 +18,6 @@ open Func
 let verbose = ref true
 
 type t = {
-  (* manipulate raw binary symbols and addresses with their debug info *)
-  locations : Elf_locations.t;
   (* map raw addresses to locations *)
   addr2loc : Loc.t Hashtbl.M(Addr).t;
   (* map func name to func id *)
@@ -31,12 +29,11 @@ type t = {
 }
 [@@deriving sexp]
 
-let mk size locations =
+let mk size =
   { addr2loc = Hashtbl.create ~size (module Addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
-    malformed_traces = 0L;
-    locations
+    malformed_traces = 0L
   }
 
 let get_func t addr =
@@ -56,7 +53,7 @@ let get_func t addr =
    not use the CFG. In particular, it does not count instructions that can
    be traced using LBR. The advantage is that we can compute it for
    non-OCaml functions. *)
-let create_func_execounts t (agg : Aggregated_perf.t) =
+let create_func_execounts t (agg : Aggregated_perf_profile.t) =
   Hashtbl.iteri agg.instructions ~f:(fun ~key ~data ->
       match get_func t key with
       | None -> ()
@@ -107,10 +104,10 @@ let get_func_id t ~name ~start =
       assert (func.start = start);
       func.id
 
-let decode_loc t addr =
+let decode_loc t locations addr =
   let open Loc in
   match
-    Elf_locations.resolve_function_containing t.locations
+    Elf_locations.resolve_function_containing locations
       ~program_counter:addr
   with
   | None ->
@@ -132,7 +129,7 @@ let decode_loc t addr =
       let dbg =
         match
           Ocaml_locations.(
-            decode_line t.locations ~program_counter:addr name Linearid)
+            decode_line locations ~program_counter:addr name Linearid)
         with
         | None -> None
         | Some (file, line) ->
@@ -143,14 +140,13 @@ let decode_loc t addr =
       in
       { addr; rel; dbg }
 
-let create l (aggregated_perf : Aggregated_perf.t) =
+let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
   (* Collect all addresses that need decoding. Mispredicts and traces use
      the same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
   let len =
-    Hashtbl.length aggregated_perf.instructions
-    + (Hashtbl.length aggregated_perf.branches * 2)
+    Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
   in
   (* Elf_locations does not use Core, so we need to create Caml.Hashtbl *)
   let addresses = Caml.Hashtbl.create len in
@@ -163,26 +159,26 @@ let create l (aggregated_perf : Aggregated_perf.t) =
     add fa;
     add ta
   in
-  Hashtbl.iter_keys aggregated_perf.instructions ~f:add;
-  Hashtbl.iter_keys aggregated_perf.branches ~f:add2;
+  Hashtbl.iter_keys agg.instructions ~f:add;
+  Hashtbl.iter_keys agg.branches ~f:add2;
   (* A key may be used multiple times in keys of t.instruction and
      t.branches *)
   let size = Caml.Hashtbl.length addresses in
   if !verbose then printf "size=%d,len=%d\n" size len;
   assert (size <= len);
-  let t = mk size l in
+  let t = mk size in
   (* Resolve and cache all addresses we need in one pass over the binary. *)
-  Elf_locations.resolve_all t.locations addresses;
+  Elf_locations.resolve_all locations addresses;
   (* Decode all locations: map addresses to locations *)
   Caml.Hashtbl.iter
     (fun addr _ ->
-      let loc = decode_loc t addr in
+      let loc = decode_loc t locations addr in
       Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc )
     addresses;
-  create_func_execounts t aggregated_perf;
+  create_func_execounts t agg;
   (* To free space, reset the cache we used for decoding dwarf info. We may
      use locations later for printing to bolt format for testing/debugging.*)
-  Elf_locations.reset t.locations;
+  Elf_locations.reset_cache locations;
   t
 
 let read filename =

@@ -12,10 +12,8 @@
 (*                                                                        *)
 (**************************************************************************)
 open Core
+open Loc
 open Block_info
-
-(* Map basic blocks of this function to breakdown of execution counts *)
-(* blocks = Block_info.t Hashtbl.M(Cfg_label).t *)
 
 let mal t count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
@@ -411,7 +409,7 @@ let compute_execounts t func cfg =
 (* CR gyorsh: propagate counts to compute missing fallthroughs? *)
 
 (* Compute detailed execution counts for function [name] using its CFG *)
-let compute_cfg_execounts t name cfg =
+let create t name cfg =
   match Hashtbl.find t.name2id name with
   | None ->
       if !verbose then printf "Not found profile for %s with cfg.\n" name;

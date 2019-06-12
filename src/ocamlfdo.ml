@@ -24,20 +24,27 @@ let time f x =
   let fx = f x in
   let stop = now () in
   Printf.printf "Execution time: %s\n"
-    (Span.to_string (abs_diff stop start)) ;
+    (Span.to_string (abs_diff stop start));
   fx
 
 let load_locations binary_filename =
   let elf_locations =
     Elf_locations.create ~elf_executable:binary_filename
   in
-  if !verbose then Elf_locations.print_dwarf elf_locations ;
+  if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-let setup_reorder ~binary_filename ~perf_profile_filename
-    ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
-    ~random_order ~gen_linearid_layout ~gen_linearid_profile
-    ~linearid_profile_filename ~gen_bolt_fdata =
+let setup_reorder
+    ~binary_filename
+    ~perf_profile_filename
+    ~raw_layout_filename
+    ~rel_layout_filename
+    ~linearid_layout_filename
+    ~random_order
+    ~gen_linearid_layout
+    ~gen_linearid_profile
+    ~linearid_profile_filename
+    ~gen_bolt_fdata =
   if random_order then
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -73,7 +80,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
             | None -> Reorder.Identity
             | Some linearid_profile_filename ->
                 let linearid_profile =
-                  Profiles.Aggregated_decoded.read linearid_profile_filename
+                  Aggregated_decoded_profile.read linearid_profile_filename
                 in
                 let config =
                   Reorder.Config.default linearid_profile_filename
@@ -86,10 +93,10 @@ let setup_reorder ~binary_filename ~perf_profile_filename
               (* CR gyorsh: Check pid of the samples. *)
               (* First aggregate raw profile and then decode it. *)
               let aggr_perf_profile =
-                Profiles.Perf.read_and_aggregate perf_profile_filename
+                Perf_profile.read_and_aggregate perf_profile_filename
               in
               let linearid_profile =
-                Profiles.Aggregated_decoded.decode_aggregated locations
+                Aggregated_decoded_profile.create locations
                   aggr_perf_profile
               in
               let gen_linearid_profile =
@@ -97,48 +104,49 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                 | None -> perf_profile_filename ^ ".linearid"
                 | Some f -> f
               in
-              Profiles.Aggregated_decoded.write linearid_profile
-                gen_linearid_profile ;
+              Aggregated_decoded_profile.write linearid_profile
+                gen_linearid_profile;
               let gen_bolt_fdata =
                 match gen_bolt_fdata with
                 | None -> gen_linearid_profile ^ ".fdata"
                 | Some f -> f
               in
-              Profiles.Aggregated_decoded.write_bolt linearid_profile
-                aggr_perf_profile gen_bolt_fdata ;
+              Bolt_profile.save linearid_profile aggr_perf_profile
+                ~filename:gen_bolt_fdata locations;
               (* CR gyorsh: configuration shouldn't be hardcoded! *)
               let config =
                 let open Reorder.Config in
                 { (default gen_linearid_profile) with
-                  reorder_functions= Reorder.Config.Execounts }
+                  reorder_functions = Reorder.Config.Execounts
+                }
               in
               (* CR gyorsh: write_top is here just for testing! *)
               (* Do we ever need the cfg to decide on function order? *)
-              Profiles.Aggregated_decoded.write_top_functions
+              Aggregated_decoded_profile.write_top_functions
                 linearid_profile
-                (Reorder.Config.linker_script_filename config "prelim") ;
+                (Reorder.Config.linker_script_filename config "prelim");
               Reorder.Profile (linearid_profile, config) ) )
 
 let call_ocamlopt args =
   (* Set debug "-g" to emit dwarf locations. *)
-  Clflags.debug := true ;
-  Clflags.extended_debug := true ;
+  Clflags.debug := true;
+  Clflags.extended_debug := true;
   (* set command line to args to call ocamlopt *)
   ( match args with
   | None | Some [] ->
       if !verbose then printf "Missing compilation command\n"
   | Some args ->
       if !verbose then (
-        printf "ocamlopt " ;
-        List.iter ~f:(fun s -> printf " %s" s) args ;
-        printf "\n" ) ) ;
+        printf "ocamlopt ";
+        List.iter ~f:(fun s -> printf " %s" s) args;
+        printf "\n" ) );
   let args = Array.of_list (Option.value args ~default:[]) in
   let len = Array.length args in
   let argc = Array.length Sys.argv in
-  assert (len < argc) ;
-  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:1 ~len ;
+  assert (len < argc);
+  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:1 ~len;
   (* CR gyorsh: Can't resize args array. Fake missing arguments. Better way? *)
-  Array.fill Sys.argv ~pos:(len + 1) ~len:(argc - len - 1) "-absname" ;
+  Array.fill Sys.argv ~pos:(len + 1) ~len:(argc - len - 1) "-absname";
   (* -inlining-report? *)
   Optmain.main ()
 
@@ -156,14 +164,14 @@ let check_equal f ~new_body =
     then if i1.desc = Lend then true else equal i1.next i2.next
     else (
       Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
-        f.fun_name Printlinear.instr i1 Printlinear.instr i2 ;
+        f.fun_name Printlinear.instr i1 Printlinear.instr i2;
       false )
   in
   if not (equal f.fun_body new_body) then (
     let name = X86_proc.string_of_symbol "" f.fun_name in
     (* Separate files for before and after to make it easier to diff *)
-    Report.linear ~name "Before" f ;
-    Report.linear ~name "After" {f with fun_body= new_body} ;
+    Report.linear ~name "Before" f;
+    Report.linear ~name "After" { f with fun_body = new_body };
     if !strict then
       failwithf
         "Conversion from linear to cfg and back to linear is not an \
@@ -173,7 +181,7 @@ let check_equal f ~new_body =
 let print_linear msg f =
   if false then
     if !verbose then (
-      Printf.printf "%s processing %s\n" f.Linearize.fun_name msg ;
+      Printf.printf "%s processing %s\n" f.Linearize.fun_name msg;
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let rec remove_discriminator = function
@@ -188,14 +196,16 @@ let rec remove_linear_discriminator i =
   | Lend -> i
   | _ ->
       { i with
-        dbg= remove_discriminator i.dbg
-      ; next= remove_linear_discriminator i.next }
+        dbg = remove_discriminator i.dbg;
+        next = remove_linear_discriminator i.next
+      }
 
 let remove_linear_discriminators f =
   let open Linearize in
   { f with
-    fun_dbg= remove_discriminator f.fun_dbg
-  ; fun_body= remove_linear_discriminator f.fun_body }
+    fun_dbg = remove_discriminator f.fun_dbg;
+    fun_body = remove_linear_discriminator f.fun_body
+  }
 
 (* CR gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -207,17 +217,29 @@ let write_reorder_report f cfg newf newcfg =
   if not (phys_equal cfg newcfg) then (
     (* Separate files for before and after make it easier to diff *)
     let name = X86_proc.string_of_symbol "" f.Linearize.fun_name in
-    Report.linear ~name "Before-Reorder" f ;
-    Report.linear ~name "After-Reorder" newf ;
-    Report.cfg ~name "Before-Reorder" cfg ;
+    Report.linear ~name "Before-Reorder" f;
+    Report.linear ~name "After-Reorder" newf;
+    Report.cfg ~name "Before-Reorder" cfg;
     Report.cfg ~name "After-Reorder" newcfg )
 
-let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
-    ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout
-    ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
-    ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
-    ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    ~gen_bolt_fdata args =
+let main
+    ~binary_filename
+    ~perf_profile_filename
+    ~raw_layout_filename
+    ~rel_layout_filename
+    ~linearid_layout_filename
+    ~gen_rel_layout
+    ~gen_linearid_layout
+    ~random_order
+    ~eliminate_dead_blocks
+    ~eliminate_fallthrough_blocks
+    ~remove_linear_ids
+    ~reorder_report
+    ~preserve_orig_labels
+    ~gen_linearid_profile
+    ~linearid_profile_filename
+    ~gen_bolt_fdata
+    args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
@@ -242,10 +264,10 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     | _ -> ()
   in
   let transform f =
-    print_linear "Before" f ;
+    print_linear "Before" f;
     let cfg = Cfg_builder.from_linear f ~preserve_orig_labels in
     let new_cfg = reorder cfg in
-    write_rel_layout new_cfg ;
+    write_rel_layout new_cfg;
     (* If we eliminate dead blocks before a transformation then some
        algorithms might not apply because they rely on perf data based on
        original instructions. *)
@@ -253,19 +275,25 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
       (* implies dead block elimination *)
       Cfg_builder.eliminate_fallthrough_blocks new_cfg
     else if eliminate_dead_blocks then
-      Cfg_builder.eliminate_dead_blocks new_cfg ;
+      Cfg_builder.eliminate_dead_blocks new_cfg;
     let new_body = Cfg_builder.to_linear new_cfg in
-    validate f ~new_body ;
-    let fnew = {f with fun_body= new_body} in
-    if reorder_report then write_reorder_report f cfg fnew new_cfg ;
+    validate f ~new_body;
+    let fnew = { f with fun_body = new_body } in
+    if reorder_report then write_reorder_report f cfg fnew new_cfg;
     let fnew =
       if remove_linear_ids then remove_linear_discriminators fnew else fnew
     in
-    print_linear "After" fnew ; fnew
+    print_linear "After" fnew;
+    fnew
   in
-  Reoptimize.setup ~f:transform ;
-  let finish () = Reorder.finish algo ; Report.finish () in
-  at_exit finish ; call_ocamlopt args ; finish ()
+  Reoptimize.setup ~f:transform;
+  let finish () =
+    Reorder.finish algo;
+    Report.finish ()
+  in
+  at_exit finish;
+  call_ocamlopt args;
+  finish ()
 
 let command =
   Command.basic ~summary:"Feedback-directed optimizer for Ocaml"
@@ -285,7 +313,7 @@ let command =
        match the build of ocamlopt used above.\n" )
     Command.Let_syntax.(
       let%map_open v =
-        flag "-verbose" ~aliases:["-v"] no_arg ~doc:" verbose"
+        flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose"
       and q = flag "-q" no_arg ~doc:" quiet"
       and remove_linear_ids =
         flag "-remove-linear-ids" no_arg
@@ -340,7 +368,7 @@ let command =
             "filename block layout for reordering relative to function \
              start,does not require -binary"
       and linearid_layout_filename =
-        flag "-linearid-layout" ~aliases:["-layout"]
+        flag "-linearid-layout" ~aliases:[ "-layout" ]
           (optional Filename.arg_type)
           ~doc:
             "filename same as -rel-layout but uses linear id not cfg labels"
@@ -351,17 +379,17 @@ let command =
         flag "--" escape
           ~doc:"ocamlopt_args standard options passed to opcamlopt"
       in
-      if v then verbose := true ;
-      if q then verbose := false ;
-      if !verbose then Report.verbose := true ;
+      if v then verbose := true;
+      if q then verbose := false;
+      if !verbose then Report.verbose := true;
       (* CR gyorsh: use choose_one to reduce the mess below? *)
       if !verbose then (
         if
           preserve_orig_labels
           && (eliminate_dead_blocks || eliminate_fallthrough_blocks)
         then (
-          Printf.printf "Warning: Ignoring -preserve-orig-labels.\n" ;
-          Printf.printf "Incompatible with -edb and -efb\n" ) ;
+          Printf.printf "Warning: Ignoring -preserve-orig-labels.\n";
+          Printf.printf "Incompatible with -edb and -efb\n" );
         if random_order then
           if
             (not (perf_profile_filename = None))
@@ -372,20 +400,20 @@ let command =
           then (
             Printf.printf
               "Warning: Ignoring -perf-profile -raw-layout -layout \
-               -linearid-layout -binary. " ;
-            Printf.printf "Incompatible with -random\n" ) ;
+               -linearid-layout -binary. ";
+            Printf.printf "Incompatible with -random\n" );
         if binary_filename = None then (
           if
             (not (perf_profile_filename = None))
             || not (raw_layout_filename = None)
           then (
             Printf.printf
-              "Warning: ignoring -raw_layout and -perf-profile. " ;
+              "Warning: ignoring -raw_layout and -perf-profile. ";
             Printf.printf "Cannot use without -binary.\n" ) )
         else if perf_profile_filename = None && raw_layout_filename = None
         then (
-          Printf.printf "Warning: Ignoring -binary. " ;
-          Printf.printf "Cannot use without -perf-profile or -raw-layout.\n" ) ) ;
+          Printf.printf "Warning: Ignoring -binary. ";
+          Printf.printf "Cannot use without -perf-profile or -raw-layout.\n" ) );
       fun () ->
         main ~binary_filename ~perf_profile_filename ~raw_layout_filename
           ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout

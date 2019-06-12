@@ -14,37 +14,44 @@
 open Core
 open Loc
 
-type t = {
-  id : int;
-  (* Unique identifier we assign to this function *)
-  name : string;
-  (* Name of the function symbol *)
-  start : Addr.t;
-  (* Raw start address of the function in original binary *)
-  mutable count : Execount.t;
-  (* Preliminary execution count *)
-  mutable has_linearids : bool;
-  (* Does the function have any linearids? *)
-  agg : Aggregated_perf.t
-      (* Counters that refer to this function, uses raw addresses. This can
-         be dropped after cfg_count is constructed, to save memory. *)
+(* Successor info *)
+type b = {
+  target : Loc.t option;
+  target_label : Cfg_label.t option;
+  (* is the target intraprocedural? *)
+  intra : bool;
+  fallthrough : bool;
+  (* true for fallthrough targets where counts are inferred from LBR; false
+     for branches that appeared explicitly in LBR *)
+  taken : Execount.t;
+  mispredicts : Execount.t
 }
 [@@deriving sexp]
 
-let mk ~id ~name ~start =
-  { id;
-    name;
-    start;
-    has_linearids = false;
-    count = 0L;
-    agg = Aggregated_perf.empty ()
-  }
+(* call site info *)
+type c = {
+  callsite : Loc.t;
+  mutable callees : b list
+}
+[@@deriving sexp]
 
-(* descending order of execution counts (reverse order of compare) *)
-(* Tie breaker using name. Slower than id but more stable w.r.t. changes in
-   perf data and ocamlfdo, because ids are an artifact of the way ocamlfdo
-   reads and decodes locations. Change to tie breaker using id if speed
-   becomes a problem. *)
-let compare f1 f2 =
-  let res = compare f2.count f1.count in
-  if res = 0 then compare f1.name f2.name else res
+(* Execution counts for a basic block *)
+type t = {
+  label : Cfg_label.t;
+  mutable count : Execount.t;
+  (* Number of times this block was executed. *)
+  mutable branches : b list;
+  (* Info about branch targets *)
+  mutable calls : c list (* Info about call targets *)
+}
+[@@deriving sexp]
+
+val mk : label:Cfg_label.t -> t
+
+(* in-place update of mutable fields *)
+val add : t -> count:Execount.t -> unit
+
+(* Maintain unique targets *)
+val add_call : t -> callsite:c -> callee:b -> unit
+
+val add_branch : t -> b -> unit

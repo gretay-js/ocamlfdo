@@ -61,7 +61,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Profiles.Aggregated_decoded.t * Config.t
+  | Profile of Aggregated_decoded_profile.t * Config.t
 
 let validate cfg new_cfg_layout =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
@@ -186,7 +186,7 @@ let write_profile linearid_profile config =
           printf
             "Reorder functions is not enabled.Cannot output linker script.\n"
     | Execounts ->
-        Profiles.Aggregated_decoded.write_top_functions linearid_profile
+        Aggregated_decoded_profile.write_top_functions linearid_profile
           linker_script_hot
     | Hot_clusters -> failwith "Not implemented" )
 
