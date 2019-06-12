@@ -11,6 +11,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+open Core
 open Loc
 
 (* CR: Improve different option fields. The reason for them is that we don't
@@ -24,7 +25,7 @@ open Loc
 type b = {
   target : Loc.t option;
   target_label : Cfg_label.t option;
-  target_id : int;
+  target_id : int option;
   (* is the target intraprocedural? *)
   intra : bool;
   fallthrough : bool;
@@ -64,13 +65,22 @@ type t = {
 [@@deriving sexp]
 
 let mk ~label ~first_id ~terminator_id =
-  { label; count = 0L; branches = []; calls = [] }
+  { label; count = 0L; branches = []; calls = []; first_id; terminator_id }
 
 let add t ~count = t.count <- Int64.(t.count + count)
 
-let add_call t callsite callee =
-  c.callees <- callee :: c.callees;
-  failwith "not implemented"
+let add_call t ~callsite ~callee =
+  (* Find the callsite's info *)
+  match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
+  | None ->
+      let c = { callsite; callees = [ callee ] } in
+      t.calls <- c :: t.calls
+  | Some c ->
+      (* Check unique call target. *)
+      assert (
+        Option.is_none
+          (List.find c.callees ~f:(fun b -> b.target = callee.target)) );
+      c.callees <- callee :: c.callees
 
 (* Merge maintain unique targets *)
 let add_branch t b =
@@ -105,15 +115,3 @@ let add_branch t b =
 (* | Some tr when tr = target -> true *)
 (* | _ -> false )) ) *)
 (* | _ -> assert false ) ; *)
-
-(*   (* Find the callsite's info *)
- * ( match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
- * | None ->
- *     let c = { callsite; callees = [ callee ] } in
- *     t.calls <- c :: t.calls
- * | Some c ->
- *     (* Check unique call target. *)
- *     assert (
- *       Option.is_none
- *         (List.find c.callees ~f:(fun b -> b.target = callee.target)) );
- *     c.callees <- callee :: c.callees ); *)

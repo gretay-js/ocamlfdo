@@ -18,25 +18,31 @@ open Block_info
 
 let verbose = ref true
 
+(* Map basic blocks of this function to breakdown of execution counts *)
+type t = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
+
 let mal (func : Func.t) count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
   func.malformed_traces <- Int64.(func.malformed_traces + count)
-
-let get_block_info t label =
-  Hashtbl.find_or_add t label ~default:(fun () -> Block_info.mk ~label)
-
-let record t ~label ~count =
-  let b = get_block_info t label in
-  Block_info.add b ~count
-
-let get_linearid (loc : Loc.t) =
-  let dbg = Option.value_exn loc.dbg in
-  dbg.line
 
 let first_id (block : Cfg.block) =
   match block.body with
   | [] -> block.terminator.id
   | hd :: _ -> hd.id
+
+let get_block_info t (block : Cfg.block) =
+  Hashtbl.find_or_add t block.start ~default:(fun () ->
+      let terminator_id = block.terminator.id in
+      let first_id = first_id block in
+      Block_info.mk ~label:block.start ~first_id ~terminator_id )
+
+let record t block ~count =
+  let b = get_block_info t block in
+  Block_info.add b ~count
+
+let get_linearid (loc : Loc.t) =
+  let dbg = Option.value_exn loc.dbg in
+  dbg.line
 
 (* Find basic instruction whose id=[linearid] in [block] *)
 let get_basic_instr linearid (block : Cfg.block) =
@@ -79,8 +85,8 @@ let get_block (loc : Loc.t) cfg =
             "Can't find cfg basic block labeled %d for linearid %d in %s\n"
             label dbg.line dbg.file () ) )
 
-let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts
-    func cfg =
+let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
+    =
   let from_block = get_block from_loc cfg in
   let to_block = get_block to_loc cfg in
   match (from_block, to_block) with
@@ -96,22 +102,22 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts
           "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map \
            target to CFG\n"
           count from_loc.addr to_loc.addr;
-      record t ~label:from_block.start ~count
+      record t from_block ~count
   | None, Some to_block ->
       if !verbose then
         printf
           "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map \
            source to CFG\n"
           count from_loc.addr to_loc.addr;
-      record t ~label:to_block.start ~count
+      record t to_block ~count
   | Some from_block, Some to_block -> (
-      record t ~label:from_block.start ~count;
-      record t ~label:to_block.start ~count;
+      record t from_block ~count;
+      record t to_block ~count;
       let from_linearid = get_linearid from_loc in
       let to_linearid = get_linearid to_loc in
       let to_block_first_id = first_id to_block in
       assert (to_block_first_id = to_linearid);
-      let bi = get_block_info t from_block.start in
+      let bi = get_block_info t from_block in
       let b =
         { Block_info.target = Some to_loc;
           target_label = Some to_block.start;
@@ -147,8 +153,8 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts
         | Cfg.Call _ -> add_call bi ~callsite:from_loc ~callee:b
         | _ -> assert false )
 
-let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts func
-    cfg =
+let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
+    =
   (* Branch going outside of this function. *)
   match get_block from_loc cfg with
   | None ->
@@ -157,12 +163,12 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts func
           "Ignore inter branch count %Ld from 0x%Lx. Can't map to CFG.\n"
           count from_loc.addr
   | Some from_block -> (
-      record t ~label:from_block.start ~count;
+      record t from_block ~count;
       (* Find the corresponding instruction and update its counters. The
          instruction is either a terminator or a call.*)
       let linearid = get_linearid from_loc in
       let terminator = from_block.terminator in
-      let bi = get_block_info t from_block.start in
+      let bi = get_block_info t from_block in
       if terminator.id = linearid then
         (* terminator *)
         match terminator.desc with
@@ -203,7 +209,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts func
           | _ -> assert false ) )
 
 let record_entry t (_from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
-    func cfg =
+    cfg =
   (* Branch into this function from another function, which may be unknown.
      One of the following situations: Callee: branch target is the first
      instr in the entry block. Return from call: branch target is a label
@@ -215,10 +221,10 @@ let record_entry t (_from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
         printf "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
           count to_loc.addr
   | Some to_block -> (
-      record t ~label:to_block.start ~count;
+      record t to_block ~count;
       (* Find the corresponding instruction and update its counters.*)
       let linearid = get_linearid to_loc in
-      let _bi = get_block_info t to_block.start in
+      let _bi = get_block_info t to_block in
       let first_instr_linearid =
         match to_block.body with
         | [] -> to_block.terminator.id
@@ -285,11 +291,11 @@ let record_branch t from_loc to_loc count mispredicts (func : Func.t) cfg =
   match (from_loc.rel, to_loc.rel) with
   | Some from_rel, Some to_rel
     when from_rel.id = func.id && to_rel.id = func.id ->
-      record_intra t from_loc to_loc count mispredicts func cfg
+      record_intra t from_loc to_loc count mispredicts cfg
   | Some from_rel, _ when from_rel.id = func.id ->
-      record_exit t from_loc to_loc count mispredicts func cfg
+      record_exit t from_loc to_loc count mispredicts cfg
   | _, Some to_rel when to_rel.id = func.id ->
-      record_entry t from_loc to_loc count mispredicts func cfg
+      record_entry t from_loc to_loc count mispredicts cfg
   | _ -> assert false
 
 exception Malformed_fallthrough_trace
@@ -323,9 +329,15 @@ let compute_fallthrough_execounts t from_lbl to_lbl count func cfg =
        blocks of the trace are accounted for when we handled their LBR
        branches. *)
     let record_fallthrough src_lbl dst_lbl =
-      record t ~label:dst_lbl ~count;
-      let target_bi = get_block_info t dst_lbl in
-      let bi = get_block_info t src_lbl in
+      let dst_block =
+        Option.value_exn (Cfg_builder.get_block cfg dst_lbl)
+      in
+      record t dst_block ~count;
+      let target_bi = get_block_info t dst_block in
+      let src_block =
+        Option.value_exn (Cfg_builder.get_block cfg src_lbl)
+      in
+      let bi = get_block_info t src_block in
       let b =
         { Block_info.target = None;
           target_label = Some dst_lbl;
@@ -380,42 +392,4 @@ let record_trace t from_loc to_loc count (func : Func.t) cfg =
           count from_loc.addr to_loc.addr;
       mal func count
 
-(* Translate linear ids of this function's locations to cfg labels within
-   this function, find the corresponding basic blocks and update their
-   block_info. Perform lots of sanity checks to make sure the location of
-   the execounts match the instructions in the cfg. *)
-let create func cfg =
-  let get_loc addr = Hashtbl.find_exn addr2loc addr in
-  let t = Hashtbl.create (module Cfg_label) in
-  (* CR: add blocks to blocks *)
-  let malformed_traces = 0L in
-  (* Associate instruction counts with basic blocks *)
-  Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
-      let loc = get_loc t key in
-      match get_block loc cfg with
-      | None ->
-          if !verbose then
-            printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n"
-              loc.addr
-      | Some block -> record t ~label:block.start ~count:data );
-  (* Associate fall-through trace counts with basic blocks *)
-  Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
-      let from_addr, to_addr = key in
-      let from_loc = get_loc t from_addr in
-      let to_loc = get_loc t to_addr in
-      record_trace t from_loc to_loc data func cfg );
-  ( if !verbose then
-    let total_traces =
-      List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
-    in
-    let ratio = Int64.(func.malformed_traces * 100L / total_traces) in
-    printf "Found %Ld malformed traces out of %Ld (%Ld)\n"
-      func.malformed_traces total_traces ratio );
-  (* Associate branch counts with basic blocks *)
-  Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
-      let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
-      let from_addr, to_addr = key in
-      let from_loc = get_loc t from_addr in
-      let to_loc = get_loc t to_addr in
-      record_branch t from_loc to_loc data mispredicts func cfg );
-  blocks
+let create () = Hashtbl.create (module Cfg_label)

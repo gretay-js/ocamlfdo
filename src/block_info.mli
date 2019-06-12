@@ -50,7 +50,7 @@ type t = {
 }
 [@@deriving sexp]
 
-val mk : label:Cfg_label.t -> t
+val mk : label:Cfg_label.t -> first_id:int -> terminator_id:int -> t
 
 (* in-place update of mutable fields *)
 val add : t -> count:Execount.t -> unit

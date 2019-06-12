@@ -216,6 +216,45 @@ let write_top_functions t filename =
   let fl = List.map sorted ~f:(fun func -> func.name) in
   Layouts.Func_layout.write_linker_script fl filename
 
+(* Translate linear ids of this function's locations to cfg labels within
+   this function, find the corresponding basic blocks and update their
+   block_info. Perform lots of sanity checks to make sure the location of
+   the execounts match the instructions in the cfg. *)
+let create_cfg_info t func cfg =
+  let get_loc addr = Hashtbl.find_exn t.addr2loc addr in
+  let blocks = Cfg_info.create () in
+  (* Associate instruction counts with basic blocks *)
+  Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
+      let loc = get_loc key in
+      match Cfg_info.get_block loc cfg with
+      | None ->
+          if !verbose then
+            printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n"
+              loc.addr
+      | Some block -> Cfg_info.record blocks block ~count:data );
+  (* Associate fall-through trace counts with basic blocks *)
+  Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
+      let from_addr, to_addr = key in
+      let from_loc = get_loc from_addr in
+      let to_loc = get_loc to_addr in
+      Cfg_info.record_trace blocks from_loc to_loc data func cfg );
+  ( if !verbose then
+    let total_traces =
+      List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
+    in
+    let ratio = Int64.(func.malformed_traces * 100L / total_traces) in
+    printf "Found %Ld malformed traces out of %Ld (%Ld)\n"
+      func.malformed_traces total_traces ratio );
+  (* Associate branch counts with basic blocks *)
+  Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
+      let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
+      let from_addr, to_addr = key in
+      let from_loc = get_loc from_addr in
+      let to_loc = get_loc to_addr in
+      Cfg_info.record_branch blocks from_loc to_loc data mispredicts func
+        cfg );
+  blocks
+
 (* Compute detailed execution counts for function [name] using its CFG *)
 let add t name cfg =
   match Hashtbl.find t.name2id name with
@@ -226,7 +265,7 @@ let add t name cfg =
       let func = Hashtbl.find_exn t.functions id in
       if func.count > 0L && func.has_linearids then (
         if !verbose then printf "compute_cfg_execounts for %s\n" name;
-        let cfg_info = Cfg_info.create func cfg in
+        let cfg_info = create_cfg_info t func cfg in
         Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
         Some cfg_info )
       else None
