@@ -31,7 +31,7 @@ type b = {
   fallthrough : bool;
   (* true for fallthrough targets where counts are inferred from LBR; false
      for branches that appeared explicitly in LBR *)
-  taken : Execount.t;
+  mutable taken : Execount.t;
   mispredicts : Execount.t
 }
 [@@deriving sexp]
@@ -69,23 +69,45 @@ let mk ~label ~first_id ~terminator_id =
 
 let add t ~count = t.count <- Int64.(t.count + count)
 
+let find branches branch =
+  List.find branches ~f:(fun b ->
+      match (b.target, b.target_label, b.target_id) with
+      | Some t, _, _ when Some t = branch.target ->
+          assert (
+            b.target_label = branch.target_label
+            && b.target_id = branch.target_id );
+          true
+      | None, Some tl, _ when Some tl = branch.target_label ->
+          assert (is_none branch.target && b.target_id = branch.target_id);
+          true
+      | None, None, Some tid when Some tid = branch.target_id ->
+          assert (is_none branch.target && is_none branch.target_label);
+          true
+      | None, None, None -> assert false
+      | _ -> false )
+
 let add_call t ~callsite ~callee =
   (* Find the callsite's info *)
   match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
   | None ->
       let c = { callsite; callees = [ callee ] } in
       t.calls <- c :: t.calls
-  | Some c ->
-      (* Check unique call target. *)
-      assert (
-        Option.is_none
-          (List.find c.callees ~f:(fun b -> b.target = callee.target)) );
-      c.callees <- callee :: c.callees
+  | Some c -> (
+    (* Invariant: unique entry per call target. *)
+    (* Find call target entry and update it. *)
+    match find c.callees callee with
+    | None -> c.callees <- callee :: c.callees
+    | Some _ -> assert false )
 
 (* Merge maintain unique targets *)
 let add_branch t b =
-  t.branches <- b :: t.branches;
-  failwith "not implemented"
+  match find t.branches b with
+  | None -> t.branches <- b :: t.branches
+  | Some br ->
+      assert (b.intra && br.intra);
+      assert (b.fallthrough && br.fallthrough);
+      assert (b.mispredicts = 0L && br.mispredicts = 0L);
+      br.taken <- Int64.(br.taken + b.taken)
 
 (* (\* Find branches target. *\) *)
 (* ( match (b.target, b.target_label) with *)

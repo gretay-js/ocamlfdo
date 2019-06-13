@@ -18,7 +18,7 @@
    comparisons when we use the algorithm to. *)
 open Core
 
-let verbose = false
+let verbose = true
 
 type layout = int list String.Map.t
 
@@ -50,10 +50,17 @@ module Config = struct
 
   let linker_script_hot_extension = "linker-script-hot"
 
+  let bolt_fdata_extension = "fdata"
+
   let linker_script_filename t stage =
     sprintf "%s%s%s.%s" t.gen_linearid_profile
       (if String.is_empty stage then "" else ".")
       stage linker_script_hot_extension
+
+  let bolt_fdata_filename t stage =
+    sprintf "%s%s%s.%s" t.gen_linearid_profile
+      (if String.is_empty stage then "" else ".")
+      stage bolt_fdata_extension
 end
 
 type reorder_algo =
@@ -61,7 +68,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Aggregated_decoded_profile.t * Config.t
+  | Profile of Aggregated_decoded_profile.t * Config.t * Elf_locations.t
 
 let validate cfg new_cfg_layout =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
@@ -174,12 +181,14 @@ let reorder_opt cfg_info cfg =
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 
-let write_profile linearid_profile config =
+let write_profile linearid_profile config locations =
   let open Config in
   if config.write_linker_script then (
     let linker_script_hot = Config.linker_script_filename config "" in
     if verbose then
       printf "Writing linker script hot to %s\n" linker_script_hot;
+    let filename = Config.bolt_fdata_filename config "" in
+    Bolt_profile.save_fallthrough linearid_profile locations ~filename;
     match config.reorder_functions with
     | No ->
         if verbose then
@@ -205,19 +214,26 @@ let reorder_profile cfg linearid_profile config =
 
 let reorder ~algo cfg =
   match algo with
-  | Identity -> cfg
+  | Identity ->
+      if verbose then (
+        printf "Don't reorder. Current layout=";
+        List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl ->
+            printf " %d" lbl );
+        printf "\n" );
+      cfg
   | Random random_state -> reorder_random cfg ~random_state
   | Cfg layout -> reorder_rel_layout cfg ~layout
   | Linear layout -> reorder_layout cfg ~layout
-  | Profile (linearid_profile, config) ->
+  | Profile (linearid_profile, config, _locations) ->
       reorder_profile cfg linearid_profile config
 
-let finish_profile linearid_profile config =
+let finish_profile linearid_profile config locations =
   (* Call write_profile here after all cfgs are processed. It will only be
      needed after we implement reorder that depends on the cfg.*)
-  write_profile linearid_profile config;
+  write_profile linearid_profile config locations;
   ()
 
 let finish = function
-  | Profile (linearid, options) -> finish_profile linearid options
+  | Profile (linearid, options, locations) ->
+      finish_profile linearid options locations
   | _ -> ()

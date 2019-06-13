@@ -30,6 +30,10 @@ val save :
   filename:string ->
   unit
 
+(* Writes directly to file without creating the entire profile in memory. *)
+val save_fallthrough :
+  Aggregated_decoded_profile.t -> Elf_locations.t -> filename:string -> unit
+
 val read : filename:string -> t
 
 val write : t -> filename:string -> unit

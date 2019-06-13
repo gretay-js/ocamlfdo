@@ -71,13 +71,14 @@ let setup_reorder ~binary_filename ~perf_profile_filename
             match linearid_profile_filename with
             | None -> Reorder.Identity
             | Some linearid_profile_filename ->
+                (* This doesn't need locations so why is it under binary? *)
                 let linearid_profile =
                   Aggregated_decoded_profile.read linearid_profile_filename
                 in
                 let config =
                   Reorder.Config.default linearid_profile_filename
                 in
-                Reorder.Profile (linearid_profile, config) )
+                Reorder.Profile (linearid_profile, config, locations) )
           | Some perf_profile_filename ->
               (* CR gyorsh: decoding raw perf data should be separate from
                  reordering algorithm setup. *)
@@ -100,7 +101,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                 gen_linearid_profile;
               let gen_bolt_fdata =
                 match gen_bolt_fdata with
-                | None -> gen_linearid_profile ^ ".fdata"
+                | None -> gen_linearid_profile ^ ".prelim.fdata"
                 | Some f -> f
               in
               Bolt_profile.save linearid_profile aggr_perf_profile
@@ -117,7 +118,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
               Aggregated_decoded_profile.write_top_functions
                 linearid_profile
                 (Reorder.Config.linker_script_filename config "prelim");
-              Reorder.Profile (linearid_profile, config) ) )
+              Reorder.Profile (linearid_profile, config, locations) ) )
 
 let call_ocamlopt args =
   (* Set debug "-g" to emit dwarf locations. *)
@@ -171,7 +172,7 @@ let check_equal f ~new_body =
         name () )
 
 let print_linear msg f =
-  if false then
+  if true then
     if !verbose then (
       printf "%s processing %s\n" f.Linearize.fun_name msg;
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )

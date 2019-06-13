@@ -102,6 +102,12 @@ let row_to_sample ~keep_pid row =
             brstack = snd (parse_brstack (0, []) rest)
           }
         in
+        if !verbose then (
+          printf "raw brstack=%s\n" row;
+          printf "parsed brstack=";
+          List.iter sample.brstack ~f:(fun br ->
+              printf "0x%Lx/0x%Lx " br.from_addr br.to_addr );
+          printf "\n" );
         Some sample )
       else None
   | _ -> failwithf "Cannot parse %s\n" row ()
@@ -173,6 +179,20 @@ let read_and_aggregate ?(expected_pid = None) filename =
                 let from_addr = prev.to_addr in
                 let to_addr = cur.from_addr in
                 let key = (from_addr, to_addr) in
+                if !verbose then
+                  printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
+                if from_addr >= to_addr then
+                  if !verbose then
+                    printf
+                      "Malformed trace ignored 0x%Lx->0x%Lx (from_addr >= \
+                       to_addr)\n"
+                      from_addr to_addr;
+                (* There appear to be a problem with perf output: last LBR
+                   entry is repeated twice sometimes. It may be related to
+                   the recent problem mentioned in a patch for perf script:
+                   Fix LBR skid dump problems in brstackinsn
+                   https://github.com/torvalds/linux/commit
+                   /61f611593f2c90547cb09c0bf6977414454a27e6 *)
                 inc aggregated.traces key;
                 Some cur )
         : br option )

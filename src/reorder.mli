@@ -46,7 +46,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of Aggregated_decoded_profile.t * Config.t
+  | Profile of Aggregated_decoded_profile.t * Config.t * Elf_locations.t
 
 val reorder : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
 

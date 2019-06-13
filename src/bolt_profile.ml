@@ -201,3 +201,15 @@ let save p agg locations ~filename =
   let chan = Out_channel.create filename in
   mk p agg locations ~init:() ~f:(fun _ b -> Bolt_branch.print ~chan b);
   Out_channel.close chan
+
+(* If [t] uses too much memory and we don't need it other than for printing,
+   then we can print during [mk] instead of "append_if" above *)
+let save_fallthrough p locations ~filename =
+  if !verbose then
+    printf
+      "Writing preliminary aggregated decoded profile in bolt form to %s\n"
+      filename;
+  let chan = Out_channel.create filename in
+  mk p (Aggregated_perf_profile.empty ()) locations ~init:() ~f:(fun _ b ->
+      Bolt_branch.print ~chan b );
+  Out_channel.close chan

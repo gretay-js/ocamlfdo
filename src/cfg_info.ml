@@ -21,6 +21,15 @@ let verbose = ref true
 (* Map basic blocks of this function to breakdown of execution counts *)
 type t = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
 
+let terminator_to_string t =
+  let open Cfg in
+  match t with
+  | Return -> "Return"
+  | Raise _ -> "Raise"
+  | Tailcall _ -> "Tailcall"
+  | Branch s -> sprintf "Branch with %d successors" (List.length s)
+  | Switch s -> sprintf "Switch with %d successors" (Array.length s)
+
 let mal (func : Func.t) count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
   func.malformed_traces <- Int64.(func.malformed_traces + count)
@@ -210,79 +219,106 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
               Block_info.add_call bi ~callsite:from_loc ~callee:b
           | _ -> assert false ) )
 
-let record_entry t (_from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
+let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
     cfg =
   (* Branch into this function from another function, which may be unknown.
      One of the following situations: Callee: branch target is the first
      instr in the entry block. Return from call: branch target is a label
      after the call site. Exception handler: branch target is a trap
      handler. *)
-  match get_block to_loc cfg with
-  | None ->
-      if !verbose then
-        printf "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
-          count to_loc.addr
-  | Some to_block -> (
-      record t to_block ~count;
-      (* Find the corresponding instruction and update its counters.*)
-      let linearid = get_linearid to_loc in
-      let _bi = get_block_info t to_block in
-      let first_instr_linearid =
-        match to_block.body with
-        | [] -> to_block.terminator.id
-        | hd :: _ -> hd.id
-      in
-      (* We could infer call targets from this info, but its not implemented
-         yet because we don't have much use for it and it would change the
-         way Block_info.add_call maps callsites using locations because we
-         don't necessarily have a location for the caller. Also note that
-         add_call currently checks that each callee can be installed at most
-         once, as guaranteed by the aggregated profile. *)
-      if
-        first_instr_linearid = linearid
-        && ( to_block.start = Cfg_builder.entry_label cfg
-           (* Callee *)
-           || Cfg_builder.is_trap_handler cfg to_block.start
-              (* Exception handler *) )
-      then ( (* Block_info of potential callers can be updated *) )
-      else
-        (* Return from a call. Find predecessor instruction and check that
-           it is a call. There could be more than one predecessor. We have
-           enough information to find which one in some cases. *)
-        let record_call (instr : Cfg.basic Cfg.instruction) =
-          match instr.desc with
-          | Call _ -> ()
-          | _ -> assert false
+  if from_loc.addr < 0L then (
+    if
+      (* [from_loc.addr] of this branch does not belong to the binary and
+         usually to_addr cannot be target of jump because it is not a return
+         from a call instruction and not an entry function. Could it be a
+         context switch? *)
+      !verbose
+    then
+      printf "record_entry at 0x%Lx -> 0x%Lx (from_addr < 0)\n"
+        from_loc.addr to_loc.addr )
+  else
+    match get_block to_loc cfg with
+    | None ->
+        if !verbose then
+          printf
+            "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
+            count to_loc.addr
+    | Some to_block -> (
+        record t to_block ~count;
+        (* Find the corresponding instruction and update its counters.*)
+        let linearid = get_linearid to_loc in
+        let _bi = get_block_info t to_block in
+        let first_instr_linearid =
+          match to_block.body with
+          | [] -> to_block.terminator.id
+          | hd :: _ -> hd.id
         in
-        let find_prev_block_call () =
-          (* find a predecessor block that must end in a call and
-             fallthrough. *)
-          Cfg.LabelSet.iter
-            (fun pred_label ->
-              let pred =
-                Option.value_exn (Cfg_builder.get_block cfg pred_label)
-              in
-              match pred.terminator.desc with
-              | Branch [ (Always, label) ] when label = to_block.start ->
-                  let last_instr = List.last_exn to_block.body in
-                  record_call last_instr
-              | _ -> assert false )
-            to_block.predecessors
-        in
-        if first_instr_linearid = linearid then find_prev_block_call ()
+        (* We could infer call targets from this info, but its not
+           implemented yet because we don't have much use for it and it
+           would change the way Block_info.add_call maps callsites using
+           locations because we don't necessarily have a location for the
+           caller. Also note that add_call currently checks that each callee
+           can be installed at most once, as guaranteed by the aggregated
+           profile. *)
+        if
+          first_instr_linearid = linearid
+          && ( to_block.start = Cfg_builder.entry_label cfg
+             (* Callee *)
+             || Cfg_builder.is_trap_handler cfg to_block.start
+                (* Exception handler *) )
+        then ( (* Block_info of potential callers can be updated *) )
         else
-          match prev_instr linearid to_block with
-          | Some instr -> record_call instr
-          | None -> (
-              (* instr with linearid must be the terminator *)
-              assert (to_block.terminator.id = linearid);
-              match to_block.body with
-              | [] ->
-                  (* empty body means the call was in one of the pred blocks *)
-                  find_prev_block_call ()
-              | _ ->
-                  let last_instr = List.last_exn to_block.body in
-                  record_call last_instr ) )
+          (* Return from a call. Find predecessor instruction and check that
+             it is a call. There could be more than one predecessor. We have
+             enough information to find which one in some cases. *)
+          let record_call (instr : Cfg.basic Cfg.instruction) =
+            match instr.desc with
+            | Call _ -> ()
+            | _ ->
+                if !verbose then
+                  printf
+                    "record_entry failed at 0x%Lx -> 0x%Lx linid=%d \
+                     unrecognized as call instr.id=%d\n"
+                    from_loc.addr to_loc.addr linearid instr.id;
+                assert false
+          in
+          let find_prev_block_call () =
+            (* find a predecessor block that must end in a call and
+               fallthrough. *)
+            Cfg.LabelSet.iter
+              (fun pred_label ->
+                let pred =
+                  Option.value_exn (Cfg_builder.get_block cfg pred_label)
+                in
+                match pred.terminator.desc with
+                | Branch [ (Always, label) ] when label = to_block.start ->
+                    let last_instr = List.last_exn to_block.body in
+                    record_call last_instr
+                | _ ->
+                    if !verbose then
+                      printf
+                        "record_entry failed at 0x%Lx -> 0x%Lx \
+                         to_first_instr_linid=%d to_linearid=%d%s\n"
+                        from_loc.addr to_loc.addr first_instr_linearid
+                        linearid
+                        (terminator_to_string pred.terminator.desc) )
+              to_block.predecessors
+          in
+          if first_instr_linearid = linearid then find_prev_block_call ()
+          else
+            match prev_instr linearid to_block with
+            | Some instr -> record_call instr
+            | None -> (
+                (* instr with linearid must be the terminator *)
+                assert (to_block.terminator.id = linearid);
+                match to_block.body with
+                | [] ->
+                    (* empty body means the call was in one of the pred
+                       blocks *)
+                    find_prev_block_call ()
+                | _ ->
+                    let last_instr = List.last_exn to_block.body in
+                    record_call last_instr ) )
 
 (* Depending on the settings of perf record and the corresponding CPU
    configuration, LBR may capture different kinds of branches, including
@@ -302,7 +338,8 @@ let record_branch t from_loc to_loc count mispredicts (func : Func.t) cfg =
 
 exception Malformed_fallthrough_trace
 
-let compute_fallthrough_execounts t from_lbl to_lbl count func cfg =
+let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
+    cfg =
   (* Get the part of the layout starting from from_block up to but not
      including to_block *)
   try
@@ -315,16 +352,45 @@ let compute_fallthrough_execounts t from_lbl to_lbl count func cfg =
       | None -> raise Malformed_fallthrough_trace
       | Some (to_pos, _) -> List.take fallthrough to_pos
     in
+    if !verbose then (
+      printf "%s trace (from_lbl=%d,to_lbl=%d)\n fallthrough: " func.name
+        from_lbl to_lbl;
+      List.iter fallthrough ~f:(fun lbl -> printf " %d" lbl);
+      printf "\nlayout=";
+      List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl -> printf " %d" lbl);
+      printf "\n" );
     (* Check that all terminators fall through *)
     let check_fallthrough src_lbl dst_lbl =
       let block = Option.value_exn (Cfg_builder.get_block cfg src_lbl) in
       match block.terminator.desc with
       | Branch _ | Switch _ ->
-          assert (
-            List.mem (Cfg.successor_labels block) dst_lbl ~equal:Int.equal
-          );
-          src_lbl
-      | _ -> raise Malformed_fallthrough_trace
+          if !verbose then (
+            printf
+              "check_fallthrough in %s trace (from_lbl=%d,to_lbl=%d): \
+               src_lbl=%d dst_lbl=%d\n\
+               src_block.successor_labels:\n"
+              func.name from_lbl to_lbl src_lbl dst_lbl;
+            List.iter (Cfg.successor_labels block) ~f:(fun lbl ->
+                printf "%d\n" lbl ) );
+          if List.mem (Cfg.successor_labels block) dst_lbl ~equal:Int.equal
+          then src_lbl
+          else (
+            if !verbose then
+              printf
+                "Malformed fallthrough in %s trace \
+                 (from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
+                 src_block.successor_labels:\n"
+                func.name from_lbl to_lbl src_lbl dst_lbl;
+            raise Malformed_fallthrough_trace )
+      | _ ->
+          if !verbose then
+            printf
+              "Unexpected terminator %s in fallthrough trace  \
+               %s(from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
+               src_block.successor_labels:\n"
+              (terminator_to_string block.terminator.desc)
+              func.name from_lbl to_lbl src_lbl dst_lbl;
+          raise Malformed_fallthrough_trace
     in
     List.fold_right fallthrough ~init:to_lbl ~f:check_fallthrough |> ignore;
     (* Account only for the intermediate blocks in the trace. Endpoint
@@ -375,8 +441,19 @@ let record_trace t from_loc to_loc count (func : Func.t) cfg =
             printf
               "No fallthroughs in trace with count %Ld from 0x%Lx to \
                0x%Lx:from_block = to_block\n"
-              count from_loc.addr to_loc.addr
+              count from_loc.addr to_loc.addr;
+        record t from_block ~count
     | Some from_block, Some to_block ->
+        if !verbose then
+          printf
+            "trace (from_addr=0x%Lx,to_addr=0x%Lx)=> \
+             (from_linid=%d,to_linid=%d)=> (from_block=%d,to_block=%d)\n"
+            from_loc.addr to_loc.addr
+            (let from_dbg = Option.value_exn from_loc.dbg in
+             from_dbg.line)
+            (let to_dbg = Option.value_exn to_loc.dbg in
+             to_dbg.line)
+            from_block.start to_block.start;
         compute_fallthrough_execounts t from_block.start to_block.start
           count func cfg
     | _ ->
