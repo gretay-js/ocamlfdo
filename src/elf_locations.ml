@@ -152,48 +152,70 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
   match prev with
   | None -> ()
   | Some prev ->
+      if verbose then (
+        Printf.printf "find_range prev.state.filename=%s .addr=0x%Lx\n"
+          prev.state.filename prev.state.address;
+        Printf.printf "find_range cur.state.filename=%s .addr=0x%Lx\n"
+          cur.state.filename cur.state.address );
+      let filename =
+        match prev.filename with
+        | None ->
+            if verbose then
+              Printf.printf
+                "find_range at prev=0x%Lx: prev.filename=None, use \
+                 prev.state.filename=%s\n"
+                prev.state.address prev.state.filename;
+            prev.state.filename
+        | Some filename ->
+            if verbose then
+              Printf.printf "find_range filename=%s\n" filename;
+            filename
+      in
       assert (prev.state.address <= cur.state.address);
-      if start <= prev.state.address then (
-        if finish < prev.state.address then raise FinishedFunc
-        else
-          let filename =
-            match prev.filename with
+      if start <= prev.state.address && finish >= prev.state.address then (
+        let line = prev.state.line in
+        if verbose then
+          Printf.printf "Caching loc 0x%Lx %s %d\n" prev.state.address
+            filename line;
+        let res = Some (filename, line) in
+        ( if with_inverse then
+          let tbl =
+            match Hashtbl.find_opt t.inverse filename with
             | None ->
-                if verbose then Printf.printf "find_range filename=None\n";
-                prev.state.filename
-            | Some filename ->
                 if verbose then
-                  Printf.printf "find_range filename=%s\n" filename;
-                filename
+                  Printf.printf "creating a new func table for %s %d\n"
+                    filename line;
+                let tbl = Hashtbl.create 42 in
+                Hashtbl.add t.inverse filename tbl;
+                tbl
+            | Some tbl ->
+                if verbose then
+                  Printf.printf
+                    "found func table with %d entries for %s %d\n"
+                    (Hashtbl.length tbl) filename line;
+                tbl
           in
-          let line = prev.state.line in
-          if verbose then
-            Printf.printf "Caching loc 0x%Lx %s %d\n" prev.state.address
-              filename line;
-          let res = Some (filename, line) in
-          ( if with_inverse then
-            let tbl =
-              match Hashtbl.find_opt t.inverse filename with
-              | None ->
-                  let tbl = Hashtbl.create 42 in
-                  Hashtbl.add t.inverse filename tbl;
-                  tbl
-              | Some tbl -> tbl
-            in
-            match Hashtbl.find_opt tbl line with
-            | None -> Hashtbl.add tbl line prev.state.address
-            | Some addr -> assert (prev.state.address = addr) );
-          if fill_gaps then
-            let n =
-              if cur.state.address < finish then cur.state.address
-              else finish
-            in
-            let i = ref prev.state.address in
-            while !i < n do
-              Hashtbl.add t.resolved !i res;
-              i := Int64.add !i 1L
-            done
-          else Hashtbl.add t.resolved prev.state.address res )
+          match Hashtbl.find_opt tbl line with
+          | None ->
+              if verbose then
+                Printf.printf
+                  "adding new entry to line table for %s %d: 0x%Lx\n"
+                  filename line prev.state.address;
+              Hashtbl.add tbl line prev.state.address
+          | Some addr ->
+              if verbose then
+                Printf.printf "found entry in line table for %s %d: 0x%Lx\n"
+                  filename line addr );
+        if fill_gaps then
+          let n =
+            if cur.state.address < finish then cur.state.address else finish
+          in
+          let i = ref prev.state.address in
+          while !i < n do
+            Hashtbl.add t.resolved !i res;
+            i := Int64.add !i 1L
+          done
+        else Hashtbl.add t.resolved prev.state.address res )
 
 let find_offsets t ~start ~finish ~addresses cur prev =
   match prev with
@@ -547,13 +569,11 @@ let resolve_range t ~start ~finish ~with_inverse =
       finish
       (if with_inverse then " with inverse" else "");
   let oldlen = Hashtbl.length t.inverse in
-  try
-    resolve_from_dwarf t
-      ~f:(find_range t ~start ~finish ~fill_gaps:false ~with_inverse)
-  with FinishedFunc ->
-    if verbose then
-      Printf.printf "inverse entries before=%d after=%d\n" oldlen
-        (Hashtbl.length t.inverse)
+  resolve_from_dwarf t
+    ~f:(find_range t ~start ~finish ~fill_gaps:false ~with_inverse);
+  if verbose then
+    Printf.printf "inverse entries before=%d after=%d\n" oldlen
+      (Hashtbl.length t.inverse)
 
 let to_address t file line =
   if verbose then Printf.printf "to_address of %s:%d" file line;
