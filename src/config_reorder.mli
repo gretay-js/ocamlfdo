@@ -11,21 +11,26 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
 
-(* Maps functions to layout of the function, which is essentially a
-   permutation of original ids. Sparse, i.e., only contains functions whose
-   layout changed. *)
-type layout = int list String.Map.t
+type reorder_basic_blocks =
+  | No
+  | Opt
 
-type reorder_algo =
-  | Identity
-  | Random of Random.State.t
-  | Linear of layout
-  | Cfg of layout
-  | Profile of
-      Aggregated_decoded_profile.t * Config_reorder.t * Elf_locations.t
+type reorder_functions =
+  | No
+  | Execounts
+  | Hot_clusters
 
-val reorder : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
+type t = {
+  gen_linearid_profile : string;
+  write_bolt_fdata : bool;
+  write_linker_script : bool;
+  reorder_basic_blocks : reorder_basic_blocks;
+  reorder_functions : reorder_functions
+}
 
-val finish : reorder_algo -> unit
+val default : string -> t
+
+val linker_script_filename : t -> string -> string
+
+val bolt_fdata_filename : t -> string -> string

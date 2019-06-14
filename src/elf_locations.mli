@@ -33,11 +33,7 @@ val resolve_function_containing :
   t -> program_counter:Int64.t -> string Intervals.interval option
 
 val resolve_function_starting_at :
-  t ->
-  program_counter:Int64.t ->
-  resolve_contents:bool ->
-  reset:bool ->
-  string option
+  t -> program_counter:Int64.t -> reset:bool -> string option
 
 (* Resolves debug info in one pass and caches the results for addresses. *)
 val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> unit

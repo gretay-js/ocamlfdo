@@ -36,7 +36,7 @@ let load_locations binary_filename =
 let setup_reorder ~binary_filename ~perf_profile_filename
     ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
     ~random_order ~gen_linearid_layout ~gen_linearid_profile
-    ~linearid_profile_filename ~gen_bolt_fdata =
+    ~linearid_profile_filename =
   if random_order then
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -76,7 +76,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                   Aggregated_decoded_profile.read linearid_profile_filename
                 in
                 let config =
-                  Reorder.Config.default linearid_profile_filename
+                  Config_reorder.default linearid_profile_filename
                 in
                 Reorder.Profile (linearid_profile, config, locations) )
           | Some perf_profile_filename ->
@@ -99,25 +99,23 @@ let setup_reorder ~binary_filename ~perf_profile_filename
               in
               Aggregated_decoded_profile.write linearid_profile
                 gen_linearid_profile;
-              let gen_bolt_fdata =
-                match gen_bolt_fdata with
-                | None -> gen_linearid_profile ^ ".prelim.fdata"
-                | Some f -> f
-              in
-              Bolt_profile.save linearid_profile aggr_perf_profile
-                ~filename:gen_bolt_fdata locations;
               (* CR gyorsh: configuration shouldn't be hardcoded! *)
               let config =
-                let open Reorder.Config in
+                let open Config_reorder in
                 { (default gen_linearid_profile) with
-                  reorder_functions = Reorder.Config.Execounts
+                  reorder_functions = Config_reorder.Execounts
                 }
               in
               (* CR gyorsh: write_top is here just for testing! *)
               (* Do we ever need the cfg to decide on function order? *)
               Aggregated_decoded_profile.write_top_functions
                 linearid_profile
-                (Reorder.Config.linker_script_filename config "prelim");
+                (Config_reorder.linker_script_filename config "prelim");
+              let gen_bolt_fdata =
+                Config_reorder.bolt_fdata_filename config "prelim"
+              in
+              Bolt_profile.save linearid_profile aggr_perf_profile
+                ~filename:gen_bolt_fdata locations;
               Reorder.Profile (linearid_profile, config, locations) ) )
 
 let call_ocamlopt args =
@@ -220,12 +218,12 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
     ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
     ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    ~gen_bolt_fdata args =
+    args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
       ~random_order ~gen_linearid_layout ~gen_linearid_profile
-      ~linearid_profile_filename ~gen_bolt_fdata
+      ~linearid_profile_filename
   in
   let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in
@@ -329,11 +327,6 @@ let command =
         flag "-gen-linearid-profile"
           (optional Filename.arg_type)
           ~doc:"filename output decoded perf profile"
-      and gen_bolt_fdata =
-        flag "-gen-bolt-fdata"
-          (optional Filename.arg_type)
-          ~doc:
-            "filename output aggregated perf profile in bolt fdata format"
       and linearid_profile_filename =
         flag "-linearid-profile"
           (optional Filename.arg_type)
@@ -400,6 +393,6 @@ let command =
           ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
           ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
           ~preserve_orig_labels ~gen_linearid_profile
-          ~linearid_profile_filename ~gen_bolt_fdata args)
+          ~linearid_profile_filename args)
 
 let () = Command.run command

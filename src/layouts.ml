@@ -180,8 +180,7 @@ let decode_layout_all locations permutation writer =
         let func_start = hd.address in
         let func =
           Elf_locations.resolve_function_starting_at
-            ~program_counter:func_start ~resolve_contents:false ~reset:false
-            locations
+            ~program_counter:func_start ~reset:false locations
         in
         match func with
         | None ->

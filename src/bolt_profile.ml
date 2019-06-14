@@ -142,18 +142,20 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
             ~finish:func.finish ~with_inverse:true;
           Hashtbl.fold cfg_info ~init:acc ~f:(fun ~key:_ ~data:bi acc ->
               List.fold bi.branches ~init:acc ~f:(fun acc b ->
-                  if b.fallthrough then
-                    let src = make_bolt_loc func bi.terminator_id in
-                    let target_id = Option.value_exn b.target_id in
-                    let dst = make_bolt_loc func target_id in
-                    let boltb =
-                      { Bolt_branch.src;
-                        dst;
-                        count = b.taken;
-                        mis = b.mispredicts
-                      }
-                    in
-                    boltb :: acc
+                  if b.fallthrough then (
+                    let src_id = bi.terminator_id in
+                    let dst_id = Option.value_exn b.target_id in
+                    let src = make_bolt_loc func src_id in
+                    let dst = make_bolt_loc func dst_id in
+                    let count = b.taken in
+                    let mis = b.mispredicts in
+                    if !verbose then
+                      printf
+                        "Found fallthrough in %s at linearids %d->%d \
+                         count=%Ld\n"
+                        func.name src_id dst_id count;
+                    let boltb = { Bolt_branch.src; dst; count; mis } in
+                    boltb :: acc )
                   else acc ) )
       | _ -> acc )
 
@@ -185,6 +187,10 @@ let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
         append_if_valid acc b )
   in
   let ft = fallthroughs locations p in
+  if !verbose then (
+    printf "fallthroughs:\n";
+    List.iter ft ~f:(Bolt_branch.print ~chan:Out_channel.stdout);
+    printf "\n" );
   List.fold ft ~init:t ~f:append_if_valid
 
 let create (p : Aggregated_decoded_profile.t)
@@ -206,9 +212,7 @@ let save p agg locations ~filename =
    then we can print during [mk] instead of "append_if" above *)
 let save_fallthrough p locations ~filename =
   if !verbose then
-    printf
-      "Writing preliminary aggregated decoded profile in bolt form to %s\n"
-      filename;
+    printf "Writing fallthroughs profile in bolt form to %s\n" filename;
   let chan = Out_channel.create filename in
   mk p (Aggregated_perf_profile.empty ()) locations ~init:() ~f:(fun _ b ->
       Bolt_branch.print ~chan b );
