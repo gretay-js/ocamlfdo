@@ -70,7 +70,7 @@ let mk ~label ~first_id ~terminator_id =
 let add t ~count = t.count <- Int64.(t.count + count)
 
 let find branches branch =
-  List.find branches ~f:(fun b ->
+  List.partition_tf branches ~f:(fun b ->
       match (b.target, b.target_label, b.target_id) with
       | Some t, _, _ when Some t = branch.target ->
           assert (
@@ -96,18 +96,20 @@ let add_call t ~callsite ~callee =
     (* Invariant: unique entry per call target. *)
     (* Find call target entry and update it. *)
     match find c.callees callee with
-    | None -> c.callees <- callee :: c.callees
-    | Some _ -> assert false )
+    | [], _ -> c.callees <- callee :: c.callees
+    | _ -> assert false )
 
 (* Merge maintain unique targets *)
 let add_branch t b =
   match find t.branches b with
-  | None -> t.branches <- b :: t.branches
-  | Some br ->
+  | [], _ -> t.branches <- b :: t.branches
+  | [ br ], rest ->
       assert (b.intra && br.intra);
       assert (b.fallthrough && br.fallthrough);
       assert (b.mispredicts = 0L && br.mispredicts = 0L);
-      br.taken <- Int64.(br.taken + b.taken)
+      br.taken <- Int64.(br.taken + b.taken);
+      t.branches <- br :: rest
+  | _ -> assert false
 
 (* (\* Find branches target. *\) *)
 (* ( match (b.target, b.target_label) with *)

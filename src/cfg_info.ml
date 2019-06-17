@@ -392,11 +392,15 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
               func.name from_lbl to_lbl src_lbl dst_lbl;
           raise Malformed_fallthrough_trace
     in
-    List.fold_right fallthrough ~init:to_lbl ~f:check_fallthrough |> ignore;
+    assert (
+      from_lbl
+      = List.fold_right fallthrough ~init:to_lbl ~f:check_fallthrough );
     (* Account only for the intermediate blocks in the trace. Endpoint
        blocks of the trace are accounted for when we handled their LBR
        branches. *)
     let record_fallthrough src_lbl dst_lbl =
+      if !verbose then
+        printf "record_fallthrough %d->%d count=%Ld\n" src_lbl dst_lbl count;
       let dst_block =
         Option.value_exn (Cfg_builder.get_block cfg dst_lbl)
       in
