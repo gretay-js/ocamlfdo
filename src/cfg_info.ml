@@ -385,7 +385,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
       | _ ->
           if !verbose then
             printf
-              "Unexpected terminator %s in fallthrough trace  \
+              "Unexpected terminator %s in fallthrough trace \
                %s(from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
               (terminator_to_string block.terminator.desc)
@@ -417,9 +417,11 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
         }
       in
       Block_info.add_branch bi b;
-      dst_lbl
+      src_lbl
     in
-    List.fold_right fallthrough ~init:to_lbl ~f:record_fallthrough |> ignore;
+    assert (
+      from_lbl
+      = List.fold_right fallthrough ~init:to_lbl ~f:record_fallthrough );
     if !verbose then
       printf "recorded healthy trace from %d to %d count %Ld\n" from_lbl
         to_lbl count
