@@ -588,3 +588,25 @@ let to_address t file line =
         | None -> Printf.printf " line not found\n"
         | Some addr -> Printf.printf " addr 0x%Lx\n" addr );
       addr
+
+let find_functions t functions =
+  let open Owee_elf.Symbol_table in
+  iter t.symtab ~f:(fun sym ->
+      match Symbol.type_attribute sym with
+      | Func -> (
+        match Symbol.name sym t.strtab with
+        | None -> ()
+        | Some name -> (
+          match Hashtbl.mem functions name with
+          | true -> (
+            (* bound to None *)
+            match Hashtbl.find functions name with
+            | None ->
+                let start = Symbol.value sym in
+                Hashtbl.replace functions name (Some start)
+            | Some _ ->
+                if verbose then
+                  Printf.printf
+                    "find_functions surprised to see again  %s\n" name )
+          | false -> () ) )
+      | _ -> () )

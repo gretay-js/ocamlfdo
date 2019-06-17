@@ -143,12 +143,16 @@ let reorder_opt cfg_info cfg =
 
 let write_profile linearid_profile config locations =
   let open Config_reorder in
+  let filename = bolt_fdata_filename config "ft" in
+  Bolt_profile.save_fallthrough linearid_profile locations ~filename;
+  let filename = bolt_decoded_filename config "ft" in
+  Decoded_bolt_profile.save_fallthrough linearid_profile ~filename;
+  Aggregated_decoded_profile.write linearid_profile
+    config.gen_linearid_profile;
   if config.write_linker_script then (
     let linker_script_hot = linker_script_filename config "" in
     if !verbose then
       printf "Writing linker script hot to %s\n" linker_script_hot;
-    let filename = bolt_fdata_filename config "ft" in
-    Bolt_profile.save_fallthrough linearid_profile locations ~filename;
     match config.reorder_functions with
     | No ->
         if !verbose then

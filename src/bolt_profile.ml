@@ -50,9 +50,14 @@ module Bolt_loc = struct
     sprintf "%s %s %x" (Kind.to_string t.kind) t.name t.offset
 
   let of_strings k name o =
-    { kind = Kind.of_string k; name; offset = Int.of_string o }
+    { kind = Kind.of_string k; name; offset = Int.Hex.of_string ("0x" ^ o) }
 
   let unknown = { kind = UnknownSymbol; name = "[unknown]"; offset = 0 }
+
+  let get_sym l =
+    match l.kind with
+    | Symbol -> Some (l.name, l.offset)
+    | _ -> None
 end
 
 module Bolt_branch = struct
@@ -98,7 +103,8 @@ let read ~filename =
   let chan = In_channel.create filename in
   let t =
     In_channel.fold_lines chan ~init:[] ~f:(fun acc r ->
-        Bolt_branch.of_string r :: acc )
+        let b = Bolt_branch.of_string r in
+        b :: acc )
   in
   In_channel.close chan;
   if !verbose then print t;

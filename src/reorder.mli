@@ -24,7 +24,10 @@ type reorder_algo =
   | Linear of layout
   | Cfg of layout
   | Profile of
-      Aggregated_decoded_profile.t * Config_reorder.t * Elf_locations.t
+      (* locations is used only for testing/debugging *)
+      Aggregated_decoded_profile.t
+      * Config_reorder.t
+      * Elf_locations.t
 
 val reorder : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
 

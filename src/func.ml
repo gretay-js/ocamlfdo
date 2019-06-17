@@ -12,7 +12,6 @@
 (*                                                                        *)
 (**************************************************************************)
 open Core
-open Loc
 
 type t = {
   (* Unique identifier we assign to this function *)

@@ -15,14 +15,6 @@ open Core
 
 let verbose = ref true
 
-module Addr = struct
-  type t = int64 [@@deriving compare, sexp, hash]
-end
-
-module Execount = struct
-  type t = int64 [@@deriving sexp]
-end
-
 module P = struct
   (* Pair of addresses *)
   type t = Addr.t * Addr.t [@@deriving compare, hash, sexp]

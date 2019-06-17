@@ -35,6 +35,8 @@ val resolve_function_containing :
 val resolve_function_starting_at :
   t -> program_counter:Int64.t -> reset:bool -> string option
 
+val find_functions : t -> (string, Int64.t option) Hashtbl.t -> unit
+
 (* Resolves debug info in one pass and caches the results for addresses. *)
 val resolve_all : t -> (Int64.t, unit) Hashtbl.t -> unit
 

@@ -51,3 +51,8 @@ let bolt_fdata_filename t stage =
   sprintf "%s%s%s.%s" t.gen_linearid_profile
     (if String.is_empty stage then "" else ".")
     stage bolt_fdata_extension
+
+let bolt_decoded_filename t stage =
+  sprintf "%s%s%s.decoded.%s" t.gen_linearid_profile
+    (if String.is_empty stage then "" else ".")
+    stage bolt_fdata_extension

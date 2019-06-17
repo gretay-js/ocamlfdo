@@ -34,3 +34,5 @@ val default : string -> t
 val linker_script_filename : t -> string -> string
 
 val bolt_fdata_filename : t -> string -> string
+
+val bolt_decoded_filename : t -> string -> string

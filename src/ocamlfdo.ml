@@ -33,10 +33,68 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
+let setup_profile locations ~perf_profile_filename ~gen_linearid_profile
+    ~bolt_profile_filename =
+  (* CR gyorsh: decoding raw perf data should be separate from reordering
+     algorithm setup. *)
+  (* CR gyorsh: check buildid of the samples. Use owee? *)
+  (* CR gyorsh: Check pid of the samples. *)
+
+  (* First aggregate raw profile and then decode it. *)
+  let aggr_perf_profile =
+    Perf_profile.read_and_aggregate perf_profile_filename
+  in
+  let linearid_profile =
+    Aggregated_decoded_profile.create locations aggr_perf_profile
+  in
+  let gen_linearid_profile =
+    match gen_linearid_profile with
+    | None -> perf_profile_filename ^ ".linearid"
+    | Some f -> f
+  in
+  Aggregated_decoded_profile.write linearid_profile gen_linearid_profile;
+  (* CR gyorsh: configuration shouldn't be hardcoded! *)
+  let config =
+    let open Config_reorder in
+    { (default gen_linearid_profile) with
+      reorder_functions = Config_reorder.Execounts
+    }
+  in
+  (* CR gyorsh: write_top is here just for testing! *)
+  (* Do we ever need the cfg to decide on function order? *)
+  Aggregated_decoded_profile.write_top_functions linearid_profile
+    (Config_reorder.linker_script_filename config "prelim");
+  (* For testing, output the computed profile in bolt format *)
+  let gen_bolt_fdata = Config_reorder.bolt_fdata_filename config "prelim" in
+  Bolt_profile.save linearid_profile aggr_perf_profile
+    ~filename:gen_bolt_fdata locations;
+  (* For testing, output the computed profile in "decoded bolt" format. *)
+  let gen_decoded_bolt =
+    Config_reorder.bolt_decoded_filename config "prelim"
+  in
+  Decoded_bolt_profile.save linearid_profile aggr_perf_profile
+    ~filename:gen_decoded_bolt;
+  (* For testing, read in bolt format, decode, and write to file. *)
+  ( match bolt_profile_filename with
+  | None -> ()
+  | Some bolt_profile_filename ->
+      let decoded_bolt_profile =
+        Decoded_bolt_profile.create ~filename:bolt_profile_filename
+          locations
+      in
+      let ref_decoded_bolt =
+        Config_reorder.bolt_decoded_filename config "ref"
+      in
+      Decoded_bolt_profile.write decoded_bolt_profile
+        ~filename:ref_decoded_bolt );
+  (* Passing locations only for testing bolt output. *)
+  Reorder.Profile (linearid_profile, config, locations)
+
 let setup_reorder ~binary_filename ~perf_profile_filename
     ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
     ~random_order ~gen_linearid_layout ~gen_linearid_profile
-    ~linearid_profile_filename =
+    ~linearid_profile_filename ~bolt_profile_filename =
+  (* CR: is there a better way to write all these cases?! *)
   if random_order then
     (* let random_state = Random.State.make [ deterministic seed ]; *)
     Reorder.Random Random.State.default
@@ -71,7 +129,6 @@ let setup_reorder ~binary_filename ~perf_profile_filename
             match linearid_profile_filename with
             | None -> Reorder.Identity
             | Some linearid_profile_filename ->
-                (* This doesn't need locations so why is it under binary? *)
                 let linearid_profile =
                   Aggregated_decoded_profile.read linearid_profile_filename
                 in
@@ -80,43 +137,8 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                 in
                 Reorder.Profile (linearid_profile, config, locations) )
           | Some perf_profile_filename ->
-              (* CR gyorsh: decoding raw perf data should be separate from
-                 reordering algorithm setup. *)
-              (* CR gyorsh: check buildid of the samples. Use owee? *)
-              (* CR gyorsh: Check pid of the samples. *)
-              (* First aggregate raw profile and then decode it. *)
-              let aggr_perf_profile =
-                Perf_profile.read_and_aggregate perf_profile_filename
-              in
-              let linearid_profile =
-                Aggregated_decoded_profile.create locations
-                  aggr_perf_profile
-              in
-              let gen_linearid_profile =
-                match gen_linearid_profile with
-                | None -> perf_profile_filename ^ ".linearid"
-                | Some f -> f
-              in
-              Aggregated_decoded_profile.write linearid_profile
-                gen_linearid_profile;
-              (* CR gyorsh: configuration shouldn't be hardcoded! *)
-              let config =
-                let open Config_reorder in
-                { (default gen_linearid_profile) with
-                  reorder_functions = Config_reorder.Execounts
-                }
-              in
-              (* CR gyorsh: write_top is here just for testing! *)
-              (* Do we ever need the cfg to decide on function order? *)
-              Aggregated_decoded_profile.write_top_functions
-                linearid_profile
-                (Config_reorder.linker_script_filename config "prelim");
-              let gen_bolt_fdata =
-                Config_reorder.bolt_fdata_filename config "prelim"
-              in
-              Bolt_profile.save linearid_profile aggr_perf_profile
-                ~filename:gen_bolt_fdata locations;
-              Reorder.Profile (linearid_profile, config, locations) ) )
+              setup_profile locations ~perf_profile_filename
+                ~gen_linearid_profile ~bolt_profile_filename ) )
 
 let call_ocamlopt args =
   (* Set debug "-g" to emit dwarf locations. *)
@@ -218,12 +240,12 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
     ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
     ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    args =
+    ~bolt_profile_filename args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
       ~random_order ~gen_linearid_layout ~gen_linearid_profile
-      ~linearid_profile_filename
+      ~linearid_profile_filename ~bolt_profile_filename
   in
   let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in
@@ -323,6 +345,10 @@ let command =
         flag "-perf-profile"
           (optional Filename.arg_type)
           ~doc:"perf.data output of perf record"
+      and bolt_profile_filename =
+        flag "-bolt-profile"
+          (optional Filename.arg_type)
+          ~doc:"perf.fdata output of perf2bolt"
       and gen_linearid_profile =
         flag "-gen-linearid-profile"
           (optional Filename.arg_type)
@@ -393,6 +419,6 @@ let command =
           ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
           ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
           ~preserve_orig_labels ~gen_linearid_profile
-          ~linearid_profile_filename args)
+          ~linearid_profile_filename ~bolt_profile_filename args)
 
 let () = Command.run command

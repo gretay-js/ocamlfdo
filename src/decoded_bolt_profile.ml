@@ -1,0 +1,218 @@
+(**************************************************************************)
+(*                                                                        *)
+(*                                 OCamlFDO                               *)
+(*                                                                        *)
+(*                     Greta Yorsh, Jane Street Europe                    *)
+(*                                                                        *)
+(*   Copyright 2019 Jane Street Group LLC                                 *)
+(*                                                                        *)
+(*   All rights reserved.  This file is distributed under the terms of    *)
+(*   the GNU Lesser General Public License version 2.1, with the          *)
+(*   special exception on linking described in the file LICENSE.          *)
+(*                                                                        *)
+(**************************************************************************)
+open Core
+
+let verbose = ref true
+
+type loc = {
+  (* function name *)
+  name : string;
+  (* offset from function start *)
+  offset : int;
+  (* id decode from debug info *)
+  id : int option;
+  (* raw address, only computed if we found the symbol with name in the
+     binary. used for creating aggregated_decoded_profile from bolt_profile.
+     it's not necessary but we currently require Loc.t to have address. *)
+  addr : Addr.t option
+}
+
+type branch = {
+  src : loc option;
+  dst : loc option;
+  count : Execount.t;
+  mis : Execount.t
+}
+
+type t = branch list
+
+let _loc_to_string_long loc =
+  match loc with
+  | None -> "[unknown] 0 0"
+  | Some loc ->
+      sprintf "%s %x %d" loc.name loc.offset
+        (Option.value loc.id ~default:(-1))
+
+let loc_to_string loc =
+  match loc with
+  | None -> "[unknown] 0 0"
+  | Some loc -> sprintf "%s %d" loc.name (Option.value loc.id ~default:(-1))
+
+let print_branch ~chan b =
+  fprintf chan "%s %s %Ld %Ld\n" (loc_to_string b.src) (loc_to_string b.dst)
+    b.mis b.count
+
+let write t ~filename =
+  if !verbose then printf "Writing decoded bolt profile to %s\n" filename;
+  let chan = Out_channel.create filename in
+  List.iter t ~f:(print_branch ~chan);
+  Out_channel.close chan
+
+(* Read bolt profile and decode it. For testing purposes, keep
+   aggregated_decoded_profile separate from decoded_bolt_profile. *)
+let create locations ~filename =
+  (* parse bolt profile file *)
+  let bolt_profile = Bolt_profile.read ~filename in
+  (* Resolving dwarf functions and address is slow, so we batch it. *)
+  (* collect all function names *)
+  let len = List.length bolt_profile in
+  let functions = Caml.Hashtbl.create len in
+  let add_name bolt_loc =
+    match Bolt_profile.Bolt_loc.get_sym bolt_loc with
+    | None -> ()
+    | Some (name, _) ->
+        if not (Caml.Hashtbl.mem functions name) then
+          Caml.Hashtbl.add functions name None
+  in
+  let gather_function_names (bolt_branch : Bolt_profile.Bolt_branch.t) =
+    add_name bolt_branch.src;
+    add_name bolt_branch.dst
+  in
+  List.iter bolt_profile ~f:gather_function_names;
+  Elf_locations.find_functions locations functions;
+  (* Collect all addresses *)
+  let addresses = Caml.Hashtbl.create len in
+  let add bolt_loc =
+    match Bolt_profile.Bolt_loc.get_sym bolt_loc with
+    | None -> ()
+    | Some (name, offset) -> (
+      match Caml.Hashtbl.find functions name with
+      | None -> ()
+      | Some start ->
+          let addr = Int64.(start + of_int offset) in
+          Caml.Hashtbl.add addresses addr () )
+  in
+  let gather_addresses (bolt_branch : Bolt_profile.Bolt_branch.t) =
+    add bolt_branch.src;
+    add bolt_branch.dst
+  in
+  List.iter bolt_profile ~f:gather_addresses;
+  Elf_locations.resolve_all locations addresses;
+  (* Construct decoded *)
+  let decode_loc bolt_loc =
+    match Bolt_profile.Bolt_loc.get_sym bolt_loc with
+    | None -> None
+    | Some (name, offset) -> (
+      match Caml.Hashtbl.find functions name with
+      | None -> Some { name; id = None; offset; addr = None }
+      | Some start -> (
+          let program_counter = Int64.(start + of_int offset) in
+          let open Ocaml_locations in
+          match decode_line locations ~program_counter name Linearid with
+          | None -> None
+          | Some (_, line) ->
+              Some
+                { name;
+                  id = Some line;
+                  offset;
+                  addr = Some program_counter
+                } ) )
+  in
+  List.fold bolt_profile ~init:[] ~f:(fun acc b ->
+      match (decode_loc b.src, decode_loc b.dst) with
+      | None, None -> acc
+      | src, dst ->
+          let d = { src; dst; count = b.count; mis = b.mis } in
+          d :: acc )
+
+(* create Aggregated_decoded_profile *)
+let export t =
+  let add table key count =
+    Hashtbl.update table key ~f:(fun v ->
+        Int64.(count + Option.value ~default:0L v) )
+  in
+  let agg = Aggregated_perf_profile.empty () in
+  List.iter t ~f:(fun b ->
+      match (b.src, b.dst) with
+      | Some src, Some dst -> (
+        match (src.addr, dst.addr) with
+        | Some src_addr, Some dst_addr ->
+            let key = (src_addr, dst_addr) in
+            add agg.branches key b.count;
+            add agg.mispredicts key b.mis
+        | _ -> () )
+      | _ -> () );
+  agg
+
+let save (p : Aggregated_decoded_profile.t)
+    (agg : Aggregated_perf_profile.t) ~filename =
+  if !verbose then
+    printf
+      "Writing fallthrough from aggregated decoded profile in decoded bolt \
+       form to %s\n"
+      filename;
+  let chan = Out_channel.create filename in
+  let get_loc addr =
+    let loc = Hashtbl.find_exn p.addr2loc addr in
+    let id =
+      match loc.dbg with
+      | None -> None
+      | Some dbg -> Some dbg.line
+    in
+    match loc.rel with
+    | None -> None
+    | Some rel ->
+        let func = Hashtbl.find_exn p.functions rel.id in
+        Some { name = func.name; offset = rel.offset; id; addr = None }
+  in
+  Hashtbl.iteri agg.branches ~f:(fun ~key ~data:count ->
+      let mis =
+        Option.value (Hashtbl.find agg.mispredicts key) ~default:0L
+      in
+      let src_addr, dst_addr = key in
+      let src = get_loc src_addr in
+      let dst = get_loc dst_addr in
+      match (src, dst) with
+      | None, None -> ()
+      | _ ->
+          let b = { src; dst; count; mis } in
+          print_branch ~chan b );
+  Out_channel.close chan
+
+let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
+  if !verbose then
+    printf
+      "Writing fallthrough from aggregated decoded profile in decoded bolt \
+       form to %s\n"
+      filename;
+  let chan = Out_channel.create filename in
+  (* For each function, print inferred fallthrough edges. *)
+  Hashtbl.iter p.functions ~f:(fun func ->
+      match Hashtbl.find p.execounts func.id with
+      | Some cfg_info when func.has_linearids ->
+          Hashtbl.iter cfg_info ~f:(fun bi ->
+              List.iter bi.branches ~f:(fun b ->
+                  if b.fallthrough then
+                    let count = b.taken in
+                    let mis = b.mispredicts in
+                    let src =
+                      Some
+                        { name = func.name;
+                          id = Some bi.terminator_id;
+                          offset = 0;
+                          addr = None
+                        }
+                    in
+                    let dst =
+                      Some
+                        { name = func.name;
+                          id = b.target_id;
+                          offset = 0;
+                          addr = None
+                        }
+                    in
+                    let b = { src; dst; mis; count } in
+                    print_branch ~chan b ) )
+      | _ -> () );
+  Out_channel.close chan
