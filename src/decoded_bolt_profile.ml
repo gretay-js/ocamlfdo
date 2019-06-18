@@ -27,6 +27,7 @@ type loc = {
      it's not necessary but we currently require Loc.t to have address. *)
   addr : Addr.t option
 }
+[@@deriving sexp]
 
 type branch = {
   src : loc option;
@@ -34,8 +35,9 @@ type branch = {
   count : Execount.t;
   mis : Execount.t
 }
+[@@deriving sexp]
 
-type t = branch list
+type t = branch list [@@deriving sexp]
 
 let _loc_to_string_long loc =
   match loc with
@@ -44,10 +46,20 @@ let _loc_to_string_long loc =
       sprintf "%s %x %d" loc.name loc.offset
         (Option.value loc.id ~default:(-1))
 
-let loc_to_string loc =
+let _loc_to_string_long loc =
   match loc with
-  | None -> "[unknown] 0 0"
+  | None -> "[unknown]"
+  | Some loc ->
+      sprintf "%s %d (%x)" loc.name
+        (Option.value loc.id ~default:(-1))
+        loc.offset
+
+let loc_to_string_short loc =
+  match loc with
+  | None -> "[unknown]"
   | Some loc -> sprintf "%s %d" loc.name (Option.value loc.id ~default:(-1))
+
+let loc_to_string = loc_to_string_short
 
 let print_branch ~chan b =
   fprintf chan "%s %s %Ld %Ld\n" (loc_to_string b.src) (loc_to_string b.dst)
@@ -110,7 +122,8 @@ let create locations ~filename =
           let program_counter = Int64.(start + of_int offset) in
           let open Ocaml_locations in
           match decode_line locations ~program_counter name Linearid with
-          | None -> None
+          | None ->
+              Some { name; id = None; offset; addr = Some program_counter }
           | Some (_, line) ->
               Some
                 { name;

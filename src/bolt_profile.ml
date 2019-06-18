@@ -50,6 +50,16 @@ module Bolt_loc = struct
     sprintf "%s %s %x" (Kind.to_string t.kind) t.name t.offset
 
   let of_strings k name o =
+    (* For local symbols, bolt appends "/1" "/2" etc. We remove it to match
+       up against the original names in the binary for decoding. *)
+    let name =
+      match String.rsplit2 ~on:'/' name with
+      | None -> name
+      | Some (name, suffix) ->
+          let n = Int.of_string suffix in
+          assert (n > 0);
+          name
+    in
     { kind = Kind.of_string k; name; offset = Int.Hex.of_string ("0x" ^ o) }
 
   let unknown = { kind = UnknownSymbol; name = "[unknown]"; offset = 0 }
