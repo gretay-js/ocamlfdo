@@ -263,7 +263,9 @@ let add t name cfg =
   | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       if func.count > 0L && func.has_linearids then (
-        if !verbose then printf "compute_cfg_execounts for %s\n" name;
+        if !verbose then (
+          printf "compute_cfg_execounts for %s\n" name;
+          Cfg_builder.print Out_channel.stdout cfg );
         let cfg_info = create_cfg_info t func cfg in
         Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
         Some cfg_info )

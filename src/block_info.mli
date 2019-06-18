@@ -36,7 +36,7 @@ type c = {
 [@@deriving sexp]
 
 (* Execution counts for a basic block *)
-type t = {
+type t = private {
   label : Cfg_label.t;
   (* Instruction id for the first and last instruction. *)
   (* [first_id] can be the same as terminator_id if body is empty *)

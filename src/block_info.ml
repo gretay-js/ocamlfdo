@@ -65,12 +65,16 @@ type t = {
 [@@deriving sexp]
 
 let mk ~label ~first_id ~terminator_id =
+  assert (not (terminator_id = 0));
+  assert (not (first_id = 0));
+  assert (not (label = 0));
   { label; count = 0L; branches = []; calls = []; first_id; terminator_id }
 
 let add t ~count = t.count <- Int64.(t.count + count)
 
 let find branches branch =
-  List.partition_tf branches ~f:(fun b ->
+  (* List.partition_tf *)
+  List.find branches ~f:(fun b ->
       match (b.target, b.target_label, b.target_id) with
       | Some t, _, _ when Some t = branch.target ->
           assert (
@@ -96,46 +100,15 @@ let add_call t ~callsite ~callee =
     (* Invariant: unique entry per call target. *)
     (* Find call target entry and update it. *)
     match find c.callees callee with
-    | [], _ -> c.callees <- callee :: c.callees
+    | None -> c.callees <- callee :: c.callees
     | _ -> assert false )
 
 (* Merge maintain unique targets *)
 let add_branch t b =
   match find t.branches b with
-  | [], _ -> t.branches <- b :: t.branches
-  | [ br ], rest ->
+  | None -> t.branches <- b :: t.branches
+  | Some br ->
       assert (b.intra && br.intra);
       assert (b.fallthrough && br.fallthrough);
       assert (b.mispredicts = 0L && br.mispredicts = 0L);
-      br.taken <- Int64.(br.taken + b.taken);
-      t.branches <- br :: rest
-  | _ -> assert false
-
-(* (\* Find branches target. *\) *)
-(* ( match (b.target, b.target_label) with *)
-(* | _, Some target_label -> ( *)
-(* let existing = *)
-(* List.find t.branches ~f:(fun b1 -> *)
-(* match b1.target_label with *)
-(* | Some lbl when lbl = target_label -> true *)
-(* | _ -> false ) *)
-(* in *)
-(* match existing with *)
-(* | Some existing -> *)
-(* if !verbose then *)
-(* printf *)
-(* "Already registered successor target_label %d (existing \ *) (* %d)of
-   block at %d\n" *)
-(* target_label *)
-(* (Option.value existing.target_label ~default:(-17)) *)
-(* t.label ; *)
-(* assert false *)
-(* | _ -> () ) *)
-(* | Some target, _ -> *)
-(* assert ( *)
-(* Option.is_none *)
-(* (List.find t.branches ~f:(fun b1 -> *)
-(* match b1.target with *)
-(* | Some tr when tr = target -> true *)
-(* | _ -> false )) ) *)
-(* | _ -> assert false ) ; *)
+      br.taken <- Int64.(br.taken + b.taken)

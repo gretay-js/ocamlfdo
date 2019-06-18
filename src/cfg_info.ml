@@ -41,8 +41,23 @@ let first_id (block : Cfg.block) =
 
 let get_block_info t (block : Cfg.block) =
   Hashtbl.find_or_add t block.start ~default:(fun () ->
-      let terminator_id = block.terminator.id in
+      let terminator_id =
+        match block.terminator.id with
+        | 0 ->
+            (* use the id of the last instruction in the body *)
+            ( match block.terminator.desc with
+            | Branch [ (Always, _) ] -> assert true
+            | _ -> assert false );
+            let last = List.last_exn block.body in
+            last.id
+        | n -> n
+      in
       let first_id = first_id block in
+      if !verbose then
+        printf
+          "make new block info for block.start=%d first_id=%d \
+           terminator_id=%d\n"
+          block.start first_id terminator_id;
       Block_info.mk ~label:block.start ~first_id ~terminator_id )
 
 let record t block ~count =
@@ -420,15 +435,25 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
           mispredicts = 0L
         }
       in
+      if !verbose then
+        printf
+          !"record_fallthrough: add b=%{sexp:Block_info.b}\n\
+            to bi=%{sexp:Block_info.t}\n"
+          b bi;
       Block_info.add_branch bi b;
+      if !verbose then
+        printf
+          !"record_fallthrough: after add:\nbi=%{sexp:Block_info.t}\n"
+          bi;
       src_lbl
     in
     assert (
       from_lbl
       = List.fold_right fallthrough ~init:to_lbl ~f:record_fallthrough );
-    if !verbose then
+    if !verbose then (
       printf "recorded healthy trace from %d to %d count %Ld\n" from_lbl
-        to_lbl count
+        to_lbl count;
+      printf !"%{sexp:t}\n" t )
   with Malformed_fallthrough_trace ->
     (* If the trace is malformed, don't add counts *)
     mal func count

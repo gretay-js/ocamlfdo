@@ -25,30 +25,33 @@ end
 let verbose = false
 
 type t = {
+  (* The graph itself *)
   cfg : Cfg.t;
-  mutable layout : Layout.t;
   (* Original layout: linear order of blocks. *)
-  mutable new_labels : LabelSet.t;
+  mutable layout : Layout.t;
   (* Labels added by cfg construction, except entry. Used for split_labels. *)
-  split_labels : (label, Layout.t) Hashtbl.t;
+  mutable new_labels : LabelSet.t;
   (* Maps original label [L] to the sequence of labels of blocks that
      represent block [L] in the cfg. Sparse: only contains information for
      blocks that were split or eliminated during cfg construction. Used for
      mapping information about original blocks, such as perf annotations,
      exection counts or new layout, to cfg blocks. *)
+  split_labels : (label, Layout.t) Hashtbl.t;
+  (* Map labels to trap depths. Required for linearize. *)
   trap_depths : (label, int) Hashtbl.t;
-  (* Map labels to trap depths for linearize. *)
-  trap_labels : (label, label) Hashtbl.t;
   (* Maps trap handler block label [L] to the label of the block where the
-     Lpushtrap L reference it. Used for dead block elimination. This mapping
-     is one to one, but the reverse is not, because a block might contain
-     multiple Lpushtrap, which is not a terminator. *)
-  mutable id_to_label : label Numbers.Int.Map.t;
+     "Lpushtrap L" reference it. Used for dead block elimination. This
+     mapping is one to one, but the reverse is not, because a block might
+     contain multiple Lpushtrap, which is not a terminator. *)
+  trap_labels : (label, label) Hashtbl.t;
   (* Map id of instruction to label of the block that contains the
      instruction. Used for mapping perf data back to linear IR. *)
+  mutable id_to_label : label Numbers.Int.Map.t;
+  (* Set for validation, unset for optimization. *)
   mutable preserve_orig_labels : bool
-      (* Unset for validation, set for optimization. *)
 }
+
+(* CR gyorsh: new_labels and split_labels aren't used any more. *)
 
 let entry_label t = t.cfg.entry_label
 
@@ -115,6 +118,7 @@ let register t block =
   (* Printf.printf "registering block %d\n" block.start *)
   (* Body is constructed in reverse, fix it now: *)
   block.body <- List.rev block.body;
+  assert (not (block.terminator.id = 0 && List.length block.body = 0));
   Hashtbl.add t.cfg.blocks block.start block
 
 let register_predecessors t =
@@ -268,6 +272,12 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
       if not (Hashtbl.mem t.cfg.blocks block.start) then (
         (* Previous block falls through. Add start as explicit successor. *)
         let fallthrough = Branch [ (Always, start) ] in
+        (* fallthrough terminator gets linear id = 0, like all the labels.
+           We create new labels, but preserve linearids from the original
+           program, for mapping perf data to cfg. This works for labels
+           because they don't correspond to new instructions, but for
+           fallthrough after reorder there may be a jump instruction that
+           doesn't have linearid. *)
         block.terminator <- create_empty_instruction fallthrough ~trap_depth;
         register t block );
       (* Start a new block *)

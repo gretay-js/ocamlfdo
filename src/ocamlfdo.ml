@@ -283,6 +283,10 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     if reorder_report then write_reorder_report f cfg fnew new_cfg;
     let fnew =
       if remove_linear_ids then remove_linear_discriminators fnew else fnew
+      (* CR gyorsh: for iterative fdo, renumber the instructions with fresh
+         linear ids, as we may have removed some instructions and introduced
+         new ones, for example when a fallthrough turned into a jump after
+         reorder.*)
     in
     print_linear "After" fnew;
     fnew
