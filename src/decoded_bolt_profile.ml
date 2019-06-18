@@ -62,8 +62,30 @@ let loc_to_string_short loc =
 let loc_to_string = loc_to_string_short
 
 let print_branch ~chan b =
-  fprintf chan "%s %s %Ld %Ld\n" (loc_to_string b.src) (loc_to_string b.dst)
-    b.mis b.count
+  (* OCaml entry functions are marked as "reduce_size" and not "fast". We do
+     not annotated them with linear ids and we do not compute CFG for them.
+     Therefore, we cannot compute fallthrough for them. This mismatch is
+     harder to detect using diff, so we mark these entries with a star at
+     the end of the output. We mark with two stars entries that start with
+     "caml_" and typically belong to the ocaml runtime. *)
+  let print_notes = false in
+  let entry_note =
+    if print_notes then
+      match (b.src, b.dst) with
+      | Some src, Some dst
+        when src.name = dst.name
+             && String.is_prefix ~prefix:"caml" src.name
+             && String.is_suffix ~suffix:"__entry" src.name ->
+          "*"
+      | Some src, Some dst
+        when src.name = dst.name
+             && String.is_prefix ~prefix:"caml_" src.name ->
+          "**"
+      | _ -> ""
+    else ""
+  in
+  fprintf chan "%s %s %Ld %Ld %s\n" (loc_to_string b.src)
+    (loc_to_string b.dst) b.mis b.count entry_note
 
 let write t ~filename =
   if !verbose then printf "Writing decoded bolt profile to %s\n" filename;
@@ -117,7 +139,13 @@ let create locations ~filename =
     | None -> None
     | Some (name, offset) -> (
       match Caml.Hashtbl.find functions name with
-      | None -> Some { name; id = None; offset; addr = None }
+      | None ->
+          if String.is_suffix ~suffix:"@PLT" name then
+            (* OCamlFDO doesn't know PLT names, so we ignore the LBR entries
+               in BOLT profile that carry them. This lets us automate the
+               comparison. *)
+            None
+          else Some { name; id = None; offset; addr = None }
       | Some start -> (
           let program_counter = Int64.(start + of_int offset) in
           let open Ocaml_locations in
