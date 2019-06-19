@@ -169,7 +169,7 @@ let reorder_profile cfg linearid_profile config =
   (* Compute cfg execounts even if reordering is not enabled. They can be
      saved to a file for later use. *)
   let cfg_info = Aggregated_decoded_profile.add linearid_profile name cfg in
-  match config.reorder_basic_blocks with
+  match config.reorder_blocks with
   | No -> cfg
   | Opt -> (
     match cfg_info with

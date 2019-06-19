@@ -57,7 +57,8 @@ let setup_profile locations ~perf_profile_filename ~gen_linearid_profile
   let config =
     let open Config_reorder in
     { (default gen_linearid_profile) with
-      reorder_functions = Config_reorder.Execounts
+      reorder_functions = Execounts;
+      reorder_blocks = Opt
     }
   in
   (* CR gyorsh: write_top is here just for testing! *)
@@ -162,6 +163,12 @@ let call_ocamlopt args =
   Array.fill Sys.argv ~pos:(len + 1) ~len:(argc - len - 1) "-absname";
   (* -inlining-report? *)
   Optmain.main ()
+
+let call_backend args =
+  (* Set debug "-g" to emit dwarf locations. *)
+  Clflags.debug := true;
+  Clflags.extended_debug := true;
+  Cmm.main ()
 
 let check_equal f ~new_body =
   let open Linearize in
@@ -300,6 +307,38 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
   call_ocamlopt args;
   finish ()
 
+(* Command line options based on a variant type *)
+(* print all variants *)
+
+(* construct the flag for *)
+module type Alt = sig
+  type t
+
+  val of_string : string -> t
+
+  val to_string : t -> string
+
+  val all : t list
+
+  val default : t
+end
+
+module Flag (M : Alt) = struct
+  let alternatives heading names default =
+    let names =
+      List.map M.all ~f:(fun m ->
+          if m = M.default then M.to_string s ^ " (default)"
+          else M.to_string s )
+    in
+    sprintf "%s: %s" heading (String.concat ~sep:"," names)
+
+  let alt_flag name ~doc =
+    let arg_type = Command.Arg_type.create M.of_string in
+    flag name
+      (optional_with_default M.default (Command.Arg_type.create M.of_string))
+      ~doc:(alternatives doc M.names (M.to_string M.default))
+end
+
 let command =
   Command.basic ~summary:"Feedback-directed optimizer for Ocaml"
     ~readme:(fun () ->
@@ -379,6 +418,20 @@ let command =
       and reorder_report =
         flag "-reorder-report" no_arg
           ~doc:" Emit files showing the decisions"
+      and reorder_blocks_algo =
+        let open Config_reorder in
+        flag "-reorder-blocks"
+          (optional (Command.Arg_type.create Reorder_blocks.of_string))
+          ~doc:
+            (alternatives "algo for reordering basic blocks of a function:"
+               Reorder_blocks.names Reorder_blocks.default)
+      and reorder_functions_algo =
+        let open Config_reorder in
+        flag "-reorder-functions"
+          (optional (Command.Arg_type.create Reorder_functions.of_string))
+          ~doc:
+            (alternatives "algo for reordering functions:"
+               Reorder_functions.names Reorder_functions.default)
       and args =
         flag "--" escape
           ~doc:"ocamlopt_args standard options passed to opcamlopt"

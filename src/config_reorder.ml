@@ -13,7 +13,7 @@
 (**************************************************************************)
 open Core
 
-type reorder_basic_blocks =
+type reorder_blocks =
   | No
   | Opt
 
@@ -26,7 +26,7 @@ type t = {
   gen_linearid_profile : string;
   write_bolt_fdata : bool;
   write_linker_script : bool;
-  reorder_basic_blocks : reorder_basic_blocks;
+  reorder_blocks : reorder_blocks;
   reorder_functions : reorder_functions
 }
 
@@ -35,7 +35,7 @@ let default gen_linearid_profile =
     write_bolt_fdata = true;
     write_linker_script = true;
     reorder_functions = No;
-    reorder_basic_blocks = No
+    reorder_blocks = No
   }
 
 let linker_script_hot_extension = "linker-script-hot"

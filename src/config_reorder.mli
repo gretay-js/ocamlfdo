@@ -12,21 +12,35 @@
 (*                                                                        *)
 (**************************************************************************)
 
-type reorder_basic_blocks =
-  | No
-  | Opt
+module Reorder_blocks : sig
+  type t =
+    | No
+    | Opt
 
-type reorder_functions =
-  | No
-  | Execounts
-  | Hot_clusters
+  val of_string : string -> t
+
+  val names : string
+end
+[@@deriving variants]
+
+module Reorder_functions : sig
+  type t =
+    | No
+    | Execounts
+    | Hot_clusters
+
+  val of_string : string -> t
+
+  val names : string list
+end
+[@@deriving variants]
 
 type t = {
   gen_linearid_profile : string;
   write_bolt_fdata : bool;
   write_linker_script : bool;
-  reorder_basic_blocks : reorder_basic_blocks;
-  reorder_functions : reorder_functions
+  reorder_blocks : Reorder_blocks.t;
+  reorder_functions : Reorder_functions.t
 }
 
 val default : string -> t
