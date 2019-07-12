@@ -141,7 +141,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
               setup_profile locations ~perf_profile_filename
                 ~gen_linearid_profile ~bolt_profile_filename ) )
 
-let call_ocamlopt args =
+let call_ocamlopt args ~emit_only =
   (* Set debug "-g" to emit dwarf locations. *)
   Clflags.debug := true;
   Clflags.extended_debug := true;
@@ -160,15 +160,10 @@ let call_ocamlopt args =
   assert (len < argc);
   Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:1 ~len;
   (* CR gyorsh: Can't resize args array. Fake missing arguments. Better way? *)
-  Array.fill Sys.argv ~pos:(len + 1) ~len:(argc - len - 1) "-absname";
+  Array.fill Sys.argv ~pos:(len + 1) ~len:(argc - len - 1)
+    (if emit_only then "-linear" else "-absname"  );
   (* -inlining-report? *)
   Optmain.main ()
-
-let call_backend args =
-  (* Set debug "-g" to emit dwarf locations. *)
-  Clflags.debug := true;
-  Clflags.extended_debug := true;
-  Cmm.main ()
 
 let check_equal f ~new_body =
   let open Linearize in
@@ -207,7 +202,7 @@ let print_linear msg f =
 let rec remove_discriminator = function
   | [] -> []
   | item :: t ->
-      if String.is_suffix item.Debuginfo.dinfo_file ~suffix:".linear" then t
+      if Ocaml_locations.(is_filename Linear item.Debuginfo.dinfo_file) then t
       else item :: remove_discriminator t
 
 let rec remove_linear_discriminator i =
@@ -226,6 +221,46 @@ let remove_linear_discriminators f =
     fun_dbg = remove_discriminator f.fun_dbg;
     fun_body = remove_linear_discriminator f.fun_body
   }
+
+let unmarshal filename =
+  try
+    let ic = open_in_bin filename in
+    let f = Marshal.from_channel ic in
+    close_in ic;
+    f
+  with _ ->
+    Misc.fatal_errorf "Failed to marshal to file %s" filename
+
+let marshal filename f =
+  try
+    let oc = open_out_bin filename in
+    Marshal.to_channel oc f [Marshal.Closures];
+    close_out oc;
+  with _ ->
+    Misc.fatal_errorf "Failed to marshal to file %s" filename
+
+(* unmarshal, transform, marshal the result. *)
+let process_linear ~f files args =
+  (* Compute the list of input linear ir files from [files] and [args] *)
+  let open Ocaml_locations in
+  let inputs = List.filter files ~f:(is_filename Linear) in
+  (* CR gyorsh: two ways to use these variables *)
+  (List.filter_map args ~f:(fun s ->
+     if is_filename Source s then
+       Some (make_filename Linear s)
+     else
+       None
+   ))
+  let process f =
+    unmarshal f
+    |> transform
+    |> marshal (f^".fdo")
+  in
+  let linear_functions =
+    List.map inputs ~f:process
+  in
+
+
 
 (* CR gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -247,7 +282,7 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
     ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
     ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    ~bolt_profile_filename args =
+    ~bolt_profile_filename ~linear files args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
@@ -298,14 +333,18 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     print_linear "After" fnew;
     fnew
   in
-  Reoptimize.setup ~f:transform;
+  if linear then
+    optimize_linear ~f:transform files args ~call_emit
+  else(
+    (* install a callback from the compiler *)
+    Reoptimize.setup ~f:transform;
   let finish () =
     Reorder.finish algo;
     Report.finish ()
   in
   at_exit finish;
   call_ocamlopt args;
-  finish ()
+  finish () )
 
 (* Command line options based on a variant type *)
 (* print all variants *)
@@ -336,11 +375,16 @@ module Flag (M : Alt) = struct
     let arg_type = Command.Arg_type.create M.of_string in
     flag name
       (optional_with_default M.default (Command.Arg_type.create M.of_string))
-      ~doc:(alternatives doc M.names (M.to_string M.default))
+      ~doc:(alternatives doc
+              M.names
+              (M.to_string M.default))
 end
 
-let command =
-  Command.basic ~summary:"Feedback-directed optimizer for Ocaml"
+let compile_command =
+  Command.basic ~summary:"Invoke opcamlopt with profile information"
+
+let decode_command =
+  Command.basic ~summary:"Decode perf.profile"
     ~readme:(fun () ->
       "\n\
        Build your program with ocamlfdo to enable extra debug info\n\
@@ -415,6 +459,9 @@ let command =
           (optional Filename.arg_type)
           ~doc:
             "filename same as -rel-layout but uses linear id not cfg labels"
+      and linear =
+        flag "-linear" no_arg
+          ~doc:" compile from linear IR instead of source"
       and reorder_report =
         flag "-reorder-report" no_arg
           ~doc:" Emit files showing the decisions"
@@ -423,15 +470,16 @@ let command =
         flag "-reorder-blocks"
           (optional (Command.Arg_type.create Reorder_blocks.of_string))
           ~doc:
-            (alternatives "algo for reordering basic blocks of a function:"
+            (alternatives "heuristics for reordering basic blocks of a function:"
                Reorder_blocks.names Reorder_blocks.default)
       and reorder_functions_algo =
         let open Config_reorder in
         flag "-reorder-functions"
           (optional (Command.Arg_type.create Reorder_functions.of_string))
           ~doc:
-            (alternatives "algo for reordering functions:"
+            (alternatives "heuristics for reordering functions:"
                Reorder_functions.names Reorder_functions.default)
+      and files = anon Filename.arg_type
       and args =
         flag "--" escape
           ~doc:"ocamlopt_args standard options passed to opcamlopt"
@@ -476,6 +524,17 @@ let command =
           ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
           ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
           ~preserve_orig_labels ~gen_linearid_profile
-          ~linearid_profile_filename ~bolt_profile_filename args)
+          ~linearid_profile_filename ~bolt_profile_filename ~linear files
+          args)
 
-let () = Command.run command
+let _main_command =
+   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
+     [ "decode", decode_command;   (* parse perf profile and decode it *)
+       "compile", compile_command; (* invokes ocaml compiler up to linearize *)
+       "opt", opt_command;         (* optimize one input file using profile *)
+       "emit", emit_command;       (* invoke ocaml compiler's emit *)
+       "extra" extra_command;      (* experimental commands *)
+       "reopt", reopt_command;     (* callback from ocamlopt *)
+     ]
+
+let () = Command.run decode_command

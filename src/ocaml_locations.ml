@@ -17,14 +17,23 @@ open Core
 
 let verbose = ref true
 
+(* It should be in the pass manager. *)
 type t =
   | Source
-  | Linearid
+  | Linear
 
 (* CR gyorsh: what are all the source file extensions we should support? *)
+let extension = function
+  | Linear -> ".linear"
+  | Source -> ".ml"
+
 let suffix = function
-  | Linearid -> [ ".linear" ]
+  | Linear -> [ ".linear" ]
   | Source -> [ ".ml"; ".mli"; ".c"; ".h" ]
+
+let is_filename t s = String.is_suffix s ~suffix:(extension t)
+
+let make_filename t s = s ^ extension t
 
 let decode_line locations ~program_counter func t =
   match Elf_locations.resolve_from_cache ~program_counter locations with
@@ -34,10 +43,9 @@ let decode_line locations ~program_counter func t =
       None
   | Some (file, line) -> (
       if !verbose then Printf.printf "%s:%d\n" file line;
-      let suffixes = suffix t in
-      (* Check that the filename is supported. *)
+      (* Check that the filename has support suffix and return it. *)
       match
-        List.find ~f:(fun s -> String.is_suffix file ~suffix:s) suffixes
+        List.find (suffix t) ~f:(fun s -> String.is_suffix file ~suffix:s)
       with
       | None ->
           Report.log (sprintf "Ignoring %s in %s\n" func file);
@@ -45,7 +53,7 @@ let decode_line locations ~program_counter func t =
       | Some suffix -> (
         match t with
         | Source -> Some (file, line)
-        | Linearid -> (
+        | Linear -> (
           (* Checks that debug info is relative to the input function, i.e.,
              the name of the "file" matches the name of the function. We
              check that the function symbol name from the binary matches the
@@ -64,7 +72,7 @@ let to_address locations name line t =
   let file =
     match t with
     | Source -> name
-    | Linearid ->
+    | Linear ->
         let suffix = List.hd_exn (suffix t) in
         name ^ suffix
   in

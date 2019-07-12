@@ -16,7 +16,7 @@
 
 type t =
   | Source
-  | Linearid
+  | Linear
 
 val decode_line :
   Elf_locations.t ->
@@ -26,3 +26,9 @@ val decode_line :
   (string * int) option
 
 val to_address : Elf_locations.t -> string -> int -> t -> Addr.t option
+
+(* is filename of type t, i.e., does it have an expected extension. *)
+val is_filename : t -> string -> bool
+
+(* append the expected extension *)
+val make_filename : t -> string -> string
