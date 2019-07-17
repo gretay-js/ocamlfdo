@@ -25,7 +25,7 @@ module Raw_layout : sig
     (* offset from address *)
     index : int;
     (* index in the original layout *)
-    position : int (* new position in the permutation *)
+    position : int; (* new position in the permutation *)
   }
   [@@deriving fields, csv, compare, sexp]
 
@@ -46,7 +46,7 @@ end = struct
     (* offset from address *)
     index : int;
     (* index in the original layout *)
-    position : int (* new position in the permutation *)
+    position : int; (* new position in the permutation *)
   }
   [@@deriving fields, csv, compare, sexp]
 
@@ -69,7 +69,7 @@ end
 module Rel_layout : sig
   type t = {
     func : string;
-    labels : int list
+    labels : int list;
   }
   [@@deriving sexp]
 
@@ -81,7 +81,7 @@ module Rel_layout : sig
 end = struct
   type t = {
     func : string;
-    labels : int list
+    labels : int list;
   }
   [@@deriving sexp]
 
@@ -122,7 +122,7 @@ end
 
 let convert_layout (l : Rel_layout.p) =
   List.fold l ~init:String.Map.empty ~f:(fun layout p ->
-      String.Map.add_exn layout ~key:p.func ~data:p.labels )
+      String.Map.add_exn layout ~key:p.func ~data:p.labels)
 
 let print_fun_layout_item (key, data) =
   printf "position=%d linear_id=%d\n" key data
@@ -131,7 +131,7 @@ let print_fun_layout ~key:name ~data:(fun_layout : (int, int) Hashtbl.t) =
   printf "%s (%d)\n" name (Hashtbl.length fun_layout);
   let sorted_fun_layout =
     List.sort (Hashtbl.to_alist fun_layout) ~compare:(fun (k1, _) (k2, _) ->
-        Int.compare k1 k2 )
+        Int.compare k1 k2)
   in
   List.iter sorted_fun_layout ~f:print_fun_layout_item
 
@@ -150,16 +150,16 @@ let _to_func file =
 let decode_item ~func ~locations fun_layout (l : Raw_layout.t) =
   let program_counter = Int64.(l.address + Int64.of_int l.offset) in
   let open Ocaml_locations in
-  match decode_line locations ~program_counter func Linearid with
+  match decode_line locations ~program_counter func Linear with
   | None -> fun_layout
   | Some (_, line) -> (
-    match Map.add fun_layout ~key:l.position ~data:line with
-    | `Duplicate ->
-        failwithf "Cannot add linear_id %d at position %d in function %s"
-          line l.position func ()
-    | `Ok fun_layout ->
-        if !verbose then printf "Added %s %d %d\n" func l.position line;
-        fun_layout )
+      match Map.add fun_layout ~key:l.position ~data:line with
+      | `Duplicate ->
+          failwithf "Cannot add linear_id %d at position %d in function %s"
+            line l.position func ()
+      | `Ok fun_layout ->
+          if !verbose then printf "Added %s %d %d\n" func l.position line;
+          fun_layout )
 
 (* Split raw layout into functions and decode each one in turn. *)
 let decode_layout_all locations permutation writer =
@@ -170,8 +170,9 @@ let decode_layout_all locations permutation writer =
   List.iter permutation ~f:(fun r ->
       let address = Int64.(r.address + of_int r.offset) in
       assert (not (Caml.Hashtbl.mem addresses address));
-      Caml.Hashtbl.add addresses address () );
+      Caml.Hashtbl.add addresses address ());
   Elf_locations.resolve_all locations addresses;
+
   (* Decode each function and record its layout. *)
   let rec decode_func_layout permutation layout =
     match permutation with
@@ -190,7 +191,7 @@ let decode_layout_all locations permutation writer =
             if !verbose then printf "Function %s\n" func;
             let l, rest =
               List.split_while permutation ~f:(fun r ->
-                  r.address = func_start )
+                  r.address = func_start)
             in
             let fun_layout =
               List.fold l ~init:Int.Map.empty

@@ -8,7 +8,7 @@
         compiler-libs.bytecomp
         compiler-libs.optcomp
         parsexp_io)
- (preprocess (pps ppx_jane ppx_csv_conv)))
+ (preprocess (pps ppx_jane ppx_csv_conv ppx_variants_conv)))
 
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))

@@ -42,7 +42,7 @@ module Bolt_loc = struct
   type t = {
     kind : Kind.t;
     name : string;
-    offset : int
+    offset : int;
   }
   [@@deriving sexp]
 
@@ -75,7 +75,7 @@ module Bolt_branch = struct
     src : Bolt_loc.t;
     dst : Bolt_loc.t;
     mis : Int64.t;
-    count : Int64.t
+    count : Int64.t;
   }
   [@@deriving sexp]
 
@@ -87,19 +87,20 @@ module Bolt_branch = struct
 
   let of_string s =
     match String.split ~on:' ' s with
-    | [ src_kind
-      ; src_name
-      ; src_offset
-      ; dst_kind
-      ; dst_name
-      ; dst_offset
-      ; mis
-      ; count
+    | [ src_kind;
+        src_name;
+        src_offset;
+        dst_kind;
+        dst_name;
+        dst_offset;
+        mis;
+        count
       ] ->
-        { src = Bolt_loc.of_strings src_kind src_name src_offset;
+        {
+          src = Bolt_loc.of_strings src_kind src_name src_offset;
           dst = Bolt_loc.of_strings dst_kind dst_name dst_offset;
           mis = Int64.of_string mis;
-          count = Int64.of_string count
+          count = Int64.of_string count;
         }
     | _ -> assert false
 end
@@ -114,7 +115,7 @@ let read ~filename =
   let t =
     In_channel.fold_lines chan ~init:[] ~f:(fun acc r ->
         let b = Bolt_branch.of_string r in
-        b :: acc )
+        b :: acc)
   in
   In_channel.close chan;
   if !verbose then print t;
@@ -136,15 +137,16 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
      create Loc.t with it. Create Bolt_loc.t with it directly because it is
      only used for debugging to generating bolt fdata. *)
   let inverse name line =
-    Ocaml_locations.(to_address locations name line Linearid)
+    Ocaml_locations.(to_address locations name line Linear)
   in
   let make_bolt_loc (func : Func.t) linearid =
     match inverse func.name linearid with
     | None -> Bolt_loc.unknown
     | Some addr ->
-        { kind = Symbol;
+        {
+          kind = Symbol;
           name = func.name;
-          offset = Int64.(to_int_trunc (addr - func.start))
+          offset = Int64.(to_int_trunc (addr - func.start));
         }
   in
   Hashtbl.fold p.functions ~init:[] ~f:(fun ~key:_ ~data:func acc ->
@@ -172,8 +174,8 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
                         func.name src_id dst_id count;
                     let boltb = { Bolt_branch.src; dst; count; mis } in
                     boltb :: acc )
-                  else acc ) )
-      | _ -> acc )
+                  else acc))
+      | _ -> acc)
 
 (* Make and fold using init and f *)
 let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
@@ -200,7 +202,7 @@ let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
         let src = get_bolt_loc src_addr in
         let dst = get_bolt_loc dst_addr in
         let b = { Bolt_branch.src; dst; mis; count } in
-        append_if_valid acc b )
+        append_if_valid acc b)
   in
   let ft = fallthroughs locations p in
   if !verbose then (
@@ -231,5 +233,5 @@ let save_fallthrough p locations ~filename =
     printf "Writing fallthroughs profile in bolt form to %s\n" filename;
   let chan = Out_channel.create filename in
   mk p (Aggregated_perf_profile.empty ()) locations ~init:() ~f:(fun _ b ->
-      Bolt_branch.print ~chan b );
+      Bolt_branch.print ~chan b);
   Out_channel.close chan

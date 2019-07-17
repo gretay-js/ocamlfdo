@@ -24,20 +24,27 @@ module LabelSet : Set.S with type elt = label
 (* CR gyorsh: store label after separately and update after reordering. *)
 type func_call_operation =
   | Indirect of { label_after : label }
-  | Immediate of { func : string; label_after : label }
+  | Immediate of {
+      func : string;
+      label_after : label;
+    }
 
 type prim_call_operation =
-  | External of { func : string; alloc : bool; label_after : label }
-  | Alloc of
-      { words : int;
-        label_after_call_gc : label option;
-        spacetime_index : int
-      }
-  | Checkbound of
-      { immediate : int option;
-        label_after_error : label option;
-        spacetime_index : int
-      }
+  | External of {
+      func : string;
+      alloc : bool;
+      label_after : label;
+    }
+  | Alloc of {
+      bytes : int;
+      label_after_call_gc : label option;
+      spacetime_index : int;
+    }
+  | Checkbound of {
+      immediate : int option;
+      label_after_error : label option;
+      spacetime_index : int;
+    }
 
 type operation =
   | Move
@@ -60,12 +67,12 @@ type operation =
   | Floatofint
   | Intoffloat
   | Specific of Arch.specific_operation
-  | Name_for_debugger of
-      { ident : Ident.t;
-        which_parameter : int option;
-        provenance : unit option;
-        is_assignment : bool
-      }
+  | Name_for_debugger of {
+      ident : Ident.t;
+      which_parameter : int option;
+      provenance : unit option;
+      is_assignment : bool;
+    }
 
 type call_operation =
   | P of prim_call_operation
@@ -82,7 +89,7 @@ type block = {
   start : label;
   mutable body : basic instruction list;
   mutable terminator : terminator instruction;
-  mutable predecessors : LabelSet.t
+  mutable predecessors : LabelSet.t;
 }
 
 and 'a instruction = {
@@ -94,7 +101,7 @@ and 'a instruction = {
   trap_depth : int;
   (* CR: make id into an abstract type to distinguish special cases of new
      ids explicitly. *)
-  id : int
+  id : int;
 }
 
 and basic =
@@ -104,6 +111,7 @@ and basic =
   | Entertrap
   | Pushtrap of { lbl_handler : label }
   | Poptrap
+  | Prologue
 
 and terminator =
   | Branch of successor list
@@ -119,7 +127,7 @@ type t = {
   (* Map labels to blocks *)
   fun_name : string;
   (* Function name, used for printing messages *)
-  entry_label : label (* Must be first in all layouts of this cfg. *)
+  entry_label : label; (* Must be first in all layouts of this cfg. *)
 }
 
 val successors : block -> successor list
@@ -132,8 +140,8 @@ val print :
   t ->
   label list ->
   basic_to_linear:(basic instruction ->
-                   Linearize.instruction ->
-                   Linearize.instruction) ->
+                  Linearize.instruction ->
+                  Linearize.instruction) ->
   linearize_terminator:(terminator instruction -> Linearize.instruction) ->
   unit
 

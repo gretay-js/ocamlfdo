@@ -25,7 +25,7 @@ type loc = {
   (* raw address, only computed if we found the symbol with name in the
      binary. used for creating aggregated_decoded_profile from bolt_profile.
      it's not necessary but we currently require Loc.t to have address. *)
-  addr : Addr.t option
+  addr : Addr.t option;
 }
 [@@deriving sexp]
 
@@ -33,7 +33,7 @@ type branch = {
   src : loc option;
   dst : loc option;
   count : Execount.t;
-  mis : Execount.t
+  mis : Execount.t;
 }
 [@@deriving sexp]
 
@@ -115,17 +115,18 @@ let create locations ~filename =
   in
   List.iter bolt_profile ~f:gather_function_names;
   Elf_locations.find_functions locations functions;
+
   (* Collect all addresses *)
   let addresses = Caml.Hashtbl.create len in
   let add bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
     | Some (name, offset) -> (
-      match Caml.Hashtbl.find functions name with
-      | None -> ()
-      | Some start ->
-          let addr = Int64.(start + of_int offset) in
-          Caml.Hashtbl.add addresses addr () )
+        match Caml.Hashtbl.find functions name with
+        | None -> ()
+        | Some start ->
+            let addr = Int64.(start + of_int offset) in
+            Caml.Hashtbl.add addresses addr () )
   in
   let gather_addresses (bolt_branch : Bolt_profile.Bolt_branch.t) =
     add bolt_branch.src;
@@ -133,57 +134,60 @@ let create locations ~filename =
   in
   List.iter bolt_profile ~f:gather_addresses;
   Elf_locations.resolve_all locations addresses;
+
   (* Construct decoded *)
   let decode_loc bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> None
     | Some (name, offset) -> (
-      match Caml.Hashtbl.find functions name with
-      | None ->
-          if String.is_suffix ~suffix:"@PLT" name then
-            (* OCamlFDO doesn't know PLT names, so we ignore the LBR entries
-               in BOLT profile that carry them. This lets us automate the
-               comparison. *)
-            None
-          else Some { name; id = None; offset; addr = None }
-      | Some start -> (
-          let program_counter = Int64.(start + of_int offset) in
-          let open Ocaml_locations in
-          match decode_line locations ~program_counter name Linearid with
-          | None ->
-              Some { name; id = None; offset; addr = Some program_counter }
-          | Some (_, line) ->
-              Some
-                { name;
-                  id = Some line;
-                  offset;
-                  addr = Some program_counter
-                } ) )
+        match Caml.Hashtbl.find functions name with
+        | None ->
+            if String.is_suffix ~suffix:"@PLT" name then
+              (* OCamlFDO doesn't know PLT names, so we ignore the LBR
+                 entries in BOLT profile that carry them. This lets us
+                 automate the comparison. *)
+              None
+            else Some { name; id = None; offset; addr = None }
+        | Some start -> (
+            let program_counter = Int64.(start + of_int offset) in
+            let open Ocaml_locations in
+            match decode_line locations ~program_counter name Linear with
+            | None ->
+                Some
+                  { name; id = None; offset; addr = Some program_counter }
+            | Some (_, line) ->
+                Some
+                  {
+                    name;
+                    id = Some line;
+                    offset;
+                    addr = Some program_counter;
+                  } ) )
   in
   List.fold bolt_profile ~init:[] ~f:(fun acc b ->
       match (decode_loc b.src, decode_loc b.dst) with
       | None, None -> acc
       | src, dst ->
           let d = { src; dst; count = b.count; mis = b.mis } in
-          d :: acc )
+          d :: acc)
 
 (* create Aggregated_decoded_profile *)
 let export t =
   let add table key count =
     Hashtbl.update table key ~f:(fun v ->
-        Int64.(count + Option.value ~default:0L v) )
+        Int64.(count + Option.value ~default:0L v))
   in
   let agg = Aggregated_perf_profile.empty () in
   List.iter t ~f:(fun b ->
       match (b.src, b.dst) with
       | Some src, Some dst -> (
-        match (src.addr, dst.addr) with
-        | Some src_addr, Some dst_addr ->
-            let key = (src_addr, dst_addr) in
-            add agg.branches key b.count;
-            add agg.mispredicts key b.mis
-        | _ -> () )
-      | _ -> () );
+          match (src.addr, dst.addr) with
+          | Some src_addr, Some dst_addr ->
+              let key = (src_addr, dst_addr) in
+              add agg.branches key b.count;
+              add agg.mispredicts key b.mis
+          | _ -> () )
+      | _ -> ());
   agg
 
 let save (p : Aggregated_decoded_profile.t)
@@ -218,7 +222,7 @@ let save (p : Aggregated_decoded_profile.t)
       | None, None -> ()
       | _ ->
           let b = { src; dst; count; mis } in
-          print_branch ~chan b );
+          print_branch ~chan b);
   Out_channel.close chan
 
 let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
@@ -239,21 +243,23 @@ let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
                     let mis = b.mispredicts in
                     let src =
                       Some
-                        { name = func.name;
+                        {
+                          name = func.name;
                           id = Some bi.terminator_id;
                           offset = 0;
-                          addr = None
+                          addr = None;
                         }
                     in
                     let dst =
                       Some
-                        { name = func.name;
+                        {
+                          name = func.name;
                           id = b.target_id;
                           offset = 0;
-                          addr = None
+                          addr = None;
                         }
                     in
                     let b = { src; dst; mis; count } in
-                    print_branch ~chan b ) )
-      | _ -> () );
+                    print_branch ~chan b))
+      | _ -> ());
   Out_channel.close chan

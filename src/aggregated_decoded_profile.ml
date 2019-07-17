@@ -25,7 +25,7 @@ type t = {
   (* map func id to func info *)
   functions : Func.t Hashtbl.M(Int).t;
   (* map func id to cfg_info of that function. *)
-  execounts : Cfg_info.t Hashtbl.M(Int).t
+  execounts : Cfg_info.t Hashtbl.M(Int).t;
       (* sparse, only holds functions that have cfg *and* execounts. *)
       (* logically it should be defined inside Func.t but it creates a
          cyclic dependency between . The advantage of the current design is
@@ -34,10 +34,11 @@ type t = {
 [@@deriving sexp]
 
 let mk size =
-  { addr2loc = Hashtbl.create ~size (module Addr);
+  {
+    addr2loc = Hashtbl.create ~size (module Addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
-    execounts = Hashtbl.create (module Int)
+    execounts = Hashtbl.create (module Int);
   }
 
 let get_func t addr =
@@ -63,7 +64,7 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       | None -> ()
       | Some func ->
           func.count <- Int64.(func.count + data);
-          Hashtbl.add_exn func.agg.instructions ~key ~data );
+          Hashtbl.add_exn func.agg.instructions ~key ~data);
   let process (from_addr, to_addr) update =
     match (get_func t from_addr, get_func t to_addr) with
     | None, None -> ()
@@ -85,12 +86,12 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
         Hashtbl.add_exn func.agg.branches ~key ~data;
         Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts
       in
-      process key update_br );
+      process key update_br);
   Hashtbl.iteri agg.traces ~f:(fun ~key ~data ->
       (* traces don't contribute to func's total count because it is account
          for in branches. *)
       let update_tr func = Hashtbl.add_exn func.agg.traces ~key ~data in
-      process key update_tr )
+      process key update_tr)
 
 (* Find or add the function and return its id *)
 let get_func_id t ~name ~start ~finish =
@@ -135,7 +136,7 @@ let decode_loc t locations addr =
       let dbg =
         match
           Ocaml_locations.(
-            decode_line locations ~program_counter:addr name Linearid)
+            decode_line locations ~program_counter:addr name Linear)
         with
         | None -> None
         | Some (file, line) ->
@@ -148,6 +149,7 @@ let decode_loc t locations addr =
 
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
+
   (* Collect all addresses that need decoding. Mispredicts and traces use
      the same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
@@ -167,6 +169,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   in
   Hashtbl.iter_keys agg.instructions ~f:add;
   Hashtbl.iter_keys agg.branches ~f:add2;
+
   (* A key may be used multiple times in keys of t.instruction and
      t.branches *)
   let size = Caml.Hashtbl.length addresses in
@@ -175,13 +178,15 @@ let create locations (agg : Aggregated_perf_profile.t) =
   let t = mk size in
   (* Resolve and cache all addresses we need in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses;
+
   (* Decode all locations: map addresses to locations *)
   Caml.Hashtbl.iter
     (fun addr _ ->
       let loc = decode_loc t locations addr in
-      Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc )
+      Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc)
     addresses;
   create_func_execounts t agg;
+
   (* To free space, reset the cache we used for decoding dwarf info. We may
      use locations later for printing to bolt format for testing/debugging.*)
   Elf_locations.reset_cache locations;
@@ -209,6 +214,7 @@ let write t filename =
 
 let write_top_functions t filename =
   if !verbose then printf "Writing top functions to %s\n" filename;
+
   (* Sort functions using preliminary function-level execution counts in
      descending order. *)
   let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
@@ -230,13 +236,14 @@ let create_cfg_info t func cfg =
           if !verbose then
             printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n"
               loc.addr
-      | Some block -> Cfg_info.record blocks block ~count:data );
+      | Some block -> Cfg_info.record blocks block ~count:data);
+
   (* Associate fall-through trace counts with basic blocks *)
   Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      Cfg_info.record_trace blocks from_loc to_loc data func cfg );
+      Cfg_info.record_trace blocks from_loc to_loc data func cfg);
   ( if !verbose then
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
@@ -244,6 +251,7 @@ let create_cfg_info t func cfg =
     let ratio = Int64.(func.malformed_traces * 100L / total_traces) in
     printf "Found %Ld malformed traces out of %Ld (%Ld)\n"
       func.malformed_traces total_traces ratio );
+
   (* Associate branch counts with basic blocks *)
   Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
       let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
@@ -251,7 +259,7 @@ let create_cfg_info t func cfg =
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
       Cfg_info.record_branch blocks from_loc to_loc data mispredicts func
-        cfg );
+        cfg);
   blocks
 
 (* Compute detailed execution counts for function [name] using its CFG *)

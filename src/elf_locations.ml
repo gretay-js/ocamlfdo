@@ -32,7 +32,7 @@ type t = {
   mutable fun_misses : int;
   mutable intervals_hits : int;
   mutable intervals_misses : int;
-  inverse : (string, (int, Int64.t) Hashtbl.t) Hashtbl.t
+  inverse : (string, (int, Int64.t) Hashtbl.t) Hashtbl.t;
 }
 
 let verbose = false
@@ -57,7 +57,8 @@ let create ~elf_executable =
   | None, _ -> failwith "Can't find symbol table in elf binary"
   | _, None -> failwith "Can't find string table in elf binary"
   | Some symtab, Some strtab ->
-      { map;
+      {
+        map;
         sections;
         strtab;
         symtab;
@@ -70,7 +71,7 @@ let create ~elf_executable =
         fun_misses = 0;
         resolved_fun_intervals;
         intervals_hits = 0;
-        intervals_misses = 0
+        intervals_misses = 0;
       }
 
 (* CR mshinwell: tidy all this up. Also, the pinpointing of which row is the
@@ -78,7 +79,7 @@ let create ~elf_executable =
 
 type l = {
   filename : string option;
-  state : Owee_debug_line.state
+  state : Owee_debug_line.state;
 }
 
 let resolve_from_dwarf t ~f =
@@ -243,7 +244,7 @@ let find_offsets t ~start ~finish ~addresses cur prev =
         List.iter
           (fun address ->
             if address <= prev.state.address && address < n then
-              Hashtbl.add t.resolved address res )
+              Hashtbl.add t.resolved address res)
           addresses )
 
 let _resolve_function t ~sym =
@@ -254,6 +255,7 @@ let _resolve_function t ~sym =
   if verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
       start size finish;
+
   (* CR gyorsh: consider turning off fill_gaps for functions that are very
      long or do not have any linear ids. *)
   (* find dwarf locations for this function *)
@@ -274,6 +276,7 @@ let resolve_offsets t ~sym offsets =
     Printf.printf
       "Resolving function offsets for cache: (0x%Lx,0x%Lx,0x%Lx)\n" start
       size finish;
+
   (* find dwarf locations for this function *)
   try resolve_from_dwarf t ~f:(find_offsets t ~start ~finish ~addresses)
   with FinishedFunc -> ()
@@ -321,9 +324,11 @@ let find_all ~t ~addresses cur prev =
       if verbose then
         Printf.printf "find_all at 0x%Lx: using filename=%s\n"
           prev.state.address filename;
+
       (* Find all [a] in [addresses] such that [a] is between address of
          [prev] and [cur], and cache this loc info. *)
       assert (prev.state.address <= cur.state.address);
+
       (* for pc = prev.state.address to cur.state.address *)
       (* but we can't use "for" because pc is int64 *)
       let rec loop pc =
@@ -419,6 +424,7 @@ let resolve_function_containing t ~program_counter =
   | name ->
       t.fun_hits <- t.fun_hits + 1;
       report "Found fun in cache" name program_counter;
+
       (* Only cache in resolved_fun the pcs for which no name was found. The
          others have an entry in resolved_fun_cache cache. It takes longer
          to extract but uses less memory. *)
@@ -451,6 +457,7 @@ let resolve_function_containing t ~program_counter =
                   Printf.printf
                     "Find func sym: start=0x%Lx finish=0x%Lx pc=0x%Lx\n"
                     start finish program_counter;
+
                 (* Look for symbol that contains program counter. This is
                    needed because functions_enclosing_address is based on
                    start+size of symbols, and sometimes previous symbol's
@@ -480,11 +487,12 @@ let resolve_function_containing t ~program_counter =
                         { l = start; r = finish; v = name }
                       in
                       report "Caching fun " (Some name) program_counter;
+
                       (* Hashtbl.add t.resolved_fun program_counter (Some
                          name); *)
-                      t.resolved_fun_intervals
-                      <- Intervals.insert t.resolved_fun_intervals
-                           fun_interval;
+                      t.resolved_fun_intervals <-
+                        Intervals.insert t.resolved_fun_intervals
+                          fun_interval;
                       Some fun_interval )
                 else find_func tail
           in
@@ -512,6 +520,7 @@ let resolve_function_starting_at t ~program_counter ~reset =
             if verbose then
               Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n" start
                 program_counter;
+
             (* Look for symbol whose start address is program counter. This
                is needed because functions_enclosing_address is based on
                start+size of symbols, and sometimes previous symbol's end of
@@ -545,6 +554,7 @@ let _resolve_function_offsets t ~program_counter offsets ~reset =
         if verbose then
           Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n" start
             program_counter;
+
         (* Look for symbol whose start address is program counter. This is
            needed because functions_enclosing_address is based on start+size
            of symbols, and sometimes previous symbol's end of interval
@@ -590,23 +600,23 @@ let to_address t file line =
       addr
 
 let find_functions t functions =
-  let open Owee_elf.Symbol_table in
-  iter t.symtab ~f:(fun sym ->
-      match Symbol.type_attribute sym with
+  Owee_elf.Symbol_table.iter t.symtab ~f:(fun sym ->
+      match Owee_elf.Symbol_table.Symbol.type_attribute sym with
       | Func -> (
-        match Symbol.name sym t.strtab with
-        | None -> ()
-        | Some name -> (
-          match Hashtbl.mem functions name with
-          | true -> (
-            (* bound to None *)
-            match Hashtbl.find functions name with
-            | None ->
-                let start = Symbol.value sym in
-                Hashtbl.replace functions name (Some start)
-            | Some _ ->
-                if verbose then
-                  Printf.printf
-                    "find_functions surprised to see again  %s\n" name )
-          | false -> () ) )
-      | _ -> () )
+          match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
+          | None -> ()
+          | Some name -> (
+              match Hashtbl.mem functions name with
+              | true -> (
+                  (* bound to None *)
+                  match Hashtbl.find functions name with
+                  | None ->
+                      let start = Owee_elf.Symbol_table.Symbol.value sym in
+                      Hashtbl.replace functions name (Some start)
+                  | Some _ ->
+                      if verbose then
+                        Printf.printf
+                          "find_functions surprised to see again  %s\n" name
+                  )
+              | false -> () ) )
+      | _ -> ())

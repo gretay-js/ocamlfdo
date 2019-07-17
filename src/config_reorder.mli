@@ -16,31 +16,32 @@ module Reorder_blocks : sig
   type t =
     | No
     | Opt
+    | Random
+  [@@deriving enumerate]
 
-  val of_string : string -> t
+  val to_string : t -> string
 
-  val names : string
+  val default : t
 end
-[@@deriving variants]
 
 module Reorder_functions : sig
   type t =
     | No
     | Execounts
     | Hot_clusters
+  [@@deriving enumerate]
 
-  val of_string : string -> t
+  val to_string : t -> string
 
-  val names : string list
+  val default : t
 end
-[@@deriving variants]
 
 type t = {
-  gen_linearid_profile : string;
+  linearid_profile_filename : string;
   write_bolt_fdata : bool;
   write_linker_script : bool;
   reorder_blocks : Reorder_blocks.t;
-  reorder_functions : Reorder_functions.t
+  reorder_functions : Reorder_functions.t;
 }
 
 val default : string -> t

@@ -48,7 +48,7 @@ type t = {
      instruction. Used for mapping perf data back to linear IR. *)
   mutable id_to_label : label Numbers.Int.Map.t;
   (* Set for validation, unset for optimization. *)
-  mutable preserve_orig_labels : bool
+  mutable preserve_orig_labels : bool;
 }
 
 (* CR gyorsh: new_labels and split_labels aren't used any more. *)
@@ -83,27 +83,29 @@ let preserve_orig_labels t = t.preserve_orig_labels
 
 type labelled_insn = {
   label : label;
-  insn : Linearize.instruction
+  insn : Linearize.instruction;
 }
 
 let labelled_insn_end = { label = -1; insn = end_instr }
 
 let create_empty_instruction ?(trap_depth = 0) desc =
-  { desc;
+  {
+    desc;
     arg = [||];
     res = [||];
     dbg = Debuginfo.none;
     live = Reg.Set.empty;
     trap_depth;
-    id = 0
+    id = 0;
   }
 
 let create_empty_block t start =
   let block =
-    { start;
+    {
+      start;
       body = [];
       terminator = create_empty_instruction (Branch []);
-      predecessors = LabelSet.empty
+      predecessors = LabelSet.empty;
     }
   in
   if Hashtbl.mem t.cfg.blocks start then
@@ -115,6 +117,7 @@ let register t block =
   if Hashtbl.mem t.cfg.blocks block.start then
     failwith
       (Printf.sprintf "Cannot register block, label exists: %d" block.start);
+
   (* Printf.printf "registering block %d\n" block.start *)
   (* Body is constructed in reverse, fix it now: *)
   block.body <- List.rev block.body;
@@ -129,9 +132,9 @@ let register_predecessors t =
         (fun target ->
           let target_block = Hashtbl.find t.cfg.blocks target in
           (* Add label to predecessors of target *)
-          target_block.predecessors
-          <- LabelSet.add label target_block.predecessors )
-        targets )
+          target_block.predecessors <-
+            LabelSet.add label target_block.predecessors)
+        targets)
     t.cfg.blocks
 
 let is_trap_handler t label = Hashtbl.mem t.trap_labels label
@@ -149,18 +152,19 @@ let register_split_labels t =
              gathers in new_labels_layout. Tuck on original label and
              register the split layout. *)
           Hashtbl.add t.split_labels label (label :: new_labels_layout);
-        [] ) )
+        [] ))
     t.layout []
   |> ignore
 
 let create_instr desc ~trap_depth (i : Linearize.instruction) =
-  { desc;
+  {
+    desc;
     arg = i.arg;
     res = i.res;
     dbg = i.dbg;
     live = i.live;
     trap_depth;
-    id = i.id
+    id = i.id;
   }
 
 let get_or_make_label t (i : Linearize.instruction) =
@@ -194,6 +198,7 @@ let mark_trap_label t ~lbl_handler ~lbl_pushtrap_block =
   Hashtbl.add t.trap_labels lbl_handler lbl_pushtrap_block
 
 let from_basic = function
+  | Prologue -> Lprologue
   | Reloadretaddr -> Lreloadretaddr
   | Entertrap -> Lentertrap
   | Pushtrap { lbl_handler } -> Lpushtrap { lbl_handler }
@@ -214,35 +219,35 @@ let from_basic = function
           { immediate = Some i; label_after_error; spacetime_index })) ->
       Lop
         (Iintop_imm (Icheckbound { label_after_error; spacetime_index }, i))
-  | Call (P (Alloc { words; label_after_call_gc; spacetime_index })) ->
-      Lop (Ialloc { words; label_after_call_gc; spacetime_index })
+  | Call (P (Alloc { bytes; label_after_call_gc; spacetime_index })) ->
+      Lop (Ialloc { bytes; label_after_call_gc; spacetime_index })
   | Op op -> (
-    match op with
-    | Move -> Lop Imove
-    | Spill -> Lop Ispill
-    | Reload -> Lop Ireload
-    | Const_int n -> Lop (Iconst_int n)
-    | Const_float n -> Lop (Iconst_float n)
-    | Const_symbol n -> Lop (Iconst_symbol n)
-    | Stackoffset n -> Lop (Istackoffset n)
-    | Load (c, m) -> Lop (Iload (c, m))
-    | Store (c, m, b) -> Lop (Istore (c, m, b))
-    | Intop op -> Lop (Iintop op)
-    | Intop_imm (op, i) -> Lop (Iintop_imm (op, i))
-    | Negf -> Lop Inegf
-    | Absf -> Lop Iabsf
-    | Addf -> Lop Iaddf
-    | Subf -> Lop Isubf
-    | Mulf -> Lop Imulf
-    | Divf -> Lop Idivf
-    | Floatofint -> Lop Ifloatofint
-    | Intoffloat -> Lop Iintoffloat
-    | Specific op -> Lop (Ispecific op)
-    | Name_for_debugger
-        { ident; which_parameter; provenance; is_assignment } ->
-        Lop
-          (Iname_for_debugger
-             { ident; which_parameter; provenance; is_assignment }) )
+      match op with
+      | Move -> Lop Imove
+      | Spill -> Lop Ispill
+      | Reload -> Lop Ireload
+      | Const_int n -> Lop (Iconst_int n)
+      | Const_float n -> Lop (Iconst_float n)
+      | Const_symbol n -> Lop (Iconst_symbol n)
+      | Stackoffset n -> Lop (Istackoffset n)
+      | Load (c, m) -> Lop (Iload (c, m))
+      | Store (c, m, b) -> Lop (Istore (c, m, b))
+      | Intop op -> Lop (Iintop op)
+      | Intop_imm (op, i) -> Lop (Iintop_imm (op, i))
+      | Negf -> Lop Inegf
+      | Absf -> Lop Iabsf
+      | Addf -> Lop Iaddf
+      | Subf -> Lop Isubf
+      | Mulf -> Lop Imulf
+      | Divf -> Lop Idivf
+      | Floatofint -> Lop Ifloatofint
+      | Intoffloat -> Lop Iintoffloat
+      | Specific op -> Lop (Ispecific op)
+      | Name_for_debugger
+          { ident; which_parameter; provenance; is_assignment } ->
+          Lop
+            (Iname_for_debugger
+               { ident; which_parameter; provenance; is_assignment }) )
 
 let record_trap_depth_at_label t label ~trap_depth =
   match Hashtbl.find t.trap_depths label with
@@ -280,6 +285,7 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
            doesn't have linearid. *)
         block.terminator <- create_empty_instruction fallthrough ~trap_depth;
         register t block );
+
       (* Start a new block *)
       (* CR gyorsh: check for multpile consecutive labels *)
       record_trap_depth_at_label t start ~trap_depth;
@@ -385,64 +391,68 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
   | d ->
       let desc =
         match d with
+        | Lprologue -> Prologue
         | Lentertrap -> Entertrap
         | Lreloadretaddr -> Reloadretaddr
         | Lop op -> (
-          match op with
-          | Icall_ind { label_after } -> Call (F (Indirect { label_after }))
-          | Icall_imm { func; label_after } ->
-              Call (F (Immediate { func; label_after }))
-          | Iextcall { func; alloc; label_after } ->
-              Call (P (External { func; alloc; label_after }))
-          | Iintop op -> (
             match op with
-            | Icheckbound { label_after_error; spacetime_index } ->
+            | Icall_ind { label_after } ->
+                Call (F (Indirect { label_after }))
+            | Icall_imm { func; label_after } ->
+                Call (F (Immediate { func; label_after }))
+            | Iextcall { func; alloc; label_after } ->
+                Call (P (External { func; alloc; label_after }))
+            | Iintop op -> (
+                match op with
+                | Icheckbound { label_after_error; spacetime_index } ->
+                    Call
+                      (P
+                         (Checkbound
+                            {
+                              immediate = None;
+                              label_after_error;
+                              spacetime_index;
+                            }))
+                | _ -> Op (Intop op) )
+            | Iintop_imm (op, i) -> (
+                match op with
+                | Icheckbound { label_after_error; spacetime_index } ->
+                    Call
+                      (P
+                         (Checkbound
+                            {
+                              immediate = Some i;
+                              label_after_error;
+                              spacetime_index;
+                            }))
+                | _ -> Op (Intop_imm (op, i)) )
+            | Ialloc { bytes; label_after_call_gc; spacetime_index } ->
                 Call
-                  (P
-                     (Checkbound
-                        { immediate = None;
-                          label_after_error;
-                          spacetime_index
-                        }))
-            | _ -> Op (Intop op) )
-          | Iintop_imm (op, i) -> (
-            match op with
-            | Icheckbound { label_after_error; spacetime_index } ->
-                Call
-                  (P
-                     (Checkbound
-                        { immediate = Some i;
-                          label_after_error;
-                          spacetime_index
-                        }))
-            | _ -> Op (Intop_imm (op, i)) )
-          | Ialloc { words; label_after_call_gc; spacetime_index } ->
-              Call
-                (P (Alloc { words; label_after_call_gc; spacetime_index }))
-          | Istackoffset i -> Op (Stackoffset i)
-          | Iload (c, a) -> Op (Load (c, a))
-          | Istore (c, a, b) -> Op (Store (c, a, b))
-          | Imove -> Op Move
-          | Ispill -> Op Spill
-          | Ireload -> Op Reload
-          | Iconst_int n -> Op (Const_int n)
-          | Iconst_float n -> Op (Const_float n)
-          | Iconst_symbol n -> Op (Const_symbol n)
-          | Inegf -> Op Negf
-          | Iabsf -> Op Absf
-          | Iaddf -> Op Addf
-          | Isubf -> Op Subf
-          | Imulf -> Op Mulf
-          | Idivf -> Op Divf
-          | Ifloatofint -> Op Floatofint
-          | Iintoffloat -> Op Intoffloat
-          | Ispecific op -> Op (Specific op)
-          | Iname_for_debugger
-              { ident; which_parameter; provenance; is_assignment } ->
-              Op
-                (Name_for_debugger
-                   { ident; which_parameter; provenance; is_assignment })
-          | Itailcall_ind _ | Itailcall_imm _ -> assert false )
+                  (P (Alloc { bytes; label_after_call_gc; spacetime_index }))
+            | Istackoffset i -> Op (Stackoffset i)
+            | Iload (c, a) -> Op (Load (c, a))
+            | Istore (c, a, b) -> Op (Store (c, a, b))
+            | Imove -> Op Move
+            | Ispill -> Op Spill
+            | Ireload -> Op Reload
+            | Iconst_int n -> Op (Const_int n)
+            | Iconst_float n -> Op (Const_float n)
+            | Iconst_symbol n -> Op (Const_symbol n)
+            | Inegf -> Op Negf
+            | Iabsf -> Op Absf
+            | Iaddf -> Op Addf
+            | Isubf -> Op Subf
+            | Imulf -> Op Mulf
+            | Idivf -> Op Divf
+            | Ifloatofint -> Op Floatofint
+            | Iintoffloat -> Op Intoffloat
+            | Ispecific op -> Op (Specific op)
+            | Iname_for_debugger
+                { ident; which_parameter; provenance; is_assignment } ->
+                Op
+                  (Name_for_debugger
+                     { ident; which_parameter; provenance; is_assignment })
+            | Itailcall_ind _ | Itailcall_imm _ -> assert false )
         | Lend | Lreturn | Llabel _ | Lbranch _
         | Lcondbranch (_, _)
         | Lcondbranch3 (_, _, _)
@@ -455,19 +465,21 @@ let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
 
 let make_empty_cfg name ~preserve_orig_labels =
   let cfg =
-    { fun_name = name;
+    {
+      fun_name = name;
       entry_label = 0;
-      blocks : (label, block) Hashtbl.t = Hashtbl.create 31
+      blocks : (label, block) Hashtbl.t = Hashtbl.create 31;
     }
   in
-  { cfg;
+  {
+    cfg;
     trap_labels : (label, label) Hashtbl.t = Hashtbl.create 7;
     trap_depths : (label, int) Hashtbl.t = Hashtbl.create 31;
     new_labels = LabelSet.empty;
     split_labels : (label, Layout.t) Hashtbl.t = Hashtbl.create 7;
     layout = [];
     id_to_label = Numbers.Int.Map.empty;
-    preserve_orig_labels
+    preserve_orig_labels;
   }
 
 let compute_id_to_label t =
@@ -490,36 +502,40 @@ let from_linear (f : Linearize.fundecl) ~preserve_orig_labels =
      efficient because label is used as a key to Hashtble. *)
   let entry_block = create_empty_block t t.cfg.entry_label in
   create_blocks t f.fun_body entry_block ~trap_depth:0;
+
   (* Register predecessors now rather than during cfg construction, because
      of forward jumps: the blocks do not exist when the jump that reference
      them is processed. CR gyorsh: combine with dead block elimination. *)
   register_predecessors t;
   register_split_labels t;
   compute_id_to_label t;
+
   (* Layout was constructed in reverse, fix it now: *)
   t.layout <- List.rev t.layout;
   t
 
 (* Set desc and next from inputs and the rest is empty *)
 let make_simple_linear desc next =
-  { desc;
+  {
+    desc;
     next;
     arg = [||];
     res = [||];
     dbg = Debuginfo.none;
     live = Reg.Set.empty;
-    id = 0
+    id = 0;
   }
 
 (* Set desc and next from inputs and copy the rest from i *)
 let to_linear_instr ~i desc next =
-  { desc;
+  {
+    desc;
     next;
     arg = i.arg;
     res = i.res;
     dbg = i.dbg;
     live = i.live;
-    id = i.id
+    id = i.id;
   }
 
 let basic_to_linear i next =
@@ -537,43 +553,46 @@ let linearize_terminator terminator ~next =
         [ Lop (Itailcall_imm { func; label_after }) ]
     | Switch labels -> [ Lswitch labels ]
     | Branch successors -> (
-      match successors with
-      | [] ->
-          if verbose then Printf.printf "next label is %d\n" next.label;
-          failwith "Branch without successors"
-      | [ (Always, label) ] ->
-          if next.label = label then [] else [ Lbranch label ]
-      | [ (Test _, _) ] -> failwith "Successors not exhastive"
-      | [ (Test cond_p, label_p); (Test cond_q, label_q) ] ->
-          if not (cond_p = invert_test cond_q) then (
-            Printf.fprintf stderr
-              "Cannot linearize branch with non-invert:\n";
-            Cfg.print_terminator
-              (Format.formatter_of_out_channel stderr)
-              terminator;
-            failwith "Illegal successors"
-            (* [Lcondbranch(cond_p,label_p); Lcondbranch(cond_q,label_q); ] *) )
-          else if label_p = next.label && label_q = next.label then []
-          else if label_p <> next.label && label_q <> next.label then
-            (* CR gyorsh: if both label are not fall through, then
-               arrangement should depend on perf data and possibly the
-               relative position of the target labels and the current block:
-               whether the jumps are forward or back. This information can
-               be obtained from layout but it needs to be made accessible
-               here. *)
-            [ Lcondbranch (cond_p, label_p); Lbranch label_q ]
-          else if label_p = next.label then [ Lcondbranch (cond_q, label_q) ]
-          else if label_q = next.label then [ Lcondbranch (cond_p, label_p) ]
-          else assert false
-      | [ (Test (Iinttest_imm (Iunsigned Clt, 1)), label0)
-        ; (Test (Iinttest_imm (Iunsigned Ceq, 1)), label1)
-        ; (Test (Iinttest_imm (Iunsigned Cgt, 1)), label2)
-        ] ->
-          let find_label l = if next.label = l then None else Some l in
-          [ Lcondbranch3
-              (find_label label0, find_label label1, find_label label2)
-          ]
-      | _ -> assert false )
+        match successors with
+        | [] ->
+            if verbose then Printf.printf "next label is %d\n" next.label;
+            failwith "Branch without successors"
+        | [ (Always, label) ] ->
+            if next.label = label then [] else [ Lbranch label ]
+        | [ (Test _, _) ] -> failwith "Successors not exhastive"
+        | [ (Test cond_p, label_p); (Test cond_q, label_q) ] ->
+            if not (cond_p = invert_test cond_q) then (
+              Printf.fprintf stderr
+                "Cannot linearize branch with non-invert:\n";
+              Cfg.print_terminator
+                (Format.formatter_of_out_channel stderr)
+                terminator;
+              failwith "Illegal successors"
+              (* [Lcondbranch(cond_p,label_p); Lcondbranch(cond_q,label_q);
+                 ] *) )
+            else if label_p = next.label && label_q = next.label then []
+            else if label_p <> next.label && label_q <> next.label then
+              (* CR gyorsh: if both label are not fall through, then
+                 arrangement should depend on perf data and possibly the
+                 relative position of the target labels and the current
+                 block: whether the jumps are forward or back. This
+                 information can be obtained from layout but it needs to be
+                 made accessible here. *)
+              [ Lcondbranch (cond_p, label_p); Lbranch label_q ]
+            else if label_p = next.label then
+              [ Lcondbranch (cond_q, label_q) ]
+            else if label_q = next.label then
+              [ Lcondbranch (cond_p, label_p) ]
+            else assert false
+        | [ (Test (Iinttest_imm (Iunsigned Clt, 1)), label0);
+            (Test (Iinttest_imm (Iunsigned Ceq, 1)), label1);
+            (Test (Iinttest_imm (Iunsigned Cgt, 1)), label2)
+          ] ->
+            let find_label l = if next.label = l then None else Some l in
+            [ Lcondbranch3
+                (find_label label0, find_label label1, find_label label2)
+            ]
+        | _ -> assert false )
   in
   List.fold_right (to_linear_instr ~i:terminator) desc_list next.insn
 
@@ -586,6 +605,7 @@ let need_label t block pred_block =
       failwith
         (Printf.sprintf "Fallthrough from %d to trap handler %d\n"
            pred_block.start block.start);
+
     (* No need for the label, unless the predecessor's terminator is switch
        and then the label is needed for the jump table. *)
     (* CR gyorsh: is this correct with label_after for calls? *)
@@ -652,32 +672,37 @@ let print oc t =
 let eliminate_dead_block t dead_blocks label =
   let block = Hashtbl.find t.cfg.blocks label in
   Hashtbl.remove t.cfg.blocks label;
+
   (* Update successor blocks of the dead block *)
   List.iter
     (fun target ->
       let target_block = Hashtbl.find t.cfg.blocks target in
       (* Remove label from predecessors of target. *)
-      target_block.predecessors
-      <- LabelSet.remove label target_block.predecessors )
+      target_block.predecessors <-
+        LabelSet.remove label target_block.predecessors)
     (successor_labels block);
+
   (* Remove from layout and other data-structures that track labels. *)
   t.layout <- List.filter (fun l -> l <> label) t.layout;
+
   (* If the dead block contains Lpushtrap, its handler becomes dead. Find
      all occurrences of label as values of trap_labels and remove them,
      because is_trap_handler depends on it. *)
   Hashtbl.filter_map_inplace
     (fun _ lbl_pushtrap_block ->
-      if label = lbl_pushtrap_block then None else Some lbl_pushtrap_block
-      )
+      if label = lbl_pushtrap_block then None else Some lbl_pushtrap_block)
     t.trap_labels;
+
   (* If dead block's label is not new, add it to split_labels, mapped to the
      empty layout! Needed for mapping annotations that may refer to dead
      blocks. *)
   if not (LabelSet.mem label t.new_labels) then
     Hashtbl.add t.split_labels label [];
+
   (* Not necessary to remove it from trap_depths, because it will only be
      accessed if found in the cfg, but remove for consistency. *)
   Hashtbl.remove t.trap_depths label;
+
   (* Return updated list of eliminated blocks. CR gyorsh: update this when
      transitively eliminate blocks. *)
   label :: dead_blocks
@@ -695,7 +720,7 @@ let rec eliminate_dead_blocks t =
           && (not (is_trap_handler t label))
           && t.cfg.entry_label <> label
         then label :: found
-        else found )
+        else found)
       t.cfg.blocks []
   in
   let num_found = List.length found in
@@ -734,7 +759,7 @@ let simplify_terminator block =
               | Some (c1 :: rest) -> Simplify.disjunction c c1 @ rest
               | Some [] -> assert false
             in
-            M.add l s map )
+            M.add l s map)
           M.empty successors
       in
       let new_successors, map =
@@ -747,7 +772,7 @@ let simplify_terminator block =
                 let res =
                   List.fold_left (fun res c -> (c, l) :: res) res s
                 in
-                (res, map) )
+                (res, map))
           ([], map) successors
       in
       assert (M.is_empty map);
@@ -776,22 +801,23 @@ let simplify_terminator block =
       | 1 ->
           let t0 = Test (Iinttest_imm (Iunsigned Clt, 1)) (* arg < 1 *) in
           let t1 = Test (Iinttest_imm (Iunsigned Cge, 1)) (* arg >= 1 *) in
-          block.terminator
-          <- { t with desc = Branch [ (t0, labels.(0)); (t1, l) ] }
+          block.terminator <-
+            { t with desc = Branch [ (t0, labels.(0)); (t1, l) ] }
       | 2 ->
           let t0 = Test (Iinttest_imm (Iunsigned Clt, 1)) (* arg < 1 *) in
           let t1 = Test (Iinttest_imm (Iunsigned Ceq, 1)) (* arg = 1 *) in
           let t2 = Test (Iinttest_imm (Iunsigned Cgt, 1)) (* arg > 1 *) in
-          block.terminator
-          <- { t with
-               desc = Branch [ (t0, labels.(0)); (t1, labels.(1)); (t2, l) ]
-             }
+          block.terminator <-
+            {
+              t with
+              desc = Branch [ (t0, labels.(0)); (t1, labels.(1)); (t2, l) ];
+            }
       | _ -> () )
   | _ -> ()
 
 type fallthrough_block = {
   label : label;
-  target_label : label
+  target_label : label;
 }
 
 (* Disconnects fallthrough block by re-routing it predecessors to point
@@ -801,14 +827,14 @@ let disconnect_fallthrough_block t { label; target_label } =
   (* Update the successor block's predecessors set: first remove the current
      block and then add its predecessors. *)
   let target_block = Hashtbl.find t.cfg.blocks target_label in
-  target_block.predecessors
-  <- LabelSet.remove label target_block.predecessors;
+  target_block.predecessors <-
+    LabelSet.remove label target_block.predecessors;
   let update_pred pred_label =
     (* Update the predecessor block's terminators *)
     let replace_label l =
       if l = label then (
-        target_block.predecessors
-        <- LabelSet.add pred_label target_block.predecessors;
+        target_block.predecessors <-
+          LabelSet.add pred_label target_block.predecessors;
         target_label )
       else l
     in
@@ -852,7 +878,7 @@ let rec disconnect_fallthrough_blocks t =
             Printf.printf "block at %d has single successor %d\n" label
               target_label;
           { label; target_label } :: found )
-        else found )
+        else found)
       t.cfg.blocks []
   in
   let len = List.length found in

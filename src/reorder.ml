@@ -73,6 +73,7 @@ let reorder_layout cfg ~layout =
         let orig_cfg_layout = Cfg_builder.get_layout cfg in
         print_list "orig" orig_cfg_layout;
         print_list "sorted_fun_layout" sorted_fun_layout;
+
         (* Convert linear_ids to labels *)
         let partial_cfg_layout =
           List.map sorted_fun_layout ~f:(fun id ->
@@ -81,7 +82,7 @@ let reorder_layout cfg ~layout =
               | None ->
                   failwithf "Cannot find label for linear id %d in %s\n" id
                     fun_name ()
-              | Some label -> label )
+              | Some label -> label)
           |> List.remove_consecutive_duplicates ~equal:Int.equal
         in
         print_list "partial:" partial_cfg_layout;
@@ -90,7 +91,7 @@ let reorder_layout cfg ~layout =
             ~f:(fun i m label ->
               match Map.add m ~key:label ~data:i with
               | `Duplicate -> raise (KeyAlreadyPresent (label, i))
-              | `Ok m -> m )
+              | `Ok m -> m)
         in
         (* Create new layout that extends partial layout with missing labels
            in the original order. To do this naively: walk over the original
@@ -102,13 +103,13 @@ let reorder_layout cfg ~layout =
            partial layout. *)
         let new_cfg_layout =
           List.group orig_cfg_layout ~break:(fun _prev cur ->
-              Map.mem partial_cfg_map cur )
+              Map.mem partial_cfg_map cur)
           |> List.sort ~compare:(fun l1 l2 ->
                  let h1 = List.hd_exn l1 in
                  let h2 = List.hd_exn l2 in
                  let index1 = Map.find_exn partial_cfg_map h1 in
                  let index2 = Map.find_exn partial_cfg_map h2 in
-                 Int.compare index1 index2 )
+                 Int.compare index1 index2)
           |> List.concat
         in
         print_list "new:" new_cfg_layout;
@@ -143,38 +144,31 @@ let reorder_opt cfg_info cfg =
 
 let write_profile linearid_profile config locations =
   let open Config_reorder in
-  let filename = bolt_fdata_filename config "ft" in
-  Bolt_profile.save_fallthrough linearid_profile locations ~filename;
-  let filename = bolt_decoded_filename config "ft" in
-  Decoded_bolt_profile.save_fallthrough linearid_profile ~filename;
+  if config.write_bolt_fdata then (
+    let filename = bolt_fdata_filename config "ft" in
+    Bolt_profile.save_fallthrough linearid_profile locations ~filename;
+    let filename = bolt_decoded_filename config "ft" in
+    Decoded_bolt_profile.save_fallthrough linearid_profile ~filename );
   Aggregated_decoded_profile.write linearid_profile
-    config.gen_linearid_profile;
-  if config.write_linker_script then (
-    let linker_script_hot = linker_script_filename config "" in
-    if !verbose then
-      printf "Writing linker script hot to %s\n" linker_script_hot;
-    match config.reorder_functions with
-    | No ->
-        if !verbose then
-          printf
-            "Reorder functions is not enabled.Cannot output linker script.\n"
-    | Execounts ->
-        Aggregated_decoded_profile.write_top_functions linearid_profile
-          linker_script_hot
-    | Hot_clusters -> failwith "Not implemented" )
+    config.linearid_profile_filename
 
 let reorder_profile cfg linearid_profile config =
-  let open Config_reorder in
   let name = Cfg_builder.get_name cfg in
   (* Compute cfg execounts even if reordering is not enabled. They can be
      saved to a file for later use. *)
   let cfg_info = Aggregated_decoded_profile.add linearid_profile name cfg in
-  match config.reorder_blocks with
+  (* could write to file intermediate per-function profiles. It would save
+     recomping the counters but that's not long and there would be many
+     files. *)
+  match config.Config_reorder.reorder_blocks with
   | No -> cfg
   | Opt -> (
-    match cfg_info with
-    | None -> cfg
-    | Some cfg_info -> reorder_opt cfg_info cfg )
+      match cfg_info with
+      | None -> cfg
+      | Some cfg_info -> reorder_opt cfg_info cfg )
+  | Random ->
+      (* We check earlier whether there is a profile. *)
+      assert false
 
 let reorder ~algo cfg =
   match algo with
@@ -182,7 +176,7 @@ let reorder ~algo cfg =
       if !verbose then (
         printf "Don't reorder. Current layout=";
         List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl ->
-            printf " %d" lbl );
+            printf " %d" lbl);
         printf "\n" );
       cfg
   | Random random_state -> reorder_random cfg ~random_state
