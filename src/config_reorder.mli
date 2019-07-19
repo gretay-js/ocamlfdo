@@ -40,14 +40,15 @@ type t = {
   linearid_profile_filename : string;
   write_bolt_fdata : bool;
   write_linker_script : bool;
+  linker_script_filename : string option;
   reorder_blocks : Reorder_blocks.t;
   reorder_functions : Reorder_functions.t;
 }
 
 val default : string -> t
 
-val linker_script_filename : t -> string -> string
+val get_linker_script_filename : t -> string -> string
 
-val bolt_fdata_filename : t -> string -> string
+val get_bolt_fdata_filename : t -> string -> string
 
-val bolt_decoded_filename : t -> string -> string
+val get_bolt_decoded_filename : t -> string -> string

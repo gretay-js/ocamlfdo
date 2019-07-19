@@ -52,18 +52,18 @@ let setup_profile locations config ~perf_profile_filename
     (* CR gyorsh: write_top is here just for testing! *)
     (* in the case we want to use cfg info for function reordering. *)
     Aggregated_decoded_profile.write_top_functions linearid_profile
-      (Config_reorder.linker_script_filename config "prelim");
+      (Config_reorder.get_linker_script_filename config "prelim");
 
     (* For testing, output the computed profile in bolt format *)
     let gen_bolt_fdata =
-      Config_reorder.bolt_fdata_filename config "prelim"
+      Config_reorder.get_bolt_fdata_filename config "prelim"
     in
     Bolt_profile.save linearid_profile aggr_perf_profile
       ~filename:gen_bolt_fdata locations;
 
     (* For testing, output the computed profile in "decoded bolt" format. *)
     let gen_decoded_bolt =
-      Config_reorder.bolt_decoded_filename config "prelim"
+      Config_reorder.get_bolt_decoded_filename config "prelim"
     in
     Decoded_bolt_profile.save linearid_profile aggr_perf_profile
       ~filename:gen_decoded_bolt;
@@ -77,46 +77,55 @@ let setup_profile locations config ~perf_profile_filename
             locations
         in
         let ref_decoded_bolt =
-          Config_reorder.bolt_decoded_filename config "ref"
+          Config_reorder.get_bolt_decoded_filename config "ref"
         in
         Decoded_bolt_profile.write decoded_bolt_profile
           ~filename:ref_decoded_bolt );
 
   linearid_profile
 
-let decode config ~binary_filename ~perf_profile_filename ~reorder_functions
-    ~write_linker_script =
+let decode ~binary_filename ~perf_profile_filename ~reorder_functions
+    ~linker_script_filename ~linearid_profile_filename ~write_linker_script
+    =
+  let open Config_reorder.Reorder_functions in
   let locations = load_locations binary_filename in
-  let config =
-    {
-      (Config_reorder.default (binary_filename ^ ".fdo-profile")) with
-      reorder_functions;
-      write_linker_script;
-    }
+  let linearid_profile_filename =
+    match linearid_profile_filename with
+    | None -> binary_filename ^ ".fdo-profile"
+    | Some f -> f
+  in
+  (* First aggregate raw profile and then decode it. *)
+  let aggr_perf_profile =
+    Perf_profile.read_and_aggregate perf_profile_filename
   in
   let linearid_profile =
-    setup_profile locations config ~perf_profile_filename
-      ~bolt_profile_filename:None
+    Aggregated_decoded_profile.create locations aggr_perf_profile
   in
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs. *)
   Aggregated_decoded_profile.write linearid_profile
-    config.Config_reorder.linearid_profile_filename;
+    linearid_profile_filename;
 
   (* Create linker script *)
-  let open Config_reorder in
-  if config.write_linker_script then (
-    let linker_script_hot = linker_script_filename config "" in
+  if write_linker_script then (
+    let linker_script_filename =
+      match linker_script_filename with
+      | None -> binary_filename ^ ".linear-script-hot"
+      | Some f -> f
+    in
     if !verbose then
-      printf "Writing linker script hot to %s\n" linker_script_hot;
-    match config.reorder_functions with
+      printf "Writing linker script hot to %s\n" linker_script_filename;
+    match reorder_functions with
     | No ->
         if !verbose then
           printf
-            "Reorder functions is not enabled.Cannot output linker script.\n"
+            "Warning: reorder functions is not enabled. Writing top \
+             functions anyway.\n";
+        Aggregated_decoded_profile.write_top_functions linearid_profile
+          linker_script_filename
     | Execounts ->
         Aggregated_decoded_profile.write_top_functions linearid_profile
-          linker_script_hot
+          linker_script_filename
     | Hot_clusters ->
         (* Do we ever need the cfg to decide on function order? *)
         failwith "Not implemented" );
@@ -169,7 +178,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                       Config_reorder.default
                         (linearid_profile_filename ^ ".new")
                     in
-                    Reorder.Profile (linearid_profile, config, locations) )
+                    Reorder.Profile (linearid_profile, config) )
             | Some perf_profile_filename ->
                 let linearid_profile_filename =
                   match gen_linearid_profile with
@@ -184,7 +193,7 @@ let setup_reorder ~binary_filename ~perf_profile_filename
                     ~bolt_profile_filename
                 in
                 (* Passing locations only for testing bolt output. *)
-                Reorder.Profile (linearid_profile, config, locations) ) )
+                Reorder.Profile (linearid_profile, config) ) )
 
 type phase =
   | Compile
@@ -285,6 +294,57 @@ let remove_linear_discriminators f =
     fun_body = remove_linear_discriminator f.fun_body;
   }
 
+(* All labels have id 0 because cfg operations can create new labels,
+   whereas ids of basic block instructions do not change. *)
+(* New terminators introduced by block reordering can also get id=0. *)
+(* CR: make id into an abstract type to distinguish special cases of new ids
+   explicitly. *)
+let label_id = 0
+
+let prolog_id = 1
+
+(* From 4.08, LPrologue is added to fun_body, so there is no need to make an
+   id for fun_dbg, and prolog_id instead of entry_id in
+   add_linear_discriminators. *)
+let entry_id = 1
+
+let add_discriminator dbg file d =
+  Debuginfo.make ~file ~line:d ~discriminator:d |> Debuginfo.concat dbg
+
+let rec add_linear_discriminator (i : Linearize.instruction) file d =
+  match i.desc with
+  | Lend -> { i with next = i.next }
+  | Llabel _ | Ladjust_trap_depth _ ->
+      { i with next = add_linear_discriminator i.next file d }
+  | _ ->
+      {
+        i with
+        dbg = add_discriminator i.dbg file d;
+        next = add_linear_discriminator i.next file (d + 1);
+      }
+
+(* CR gyorsh: This is the only machine dependent part. owee parser doesn't
+   know how to handle /% that may appear in a function name, for example an
+   Int operator. *)
+let to_symbol name =
+  let symbol_prefix =
+    if X86_proc.system = X86_proc.S_macosx then "_" else ""
+  in
+  X86_proc.string_of_symbol symbol_prefix name
+
+(* let to_symbol name = name *)
+
+let add_linear_discriminators (f : Linearize.fundecl) =
+  (* Best guess for filename based on compilation unit name, because dwarf
+     format (and assembler) require it, but only the line number or
+     discriminator really matter, and it is per function. *)
+  let file = to_symbol f.fun_name ^ ".linear" in
+  {
+    f with
+    fun_dbg = add_discriminator f.fun_dbg file prolog_id;
+    fun_body = add_linear_discriminator f.fun_body file entry_id;
+  }
+
 let unmarshal filename =
   try
     let ic = In_channel.create filename in
@@ -301,7 +361,68 @@ let marshal filename f =
   with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename
 
 (* unmarshal, transform, marshal the result. *)
-let process_linear ~f files args = Misc.fatal_error "not implemented"
+let process_linear ~f:_ _file = failwith "Not implemented"
+
+(* let open Linear in
+ * let linear_program = unmarshal file in
+ * let items =
+ *   List.map linear_program.items ~f (function
+ *     | Func f -> f f.fundecl
+ *     | Data d -> Data d)
+ * in
+ * { linear_program with items } *)
+
+let process ~f file =
+  (* CR gyorsh: identify format based on the file extension and magic
+     number. *)
+  process_linear ~f file
+
+let save file result =
+  let filename, extension = Filename.split_extension file in
+  let filename =
+    sprintf "%s.fdo.%s" filename (Option.value extension ~default:"")
+  in
+  marshal filename result
+
+let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
+  let algo =
+    match fdo_profile with
+    | None -> Reorder.Identity
+    | Some fdo_profile ->
+        let linearid_profile =
+          Aggregated_decoded_profile.read fdo_profile
+        in
+        let config =
+          {
+            (Config_reorder.default (fdo_profile ^ ".new")) with
+            reorder_blocks;
+          }
+        in
+        Reorder.Profile (linearid_profile, config)
+  in
+  let reorder = Reorder.reorder ~algo in
+  let transform f =
+    print_linear "Before" f;
+    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
+    let new_cfg = reorder cfg in
+    (* If we eliminate dead blocks before a transformation then some
+       algorithms might not apply because they rely on perf data based on
+       original instructions. *)
+    (* eliminate fallthrough implies dead block elimination *)
+    Cfg_builder.eliminate_fallthrough_blocks new_cfg;
+    let new_body = Cfg_builder.to_linear new_cfg in
+    let fnew = { f with fun_body = new_body } in
+    let fnew =
+      if extra_debug then add_linear_discriminators fnew else fnew
+      (* CR gyorsh: for iterative fdo, renumber the instructions with fresh
+         linear ids, as we may have removed some instructions and introduced
+         new ones, for example when a fallthrough turned into a jump after
+         reorder.*)
+    in
+    print_linear "After" fnew;
+    fnew
+  in
+  List.iter files ~f:(fun file -> process ~f:transform file |> save file)
 
 (* (* Compute the list of input linear ir files from [files] and [args] *)
  * let open Ocaml_locations in
@@ -320,8 +441,6 @@ let process_linear ~f files args = Misc.fatal_error "not implemented"
  * in
  * let linear_functions =
  *   List.map inputs ~f:process *)
-
-let optimize_linear _ = Misc.fatal_error "Not implemented"
 
 (* CR gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -343,7 +462,7 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
     ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
     ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    ~bolt_profile_filename ~linear files args =
+    ~bolt_profile_filename files args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
@@ -395,7 +514,10 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     print_linear "After" fnew;
     fnew
   in
-  if linear then optimize_linear ~f:transform files args (* ~call_emit *)
+  (* This is broken currently, we need to call split compilation here or
+     something to check *)
+  if not (List.is_empty files) then
+    List.iter files ~f:(fun f -> process ~f:transform f |> save f)
   else (
     (* install a callback from the compiler *)
     Reoptimize.setup ~f:transform;
@@ -432,7 +554,6 @@ module AltFlag (M : Alt) = struct
     sprintf "%s: %s" heading (String.concat ~sep:"," names)
 
   let mk name ~doc =
-    let arg_type = Command.Arg_type.create of_string in
     Command.Param.(
       flag name
         (optional_with_default M.default (Command.Arg_type.create of_string))
@@ -446,11 +567,13 @@ module Commonflag = struct
     aliases : string list;
   }
 
-  let optional t =
-    Command.Param.(flag t.name (optional Filename.arg_type) ~doc:t.doc)
+  let optional t () =
+    Command.Param.(
+      flag ~aliases:t.aliases t.name (optional Filename.arg_type) ~doc:t.doc)
 
-  let required t =
-    Command.Param.(flag t.name (required Filename.arg_type) ~doc:t.doc)
+  let required t () =
+    Command.Param.(
+      flag ~aliases:t.aliases t.name (required Filename.arg_type) ~doc:t.doc)
 
   let flag_binary_filename =
     {
@@ -470,44 +593,54 @@ module Commonflag = struct
     {
       name = "-linearid-profile";
       aliases = [ "-fdo-profile" ];
-      doc = "filename use decoded perf profile";
+      doc = "filename decoded perf profile in this file";
     }
+
+  let flag_gen_linearid_profile_filename =
+    {
+      name = "-linearid-profile";
+      aliases = [ "-fdo-profile" ];
+      doc = "filename decoded perf profile in this file";
+    }
+
+  let flag_linker_script_filename =
+    { name = "-linker-script"; doc = "filename link script"; aliases = [] }
 end
 
-let flag_v =
+let flag_v () =
   Command.Param.(flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose")
 
-let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
+let flag_q () = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
-let flag_remove_linear_ids =
+let flag_no_linker_script () =
+  Command.Param.(
+    flag "-no-linker-script" no_arg
+      ~doc:" do not generate hot functions linker script")
+
+let flag_remove_linear_ids () =
   Command.Param.(
     flag "-remove-linear-ids" no_arg
       ~doc:
         " remove extra debug info before optimizing the IR (iterative fdo)")
 
-let flag_extra_debug =
+let flag_extra_debug () =
   Command.Param.(
     flag "-extra-debug" no_arg
       ~doc:" add extra debug info for profile decoding")
 
-let flag_extra_debug =
-  Command.Param.(
-    flag "-write-linker-script" no_arg
-      ~doc:" add extra debug info for profile decoding")
-
-let anon_files =
+let anon_files () =
   Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
 
-let flag_reorder_blocks =
+let flag_reorder_blocks () =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
   RB.mk "-reorder-blocks"
     ~doc:"heuristics for reordering basic blocks of a function"
 
-let flag_reorder_functions =
+let flag_reorder_functions () =
   let module RF = AltFlag (Config_reorder.Reorder_functions) in
   RF.mk "-reorder-functions" ~doc:"heuristics for reordering functions"
 
-let old_command =
+let main_command =
   Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
     ~readme:(fun () ->
       "\n\
@@ -524,10 +657,10 @@ let old_command =
        ocamlfdo must\n\
        match the build of ocamlopt used above.\n")
     Command.Let_syntax.(
-      let%map_open v = flag_v
-      and q = flag_q
-      and remove_linear_ids = flag_remove_linear_ids
-      and extra_debug = flag_extra_debug
+      let%map_open v = flag_v ()
+      and q = flag_q ()
+      and remove_linear_ids = flag_remove_linear_ids ()
+      and extra_debug = flag_extra_debug ()
       and eliminate_dead_blocks =
         flag "-edb" no_arg ~doc:" eliminate dead blocks"
       and eliminate_fallthrough_blocks =
@@ -544,19 +677,17 @@ let old_command =
         flag "-gen-linearid-layout"
           (optional Filename.arg_type)
           ~doc:"filename generate relative layout and write to <filename>"
-      and binary_filename = Commonflag.(optional flag_binary_filename)
+      and binary_filename = Commonflag.(optional flag_binary_filename ())
       and perf_profile_filename =
-        Commonflag.(optional flag_perf_profile_filename)
+        Commonflag.(optional flag_perf_profile_filename ())
       and bolt_profile_filename =
         flag "-bolt-profile"
           (optional Filename.arg_type)
           ~doc:"perf.fdata output of perf2bolt"
       and gen_linearid_profile =
-        flag "-gen-linearid-profile"
-          (optional Filename.arg_type)
-          ~doc:"filename output decoded perf profile"
+        Commonflag.(optional flag_gen_linearid_profile_filename ())
       and linearid_profile_filename =
-        Commonflag.(optional flag_linearid_profile_filename)
+        Commonflag.(optional flag_linearid_profile_filename ())
       and raw_layout_filename =
         flag "-raw-layout"
           (optional Filename.arg_type)
@@ -578,8 +709,8 @@ let old_command =
       and reorder_report =
         flag "-reorder-report" no_arg
           ~doc:" Emit files showing the decisions"
-      and reorder_blocks = flag_reorder_blocks
-      and reorder_functions = flag_reorder_functions
+      and reorder_blocks = flag_reorder_blocks ()
+      and reorder_functions = flag_reorder_functions ()
       and files = anon_files
       and args =
         flag "--" escape
@@ -630,8 +761,7 @@ let old_command =
           ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
           ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
           ~preserve_orig_labels ~gen_linearid_profile
-          ~linearid_profile_filename ~bolt_profile_filename ~linear files
-          args)
+          ~linearid_profile_filename ~bolt_profile_filename files args)
 
 let decode_command =
   Command.basic
@@ -658,40 +788,56 @@ let decode_command =
        ocamlfdo must\n\
        match the build of ocamlopt used above.\n")
     Command.Let_syntax.(
-      let%map_open v = flag_v
+      let%map_open v = flag_v ()
       and q = flag_q
-      and binary_filename = Commonflag.(required flag_binary_filename)
+      and binary_filename = Commonflag.(required flag_binary_filename ())
       and perf_profile_filename =
-        Commonflag.(required flag_perf_profile_filename)
-      and reorder_functions = flag_reorder_functions in
-      and linker_script = flag_write_linker_script in
+        Commonflag.(required flag_perf_profile_filename ())
+      and reorder_functions = flag_reorder_functions
+      and linearid_profile_filename =
+        Commonflag.(optional flag_linearid_profile_filename ())
+      and linker_script_filename =
+        Commonflag.(optional flag_linker_script_filename ())
+      and no_linker_script = flag_no_linker_script in
       verbose := v;
       if q then verbose := false;
+      let write_linker_script = not no_linker_script in
       fun () ->
-        decode ~binary_filename ~perf_profile_filename ~reorder_functions ~write_linker_script)
+        decode ~binary_filename ~perf_profile_filename ~reorder_functions
+          ~linker_script_filename ~linearid_profile_filename
+          ~write_linker_script)
 
 let opt_command =
   Command.basic
-    ~summary:"Use fdo profile to optimize an intermediate representation."
+    ~summary:
+      "Use fdo profile to optimize intermediate representation of the \
+       program."
     ~readme:(fun () ->
       "\n\
-       $ ocamlfdo opt -fdo-profile foo.linear -o foo.fdo.linear\n\
+       For example:\n\
+      \       $ ocamlfdo opt -fdo-profile myexe.fdo-profile foo.linear \
+       bar.linear\n\
+       reads decoded profile from myexe.fdo-profile file, uses it\n\
+       to optimize foo.linear and bar.linear and save the result to\n\
+       foo.fdo.linear and bar.fdo.linear.\n\
+       The decoded profile can be obtained by running the command\n\
+       $ ocamlfdo decode -binary myexe <other options>\n\
+       The intermediate representation can be obtained by\n\
+       $ ocamlopt -save-ir-after linearize foo.ml bar.ml <other options>\n\
        Important: ocamlfdo relies on compiler-libs and thus the build of \
        ocamlfdo must\n\
-       match the build of ocamlopt that produced the input file.\n")
+       match the build of ocamlopt that produced the intermediate \
+       representation files.\n")
     Command.Let_syntax.(
-      let%map_open v = flag_v
+      let%map_open v = flag_v ()
       and q = flag_q
-      and remove_linear_ids = flag_remove_linear_ids
       and extra_debug = flag_extra_debug
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and files = anon_files in
       verbose := v;
       if q then verbose := false;
-
-      transform files ~remove_linear_ids ~extra_debug ~fdo_profile
-        ~reorder_blocks)
+      fun () -> optimize files ~fdo_profile ~reorder_blocks ~extra_debug)
 
 let split_command = main_command
 
@@ -699,14 +845,24 @@ let callback_command = main_command
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
+    ~readme:(fun () ->
+      "\n\
+      \    decode: parses perf.data to generate a profile using \
+       executable's dwarf info\n\
+       opt: transforms intermediate IR using a profile\n\
+       compile: invokes ocamlopt's new split compilation\n\
+       compile-with-callbacks: invokes ocamlopt with callbacks or hooks\n\n\
+       Subcommands decode and opt are intended build systems (such as \
+       jenga or dune)\n\
+      \    to avoid redundant re-compilation.\n\
+      \    Subcommands compile* are wrappers of ocamlopt intended for users\n\
+      \    who invoke ocamlopt directly, and have lots of different \
+       options for profile\n\
+      \    generation and testing of various intermediate outputs.\n")
     [ ("decode", decode_command);
-      (* parse perf profile and decode it, possibly calling ocamlopt
-         afterwards. *)
       ("opt", opt_command);
-      (* optimize one input file *)
-      ("main", split_command) (* split compilation *)
-        ("reopt", callback_command)
-      (* callback from ocamlopt *)
+      ("compile", split_command);
+      ("compile-with-callbacks", callback_command)
     ]
 
 let () = Command.run main_command

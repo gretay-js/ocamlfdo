@@ -47,6 +47,7 @@ type t = {
   linearid_profile_filename : string;
   write_bolt_fdata : bool;
   write_linker_script : bool;
+  linker_script_filename : string option;
   reorder_blocks : Reorder_blocks.t;
   reorder_functions : Reorder_functions.t;
 }
@@ -56,6 +57,7 @@ let default linearid_profile_filename =
     linearid_profile_filename;
     write_bolt_fdata = true;
     write_linker_script = true;
+    linker_script_filename = None;
     reorder_functions = Reorder_functions.No;
     reorder_blocks = Reorder_blocks.No;
   }
@@ -64,17 +66,17 @@ let linker_script_hot_extension = "linker-script-hot"
 
 let bolt_fdata_extension = "fdata"
 
-let linker_script_filename t stage =
+let get_linker_script_filename t stage =
   sprintf "%s%s%s.%s" t.linearid_profile_filename
     (if String.is_empty stage then "" else ".")
     stage linker_script_hot_extension
 
-let bolt_fdata_filename t stage =
+let get_bolt_fdata_filename t stage =
   sprintf "%s%s%s.%s" t.linearid_profile_filename
     (if String.is_empty stage then "" else ".")
     stage bolt_fdata_extension
 
-let bolt_decoded_filename t stage =
+let get_bolt_decoded_filename t stage =
   sprintf "%s%s%s.decoded.%s" t.linearid_profile_filename
     (if String.is_empty stage then "" else ".")
     stage bolt_fdata_extension

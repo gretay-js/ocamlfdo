@@ -27,8 +27,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Linear of layout
   | Cfg of layout
-  | Profile of
-      Aggregated_decoded_profile.t * Config_reorder.t * Elf_locations.t
+  | Profile of Aggregated_decoded_profile.t * Config_reorder.t
 
 let validate cfg new_cfg_layout =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
@@ -142,15 +141,17 @@ let reorder_opt cfg_info cfg =
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 
-let write_profile linearid_profile config locations =
-  let open Config_reorder in
-  if config.write_bolt_fdata then (
-    let filename = bolt_fdata_filename config "ft" in
-    Bolt_profile.save_fallthrough linearid_profile locations ~filename;
-    let filename = bolt_decoded_filename config "ft" in
-    Decoded_bolt_profile.save_fallthrough linearid_profile ~filename );
-  Aggregated_decoded_profile.write linearid_profile
-    config.linearid_profile_filename
+let write_profile linearid_profile config = ()
+
+(* let write_profile linearid_profile config =
+ *   let open Config_reorder in
+ *   if config.write_bolt_fdata then (
+ *     let filename = get_bolt_fdata_filename config "ft" in
+ *     Bolt_profile.save_fallthrough linearid_profile locations ~filename;
+ *     let filename = get_bolt_decoded_filename config "ft" in
+ *     Decoded_bolt_profile.save_fallthrough linearid_profile ~filename );
+ *   Aggregated_decoded_profile.write linearid_profile
+ *     config.linearid_profile_filename *)
 
 let reorder_profile cfg linearid_profile config =
   let name = Cfg_builder.get_name cfg in
@@ -182,16 +183,15 @@ let reorder ~algo cfg =
   | Random random_state -> reorder_random cfg ~random_state
   | Cfg layout -> reorder_rel_layout cfg ~layout
   | Linear layout -> reorder_layout cfg ~layout
-  | Profile (linearid_profile, config, _locations) ->
+  | Profile (linearid_profile, config) ->
       reorder_profile cfg linearid_profile config
 
-let finish_profile linearid_profile config locations =
+let finish_profile linearid_profile config =
   (* Call write_profile here after all cfgs are processed. It will only be
      needed after we implement reorder that depends on the cfg.*)
-  write_profile linearid_profile config locations;
+  write_profile linearid_profile config;
   ()
 
 let finish = function
-  | Profile (linearid, options, locations) ->
-      finish_profile linearid options locations
+  | Profile (linearid, config) -> finish_profile linearid config
   | _ -> ()
