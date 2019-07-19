@@ -567,11 +567,11 @@ module Commonflag = struct
     aliases : string list;
   }
 
-  let optional t () =
+  let optional t =
     Command.Param.(
       flag ~aliases:t.aliases t.name (optional Filename.arg_type) ~doc:t.doc)
 
-  let required t () =
+  let required t =
     Command.Param.(
       flag ~aliases:t.aliases t.name (required Filename.arg_type) ~doc:t.doc)
 
@@ -607,161 +607,161 @@ module Commonflag = struct
     { name = "-linker-script"; doc = "filename link script"; aliases = [] }
 end
 
-let flag_v () =
+let flag_v =
   Command.Param.(flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose")
 
-let flag_q () = Command.Param.(flag "-q" no_arg ~doc:" quiet")
+let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
-let flag_no_linker_script () =
+let flag_no_linker_script =
   Command.Param.(
     flag "-no-linker-script" no_arg
       ~doc:" do not generate hot functions linker script")
 
-let flag_remove_linear_ids () =
+let flag_remove_linear_ids =
   Command.Param.(
     flag "-remove-linear-ids" no_arg
       ~doc:
         " remove extra debug info before optimizing the IR (iterative fdo)")
 
-let flag_extra_debug () =
+let flag_extra_debug =
   Command.Param.(
     flag "-extra-debug" no_arg
       ~doc:" add extra debug info for profile decoding")
 
-let anon_files () =
+let anon_files =
   Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
 
-let flag_reorder_blocks () =
+let flag_reorder_blocks =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
   RB.mk "-reorder-blocks"
     ~doc:"heuristics for reordering basic blocks of a function"
 
-let flag_reorder_functions () =
+let flag_reorder_functions =
   let module RF = AltFlag (Config_reorder.Reorder_functions) in
   RF.mk "-reorder-functions" ~doc:"heuristics for reordering functions"
 
-let main_command =
-  Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
-    ~readme:(fun () ->
-      "\n\
-       Build your program with ocamlfdo to enable extra debug info\n\
-       for low-level optimizations (currently, only linearize pass):\n\
-       $ ocamlfdo -- <standard ocamlopt options including -o prog.exe>\n\n\
-       Collect perf profile with LBR information:\n\
-       $ perf record -e cycles:u -j any,u -o perf.data <prog.exe> <args..>\n\n\
-       Run ocamlfdo with exactly the same version of the source code and\n\
-       options as above:\n\
-       $ ocamlfdo -perf-profile <perf.data> -binary <prog.exe> -- \\\n\
-      \           <standard ocamlopt options including -o prog.fdo.exe>\n\n\
-       Important: ocamlfdo relies on compiler-libs and thus the build of \
-       ocamlfdo must\n\
-       match the build of ocamlopt used above.\n")
-    Command.Let_syntax.(
-      let%map_open v = flag_v ()
-      and q = flag_q ()
-      and remove_linear_ids = flag_remove_linear_ids ()
-      and extra_debug = flag_extra_debug ()
-      and eliminate_dead_blocks =
-        flag "-edb" no_arg ~doc:" eliminate dead blocks"
-      and eliminate_fallthrough_blocks =
-        flag "-efb" no_arg
-          ~doc:" eliminate fallthrough blocks, implies -edb"
-      and preserve_orig_labels =
-        flag "-preserve-orig-labels" no_arg
-          ~doc:" do not eliminate labels (for validation)"
-      and gen_rel_layout =
-        flag "-gen-layout"
-          (optional Filename.arg_type)
-          ~doc:"filename generate relative layout and write to <filename>"
-      and gen_linearid_layout =
-        flag "-gen-linearid-layout"
-          (optional Filename.arg_type)
-          ~doc:"filename generate relative layout and write to <filename>"
-      and binary_filename = Commonflag.(optional flag_binary_filename ())
-      and perf_profile_filename =
-        Commonflag.(optional flag_perf_profile_filename ())
-      and bolt_profile_filename =
-        flag "-bolt-profile"
-          (optional Filename.arg_type)
-          ~doc:"perf.fdata output of perf2bolt"
-      and gen_linearid_profile =
-        Commonflag.(optional flag_gen_linearid_profile_filename ())
-      and linearid_profile_filename =
-        Commonflag.(optional flag_linearid_profile_filename ())
-      and raw_layout_filename =
-        flag "-raw-layout"
-          (optional Filename.arg_type)
-          ~doc:"filename block layout for reordering: raw binary addresses"
-      and rel_layout_filename =
-        flag "-rel-layout"
-          (optional Filename.arg_type)
-          ~doc:
-            "filename block layout for reordering relative to function \
-             start,does not require -binary"
-      and linearid_layout_filename =
-        flag "-linearid-layout" ~aliases:[ "-layout" ]
-          (optional Filename.arg_type)
-          ~doc:
-            "filename same as -rel-layout but uses linear id not cfg labels"
-      and linear =
-        flag "-linear" no_arg
-          ~doc:" compile from linear IR instead of source"
-      and reorder_report =
-        flag "-reorder-report" no_arg
-          ~doc:" Emit files showing the decisions"
-      and reorder_blocks = flag_reorder_blocks ()
-      and reorder_functions = flag_reorder_functions ()
-      and files = anon_files
-      and args =
-        flag "--" escape
-          ~doc:"ocamlopt_args standard options passed to opcamlopt"
-      in
-      if v then verbose := true;
-      if q then verbose := false;
-      if !verbose then Report.verbose := true;
-      let random_order =
-        match reorder_blocks with
-        | Random -> true
-        | _ -> false
-      in
-      (* CR gyorsh: use choose_one to reduce the mess below? *)
-      if !verbose then (
-        if
-          preserve_orig_labels
-          && (eliminate_dead_blocks || eliminate_fallthrough_blocks)
-        then (
-          printf "Warning: Ignoring -preserve-orig-labels.\n";
-          printf "Incompatible with -edb and -efb\n" );
-        if random_order then
-          if
-            (not (perf_profile_filename = None))
-            || (not (raw_layout_filename = None))
-            || (not (rel_layout_filename = None))
-            || (not (linearid_layout_filename = None))
-            || not (binary_filename = None)
-          then (
-            printf
-              "Warning: Ignoring -perf-profile -raw-layout -layout \
-               -linearid-layout -binary. ";
-            printf "Incompatible with -random\n" );
-        if binary_filename = None then (
-          if
-            (not (perf_profile_filename = None))
-            || not (raw_layout_filename = None)
-          then (
-            printf "Warning: ignoring -raw_layout and -perf-profile. ";
-            printf "Cannot use without -binary.\n" ) )
-        else if perf_profile_filename = None && raw_layout_filename = None
-        then (
-          printf "Warning: Ignoring -binary. ";
-          printf "Cannot use without -perf-profile or -raw-layout.\n" ) );
-      fun () ->
-        main ~binary_filename ~perf_profile_filename ~raw_layout_filename
-          ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout
-          ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
-          ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
-          ~preserve_orig_labels ~gen_linearid_profile
-          ~linearid_profile_filename ~bolt_profile_filename files args)
+(* let old_command =
+ *   Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
+ *     ~readme:(fun () ->
+ *       "\n\
+ *        Build your program with ocamlfdo to enable extra debug info\n\
+ *        for low-level optimizations (currently, only linearize pass):\n\
+ *        $ ocamlfdo -- <standard ocamlopt options including -o prog.exe>\n\n\
+ *        Collect perf profile with LBR information:\n\
+ *        $ perf record -e cycles:u -j any,u -o perf.data <prog.exe> <args..>\n\n\
+ *        Run ocamlfdo with exactly the same version of the source code and\n\
+ *        options as above:\n\
+ *        $ ocamlfdo -perf-profile <perf.data> -binary <prog.exe> -- \\\n\
+ *       \           <standard ocamlopt options including -o prog.fdo.exe>\n\n\
+ *        Important: ocamlfdo relies on compiler-libs and thus the build of \
+ *        ocamlfdo must\n\
+ *        match the build of ocamlopt used above.\n")
+ *     Command.Let_syntax.(
+ *       let%map v = flag_v
+ *       and q = flag_q
+ *       and binary_filename = Commonflag.(optional flag_binary_filename)
+ *       and perf_profile_filename =
+ *         Commonflag.(optional flag_perf_profile_filename)
+ *       and extra_debug = flag_extra_debug
+ *       and gen_linearid_profile =
+ *         Commonflag.(optional flag_gen_linearid_profile_filename)
+ *       and linearid_profile_filename =
+ *         Commonflag.(optional flag_linearid_profile_filename)
+ *       and reorder_blocks = flag_reorder_blocks
+ *       and reorder_functions = flag_reorder_functions
+ *       and remove_linear_ids = flag_remove_linear_ids
+ *       and files = anon_files
+ *       and eliminate_dead_blocks =
+ *         flag "-edb" no_arg ~doc:" eliminate dead blocks"
+ *       and eliminate_fallthrough_blocks =
+ *         flag "-efb" no_arg
+ *           ~doc:" eliminate fallthrough blocks, implies -edb"
+ *       and preserve_orig_labels =
+ *         flag "-preserve-orig-labels" no_arg
+ *           ~doc:" do not eliminate labels (for validation)"
+ *       and gen_rel_layout =
+ *         flag "-gen-layout"
+ *           (optional Filename.arg_type)
+ *           ~doc:"filename generate relative layout and write to <filename>"
+ *       and gen_linearid_layout =
+ *         flag "-gen-linearid-layout"
+ *           (optional Filename.arg_type)
+ *           ~doc:"filename generate relative layout and write to <filename>"
+ *       and bolt_profile_filename =
+ *         flag "-bolt-profile"
+ *           (optional Filename.arg_type)
+ *           ~doc:"perf.fdata output of perf2bolt"
+ *       and raw_layout_filename =
+ *         flag "-raw-layout"
+ *           (optional Filename.arg_type)
+ *           ~doc:"filename block layout for reordering: raw binary addresses"
+ *       and rel_layout_filename =
+ *         flag "-rel-layout"
+ *           (optional Filename.arg_type)
+ *           ~doc:
+ *             "filename block layout for reordering relative to function \
+ *              start,does not require -binary"
+ *       and linearid_layout_filename =
+ *         flag "-linearid-layout" ~aliases:[ "-layout" ]
+ *           (optional Filename.arg_type)
+ *           ~doc:
+ *             "filename same as -rel-layout but uses linear id not cfg labels"
+ *       and linear =
+ *         flag "-linear" no_arg
+ *           ~doc:" compile from linear IR instead of source"
+ *       and reorder_report =
+ *         flag "-reorder-report" no_arg
+ *           ~doc:" Emit files showing the decisions"
+ *       and args =
+ *         flag "--" escape
+ *           ~doc:"ocamlopt_args standard options passed to opcamlopt")
+ *       in
+ *       if v then verbose := true;
+ *       if q then verbose := false;
+ *       if !verbose then Report.verbose := true;
+ *       let random_order =
+ *         match reorder_blocks with
+ *         | Random -> true
+ *         | _ -> false
+ *       in
+ *       (* CR gyorsh: use choose_one to reduce the mess below? *)
+ *       if !verbose then (
+ *         if
+ *           preserve_orig_labels
+ *           && (eliminate_dead_blocks || eliminate_fallthrough_blocks)
+ *         then (
+ *           printf "Warning: Ignoring -preserve-orig-labels.\n";
+ *           printf "Incompatible with -edb and -efb\n" );
+ *         if random_order then
+ *           if
+ *             (not (perf_profile_filename = None))
+ *             || (not (raw_layout_filename = None))
+ *             || (not (rel_layout_filename = None))
+ *             || (not (linearid_layout_filename = None))
+ *             || not (binary_filename = None)
+ *           then (
+ *             printf
+ *               "Warning: Ignoring -perf-profile -raw-layout -layout \
+ *                -linearid-layout -binary. ";
+ *             printf "Incompatible with -random\n" );
+ *         if binary_filename = None then (
+ *           if
+ *             (not (perf_profile_filename = None))
+ *             || not (raw_layout_filename = None)
+ *           then (
+ *             printf "Warning: ignoring -raw_layout and -perf-profile. ";
+ *             printf "Cannot use without -binary.\n" ) )
+ *         else if perf_profile_filename = None && raw_layout_filename = None
+ *         then (
+ *           printf "Warning: Ignoring -binary. ";
+ *           printf "Cannot use without -perf-profile or -raw-layout.\n" ) );
+ *       fun () ->
+ *         main ~binary_filename ~perf_profile_filename ~raw_layout_filename
+ *           ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout
+ *           ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
+ *           ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
+ *           ~preserve_orig_labels ~gen_linearid_profile
+ *           ~linearid_profile_filename ~bolt_profile_filename files args) *)
 
 let decode_command =
   Command.basic
@@ -788,16 +788,16 @@ let decode_command =
        ocamlfdo must\n\
        match the build of ocamlopt used above.\n")
     Command.Let_syntax.(
-      let%map_open v = flag_v ()
+      let%map v = flag_v
       and q = flag_q
-      and binary_filename = Commonflag.(required flag_binary_filename ())
+      and binary_filename = Commonflag.(required flag_binary_filename)
       and perf_profile_filename =
-        Commonflag.(required flag_perf_profile_filename ())
+        Commonflag.(required flag_perf_profile_filename)
       and reorder_functions = flag_reorder_functions
       and linearid_profile_filename =
-        Commonflag.(optional flag_linearid_profile_filename ())
+        Commonflag.(optional flag_linearid_profile_filename)
       and linker_script_filename =
-        Commonflag.(optional flag_linker_script_filename ())
+        Commonflag.(optional flag_linker_script_filename)
       and no_linker_script = flag_no_linker_script in
       verbose := v;
       if q then verbose := false;
@@ -829,7 +829,7 @@ let opt_command =
        match the build of ocamlopt that produced the intermediate \
        representation files.\n")
     Command.Let_syntax.(
-      let%map_open v = flag_v ()
+      let%map v = flag_v
       and q = flag_q
       and extra_debug = flag_extra_debug
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
@@ -837,28 +837,41 @@ let opt_command =
       and files = anon_files in
       verbose := v;
       if q then verbose := false;
+      if !verbose && List.is_empty files then printf "No input files\n";
       fun () -> optimize files ~fdo_profile ~reorder_blocks ~extra_debug)
 
-let split_command = main_command
+let split_command =
+  (* old_command *)
+  Command.basic ~summary:"not implemented"
+    Command.Let_syntax.(
+      let%map v = flag_v in
+      verbose := v;
+      fun () -> ())
 
-let callback_command = main_command
+let callback_command =
+  (* old_command *)
+  Command.basic ~summary:"not implemented"
+    Command.Let_syntax.(
+      let%map v = flag_v in
+      verbose := v;
+      fun () -> ())
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
     ~readme:(fun () ->
       "\n\
-      \    decode: parses perf.data to generate a profile using \
-       executable's dwarf info\n\
+       decode: parses perf.data to generate a profile using executable's \
+       dwarf info\n\
        opt: transforms intermediate IR using a profile\n\
        compile: invokes ocamlopt's new split compilation\n\
        compile-with-callbacks: invokes ocamlopt with callbacks or hooks\n\n\
        Subcommands decode and opt are intended build systems (such as \
        jenga or dune)\n\
-      \    to avoid redundant re-compilation.\n\
-      \    Subcommands compile* are wrappers of ocamlopt intended for users\n\
-      \    who invoke ocamlopt directly, and have lots of different \
-       options for profile\n\
-      \    generation and testing of various intermediate outputs.\n")
+       to avoid redundant re-compilation.\n\
+       Subcommands compile* are wrappers of ocamlopt intended for users\n\
+       who invoke ocamlopt directly, and have lots of different options \
+       for profile\n\
+       generation and testing of various intermediate outputs.\n")
     [ ("decode", decode_command);
       ("opt", opt_command);
       ("compile", split_command);

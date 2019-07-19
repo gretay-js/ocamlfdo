@@ -141,7 +141,7 @@ let reorder_opt cfg_info cfg =
   validate cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 
-let write_profile linearid_profile config = ()
+let write_profile _linearid_profile _config = ()
 
 (* let write_profile linearid_profile config =
  *   let open Config_reorder in
