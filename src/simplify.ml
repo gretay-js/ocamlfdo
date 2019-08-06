@@ -116,7 +116,7 @@ let disjunction cmp1 cmp2 =
       [Always]
   | Test c1, Test c2 -> (
       if c1 = c2 then [Test c1]
-      else if c1 = Linearize.invert_test c2 then [Always]
+      else if c1 = Linear.invert_test c2 then [Always]
       else
         match (c1, c2) with
         | Iinttest (Isigned cmp1), Iinttest (Isigned cmp2) ->

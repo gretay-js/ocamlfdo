@@ -13,10 +13,10 @@
 (**************************************************************************)
 [@@@ocaml.warning "+a-4-30-40-41-42-44-45"]
 
-open Linearize
+open Linear
 open Cfg
 
-type label = Linearize.label
+type label = Linear.label
 
 module Layout = struct
   type t = label list
@@ -83,7 +83,7 @@ let preserve_orig_labels t = t.preserve_orig_labels
 
 type labelled_insn = {
   label : label;
-  insn : Linearize.instruction;
+  insn : Linear.instruction;
 }
 
 let labelled_insn_end = { label = -1; insn = end_instr }
@@ -156,7 +156,7 @@ let register_split_labels t =
     t.layout []
   |> ignore
 
-let create_instr desc ~trap_depth (i : Linearize.instruction) =
+let create_instr desc ~trap_depth (i : Linear.instruction) =
   {
     desc;
     arg = i.arg;
@@ -167,7 +167,7 @@ let create_instr desc ~trap_depth (i : Linearize.instruction) =
     id = i.id;
   }
 
-let get_or_make_label t (i : Linearize.instruction) =
+let get_or_make_label t (i : Linear.instruction) =
   match i.desc with
   | Llabel label -> { label; insn = i }
   (* | Lbranch _ | Lcondbranch (_,_) | Lcondbranch3(_,_,_)
@@ -177,10 +177,10 @@ let get_or_make_label t (i : Linearize.instruction) =
   | _ ->
       let label = Cmm.new_label () in
       t.new_labels <- LabelSet.add label t.new_labels;
-      { label; insn = Linearize.instr_cons (Llabel label) [||] [||] i }
+      { label; insn = Linear.instr_cons (Llabel label) [||] [||] i }
 
 (* Is [i] an existing label? *)
-let rec has_label (i : Linearize.instruction) =
+let rec has_label (i : Linear.instruction) =
   match i.desc with
   | Lend | Llabel _ -> true
   | Ladjust_trap_depth _ -> has_label i.next
@@ -260,7 +260,7 @@ let record_trap_depth_at_label t label ~trap_depth =
               the following instruction has depth %d"
              label existing_trap_depth trap_depth)
 
-let rec create_blocks t (i : Linearize.instruction) block ~trap_depth =
+let rec create_blocks t (i : Linear.instruction) block ~trap_depth =
   let add_terminator desc =
     block.terminator <- create_instr desc ~trap_depth i;
     register t block
@@ -494,7 +494,7 @@ let compute_id_to_label t =
   in
   t.id_to_label <- List.fold_left fold_block Numbers.Int.Map.empty t.layout
 
-let from_linear (f : Linearize.fundecl) ~preserve_orig_labels =
+let from_linear (f : Linear.fundecl) ~preserve_orig_labels =
   let t = make_empty_cfg f.fun_name ~preserve_orig_labels in
   (* CR gyorsh: label of the function entry must not conflict with existing
      labels. Relies on the invariant: Cmm.new_label() is int > 99. An

@@ -17,7 +17,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-type label = Linearize.label
+type label = Linear.label
 
 module LabelSet = Set.Make (struct
   type t = label
@@ -175,7 +175,7 @@ let print_terminator ppf ti =
 
 let print_block ppf label b ~basic_to_linear ~linearize_terminator =
   Format.fprintf ppf "\n%d:\n" label;
-  let i = List.fold_right basic_to_linear b.body Linearize.end_instr in
+  let i = List.fold_right basic_to_linear b.body Linear.end_instr in
   Printlinear.instr ppf i;
   Format.fprintf ppf "%d: " b.terminator.id;
   print_terminator ppf b.terminator;

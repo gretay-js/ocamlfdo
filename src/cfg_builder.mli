@@ -14,15 +14,15 @@
 (* Control Flow Graph of a function. *)
 type t
 
-type label = Linearize.label
+type label = Linear.label
 
 module Layout : sig
   type t = label list
 end
 
-val from_linear : Linearize.fundecl -> preserve_orig_labels:bool -> t
+val from_linear : Linear.fundecl -> preserve_orig_labels:bool -> t
 
-val to_linear : t -> Linearize.instruction
+val to_linear : t -> Linear.instruction
 
 (* [get_block] raises [Not_found] if label does not exist *)
 val get_block : t -> label -> Cfg.block option

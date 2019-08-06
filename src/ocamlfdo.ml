@@ -235,7 +235,7 @@ let call_ocamlopt args ~phase =
   Optmain.main ()
 
 let check_equal f ~new_body =
-  let open Linearize in
+  let open Linear in
   let rec equal i1 i2 =
     (* Format.kasprintf prerr_endline "@;%a" Printlinear.instr i1;
      * Format.kasprintf prerr_endline "@;%a" Printlinear.instr i2; *)
@@ -265,7 +265,7 @@ let check_equal f ~new_body =
 let print_linear msg f =
   if true then
     if !verbose then (
-      printf "%s processing %s\n" f.Linearize.fun_name msg;
+      printf "%s processing %s\n" f.Linear.fun_name msg;
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let rec remove_discriminator = function
@@ -276,7 +276,7 @@ let rec remove_discriminator = function
       else item :: remove_discriminator t
 
 let rec remove_linear_discriminator i =
-  let open Linearize in
+  let open Linear in
   match i.desc with
   | Lend -> i
   | _ ->
@@ -287,7 +287,7 @@ let rec remove_linear_discriminator i =
       }
 
 let remove_linear_discriminators f =
-  let open Linearize in
+  let open Linear in
   {
     f with
     fun_dbg = remove_discriminator f.fun_dbg;
@@ -311,7 +311,7 @@ let entry_id = 1
 let add_discriminator dbg file d =
   Debuginfo.make ~file ~line:d ~discriminator:d |> Debuginfo.concat dbg
 
-let rec add_linear_discriminator (i : Linearize.instruction) file d =
+let rec add_linear_discriminator (i : Linear.instruction) file d =
   match i.desc with
   | Lend -> { i with next = i.next }
   | Llabel _ | Ladjust_trap_depth _ ->
@@ -334,7 +334,7 @@ let to_symbol name =
 
 (* let to_symbol name = name *)
 
-let add_linear_discriminators (f : Linearize.fundecl) =
+let add_linear_discriminators (f : Linear.fundecl) =
   (* Best guess for filename based on compilation unit name, because dwarf
      format (and assembler) require it, but only the line number or
      discriminator really matter, and it is per function. *)
@@ -345,44 +345,48 @@ let add_linear_discriminators (f : Linearize.fundecl) =
     fun_body = add_linear_discriminator f.fun_body file entry_id;
   }
 
-let unmarshal filename =
-  try
-    let ic = In_channel.create filename in
-    let f = Marshal.from_channel ic in
-    In_channel.close ic;
-    f
-  with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename
-
-let marshal filename f =
-  try
-    let oc = Out_channel.create filename in
-    Marshal.to_channel oc f [ Marshal.Closures ];
-    Out_channel.close oc
-  with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename
+(* let unmarshal filename =
+ *   try
+ *     let ic = In_channel.create filename in
+ *     let f = Marshal.from_channel ic in
+ *     In_channel.close ic;
+ *     f
+ *   with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename
+ *
+ * let marshal filename f =
+ *   try
+ *     let oc = Out_channel.create filename in
+ *     Marshal.to_channel oc f [ Marshal.Closures ];
+ *     Out_channel.close oc
+ *   with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename *)
 
 (* unmarshal, transform, marshal the result. *)
-let process_linear ~f:_ _file = failwith "Not implemented"
-
-(* let open Linear in
- * let linear_program = unmarshal file in
- * let items =
- *   List.map linear_program.items ~f (function
- *     | Func f -> f f.fundecl
- *     | Data d -> Data d)
- * in
- * { linear_program with items } *)
-
-let process ~f file =
-  (* CR gyorsh: identify format based on the file extension and magic
-     number. *)
-  process_linear ~f file
+let process_linear ~f file =
+  let open Linear in
+  let linear_program = read file in
+  let items =
+    List.map linear_program.items ~f:(function
+      | Func d ->
+          Func { d with decl = f d.decl }
+          (* CR gyorsh: d.contains_calls may become inaccurate if an
+             optimization deletes calls, for example dead code elimination,
+             but we cannot recompute it, because it is target-dependent:
+             selection.ml can redefine mark_call or mark_c_tailcall. *)
+      | Data d -> Data d)
+  in
+  { linear_program with items }
 
 let save file result =
   let filename, extension = Filename.split_extension file in
   let filename =
     sprintf "%s.fdo.%s" filename (Option.value extension ~default:"")
   in
-  marshal filename result
+  Linear.write filename result
+
+let process ~f file =
+  (* CR gyorsh: identify format based on the file extension and magic
+     number. *)
+  process_linear ~f file |> save file
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
   let algo =
@@ -422,7 +426,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
     print_linear "After" fnew;
     fnew
   in
-  List.iter files ~f:(fun file -> process ~f:transform file |> save file)
+  List.iter files ~f:(process ~f:transform)
 
 (* (* Compute the list of input linear ir files from [files] and [args] *)
  * let open Ocaml_locations in
@@ -451,7 +455,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
 let write_reorder_report f cfg newf newcfg =
   if not (phys_equal cfg newcfg) then (
     (* Separate files for before and after make it easier to diff *)
-    let name = X86_proc.string_of_symbol "" f.Linearize.fun_name in
+    let name = X86_proc.string_of_symbol "" f.Linear.fun_name in
     Report.linear ~name "Before-Reorder" f;
     Report.linear ~name "After-Reorder" newf;
     Report.cfg ~name "Before-Reorder" cfg;
@@ -517,7 +521,7 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
   (* This is broken currently, we need to call split compilation here or
      something to check *)
   if not (List.is_empty files) then
-    List.iter files ~f:(fun f -> process ~f:transform f |> save f)
+    List.iter files ~f:(process ~f:transform)
   else (
     (* install a callback from the compiler *)
     Reoptimize.setup ~f:transform;

@@ -17,7 +17,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-type label = Linearize.label
+type label = Linear.label
 
 module LabelSet : Set.S with type elt = label
 
@@ -140,9 +140,9 @@ val print :
   t ->
   label list ->
   basic_to_linear:(basic instruction ->
-                  Linearize.instruction ->
-                  Linearize.instruction) ->
-  linearize_terminator:(terminator instruction -> Linearize.instruction) ->
+                  Linear.instruction ->
+                  Linear.instruction) ->
+  linearize_terminator:(terminator instruction -> Linear.instruction) ->
   unit
 
 val print_terminator : Format.formatter -> terminator instruction -> unit
