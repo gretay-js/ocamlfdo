@@ -22,7 +22,7 @@ end
 
 val from_linear : Linear.fundecl -> preserve_orig_labels:bool -> t
 
-val to_linear : t -> Linear.instruction
+val to_linear : t -> extra_debug:bool -> Linear.instruction
 
 (* [get_block] raises [Not_found] if label does not exist *)
 val get_block : t -> label -> Cfg.block option

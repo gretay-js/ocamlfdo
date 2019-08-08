@@ -29,17 +29,17 @@ let get_filename name title sub =
     sprintf "%s-%d-%s.%s.%s" (String.prefix name 200) (get_id name) title
       sub extension
 
-let linear ~name title f =
+let linear ~name title formatter =
   let filename = get_filename name title "lin" in
   let out_channel = Out_channel.create filename in
   let ppf = Format.formatter_of_out_channel out_channel in
-  Printlinear.fundecl ppf f;
+  formatter ppf;
   Out_channel.close out_channel
 
-let cfg ~name title cfg =
+let cfg ~name title printer =
   let filename = get_filename name title "cfg" in
   let out_channel = Out_channel.create filename in
-  Cfg_builder.print out_channel cfg;
+  printer out_channel;
   Out_channel.close out_channel
 
 let filename = sprintf "summary.%s" extension

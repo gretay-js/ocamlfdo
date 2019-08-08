@@ -240,7 +240,8 @@ let check_equal f ~new_body =
     (* Format.kasprintf prerr_endline "@;%a" Printlinear.instr i1;
      * Format.kasprintf prerr_endline "@;%a" Printlinear.instr i2; *)
     if
-      i1.desc = i2.desc && i1.id = i2.id
+      i1.desc = i2.desc
+      (* && i1.id = i2.id *)
       && Reg.array_equal i1.arg i2.arg
       && Reg.array_equal i1.res i2.res
       && Reg.Set.equal i1.live i2.live
@@ -268,99 +269,6 @@ let print_linear msg f =
       printf "%s processing %s\n" f.Linear.fun_name msg;
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
-let rec remove_discriminator = function
-  | [] -> []
-  | item :: t ->
-      if Ocaml_locations.(is_filename Linear item.Debuginfo.dinfo_file) then
-        t
-      else item :: remove_discriminator t
-
-let rec remove_linear_discriminator i =
-  let open Linear in
-  match i.desc with
-  | Lend -> i
-  | _ ->
-      {
-        i with
-        dbg = remove_discriminator i.dbg;
-        next = remove_linear_discriminator i.next;
-      }
-
-let remove_linear_discriminators f =
-  let open Linear in
-  {
-    f with
-    fun_dbg = remove_discriminator f.fun_dbg;
-    fun_body = remove_linear_discriminator f.fun_body;
-  }
-
-(* All labels have id 0 because cfg operations can create new labels,
-   whereas ids of basic block instructions do not change. *)
-(* New terminators introduced by block reordering can also get id=0. *)
-(* CR: make id into an abstract type to distinguish special cases of new ids
-   explicitly. *)
-let label_id = 0
-
-let prolog_id = 1
-
-(* From 4.08, LPrologue is added to fun_body, so there is no need to make an
-   id for fun_dbg, and prolog_id instead of entry_id in
-   add_linear_discriminators. *)
-let entry_id = 1
-
-let add_discriminator dbg file d =
-  Debuginfo.make ~file ~line:d ~discriminator:d |> Debuginfo.concat dbg
-
-let rec add_linear_discriminator (i : Linear.instruction) file d =
-  match i.desc with
-  | Lend -> { i with next = i.next }
-  | Llabel _ | Ladjust_trap_depth _ ->
-      { i with next = add_linear_discriminator i.next file d }
-  | _ ->
-      {
-        i with
-        dbg = add_discriminator i.dbg file d;
-        next = add_linear_discriminator i.next file (d + 1);
-      }
-
-(* CR gyorsh: This is the only machine dependent part. owee parser doesn't
-   know how to handle /% that may appear in a function name, for example an
-   Int operator. *)
-let to_symbol name =
-  let symbol_prefix =
-    if X86_proc.system = X86_proc.S_macosx then "_" else ""
-  in
-  X86_proc.string_of_symbol symbol_prefix name
-
-(* let to_symbol name = name *)
-
-let add_linear_discriminators (f : Linear.fundecl) =
-  (* Best guess for filename based on compilation unit name, because dwarf
-     format (and assembler) require it, but only the line number or
-     discriminator really matter, and it is per function. *)
-  let file = to_symbol f.fun_name ^ ".linear" in
-  {
-    f with
-    fun_dbg = add_discriminator f.fun_dbg file prolog_id;
-    fun_body = add_linear_discriminator f.fun_body file entry_id;
-  }
-
-(* let unmarshal filename =
- *   try
- *     let ic = In_channel.create filename in
- *     let f = Marshal.from_channel ic in
- *     In_channel.close ic;
- *     f
- *   with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename
- *
- * let marshal filename f =
- *   try
- *     let oc = Out_channel.create filename in
- *     Marshal.to_channel oc f [ Marshal.Closures ];
- *     Out_channel.close oc
- *   with _ -> Misc.fatal_errorf "Failed to marshal to file %s" filename *)
-
-(* unmarshal, transform, marshal the result. *)
 let process_linear ~f file =
   let open Linear in
   let linear_program = read file in
@@ -404,25 +312,14 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
         in
         Reorder.Profile (linearid_profile, config)
   in
-  let reorder = Reorder.reorder ~algo in
   let transform f =
     print_linear "Before" f;
     let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
-    let new_cfg = reorder cfg in
-    (* If we eliminate dead blocks before a transformation then some
-       algorithms might not apply because they rely on perf data based on
-       original instructions. *)
     (* eliminate fallthrough implies dead block elimination *)
-    Cfg_builder.eliminate_fallthrough_blocks new_cfg;
-    let new_body = Cfg_builder.to_linear new_cfg in
+    Cfg_builder.eliminate_fallthrough_blocks cfg;
+    let new_cfg = Reorder.reorder ~algo cfg in
+    let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
     let fnew = { f with fun_body = new_body } in
-    let fnew =
-      if extra_debug then add_linear_discriminators fnew else fnew
-      (* CR gyorsh: for iterative fdo, renumber the instructions with fresh
-         linear ids, as we may have removed some instructions and introduced
-         new ones, for example when a fallthrough turned into a jump after
-         reorder.*)
-    in
     print_linear "After" fnew;
     fnew
   in
@@ -452,69 +349,79 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
    when reordering involves inlined functions. CR gyorsh: add separate
    "dump" flags for all passes in ocamlfdo, printing to stdout similarly to
    -dcmm -dlinear in the compiler, etc. *)
-let write_reorder_report f cfg newf newcfg =
-  if not (phys_equal cfg newcfg) then (
+let write_reorder_report f c newf newc =
+  if not (phys_equal c newc) then (
+    let open Report in
     (* Separate files for before and after make it easier to diff *)
     let name = X86_proc.string_of_symbol "" f.Linear.fun_name in
-    Report.linear ~name "Before-Reorder" f;
-    Report.linear ~name "After-Reorder" newf;
-    Report.cfg ~name "Before-Reorder" cfg;
-    Report.cfg ~name "After-Reorder" newcfg )
+    linear ~name "Before-Reorder" f cfg;
+    linear ~name "After-Reorder" newf;
+    cfg ~name "Before-Reorder" (fun oc -> Cfg_builder.print oc c);
+    cfg ~name "After-Reorder" (fun oc -> Cfg_builder.print oc newc) )
 
+(* If we eliminate dead blocks before a transformation then some algorithms
+   might not apply because they rely on perf data based on original
+   instructions. On the other hand, for iterative fdo, if we don't have
+   counters for an instruction, we don't know if it's because it is cold or
+   because it wasn't there in the binary at all as it was eliminated by dce.
+   It probably doesn't matter for the final layout, if the heuristics are
+   reasonable w.r.t. cold code, then dead is just very cold, but having less
+   code to deal with when computing layout will be more efficient. *)
 let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
     ~rel_layout_filename ~linearid_layout_filename ~gen_rel_layout
     ~gen_linearid_layout ~random_order ~eliminate_dead_blocks
-    ~eliminate_fallthrough_blocks ~remove_linear_ids ~reorder_report
-    ~preserve_orig_labels ~gen_linearid_profile ~linearid_profile_filename
-    ~bolt_profile_filename files args =
+    ~eliminate_fallthrough_blocks ~extra_debug ~remove_linear_ids
+    ~reorder_report ~preserve_orig_labels ~gen_linearid_profile
+    ~linearid_profile_filename ~bolt_profile_filename files args =
   let algo =
     setup_reorder ~binary_filename ~perf_profile_filename
       ~raw_layout_filename ~rel_layout_filename ~linearid_layout_filename
       ~random_order ~gen_linearid_layout ~gen_linearid_profile
       ~linearid_profile_filename ~bolt_profile_filename
   in
-  let reorder = Reorder.reorder ~algo in
   let w_rel = Rel_layout.writer gen_rel_layout in
   let write_rel_layout new_cfg =
     let new_layout = Cfg_builder.get_layout new_cfg in
     let fun_name = Cfg_builder.get_name new_cfg in
     w_rel fun_name new_layout
   in
-  let validate f ~new_body =
-    match algo with
-    | Reorder.Identity ->
-        if
-          eliminate_fallthrough_blocks || eliminate_dead_blocks
-          || not preserve_orig_labels
-        then ()
-        else check_equal f ~new_body
-    | _ -> ()
-  in
   let transform f =
+    let validate f new_cfg =
+      match algo with
+      | Reorder.Identity ->
+          if
+            eliminate_fallthrough_blocks || eliminate_dead_blocks
+            || not preserve_orig_labels
+          then ()
+          else
+            let new_body =
+              Cfg_builder.to_linear new_cfg ~extra_debug:false
+            in
+            check_equal f ~new_body
+      | _ -> ()
+    in
+    (* if the input already contains extra debug info, remove it. It may be
+       needed for iterative fdo, which can add new extra debug info that is
+       different and can be incompatible with the previous one. *)
+    let f =
+      if remove_linear_ids then Extra_debug.remove_linear_discriminators f
+      else f
+    in
     print_linear "Before" f;
     let cfg = Cfg_builder.from_linear f ~preserve_orig_labels in
-    let new_cfg = reorder cfg in
+    let new_cfg = Reorder.reorder ~algo cfg in
     write_rel_layout new_cfg;
-
-    (* If we eliminate dead blocks before a transformation then some
-       algorithms might not apply because they rely on perf data based on
-       original instructions. *)
     if eliminate_fallthrough_blocks then
       (* implies dead block elimination *)
       Cfg_builder.eliminate_fallthrough_blocks new_cfg
     else if eliminate_dead_blocks then
       Cfg_builder.eliminate_dead_blocks new_cfg;
-    let new_body = Cfg_builder.to_linear new_cfg in
-    validate f ~new_body;
+
+    (* optionally validate by linearizing and comparing to the original *)
+    validate f new_cfg;
+    let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
     let fnew = { f with fun_body = new_body } in
     if reorder_report then write_reorder_report f cfg fnew new_cfg;
-    let fnew =
-      if remove_linear_ids then remove_linear_discriminators fnew else fnew
-      (* CR gyorsh: for iterative fdo, renumber the instructions with fresh
-         linear ids, as we may have removed some instructions and introduced
-         new ones, for example when a fallthrough turned into a jump after
-         reorder.*)
-    in
     print_linear "After" fnew;
     fnew
   in
