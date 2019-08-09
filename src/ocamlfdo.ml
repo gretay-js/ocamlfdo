@@ -13,6 +13,7 @@
 (**************************************************************************)
 open Core
 open Layouts
+open Ocamlcfg
 
 let verbose = ref false
 
