@@ -173,9 +173,9 @@ let print_terminator ppf ti =
   | Raise _ -> Format.fprintf ppf "Raise\n"
   | Tailcall _ -> Format.fprintf ppf "Tailcall\n"
 
-let print_block ppf label b ~basic_to_linear ~linearize_terminator =
+let print_block ppf label b ~linearize_basic ~linearize_terminator =
   Format.fprintf ppf "\n%d:\n" label;
-  let i = List.fold_right basic_to_linear b.body Linear.end_instr in
+  let i = List.fold_right linearize_basic b.body Linear.end_instr in
   Printlinear.instr ppf i;
   Format.fprintf ppf "%d: " b.terminator.id;
   print_terminator ppf b.terminator;
@@ -189,7 +189,7 @@ let print_block ppf label b ~basic_to_linear ~linearize_terminator =
   List.iter (fun l -> Format.fprintf ppf " %d" l) (successor_labels b)
 
 (* CR gyorsh: add dot format output *)
-let print oc cfg layout ~basic_to_linear ~linearize_terminator =
+let print oc cfg layout ~linearize_basic ~linearize_terminator =
   let ppf = Format.formatter_of_out_channel oc in
   Printf.fprintf oc "\n%s\n" cfg.fun_name;
   Printf.fprintf oc "layout.length=%d\n" (List.length layout);
@@ -197,5 +197,5 @@ let print oc cfg layout ~basic_to_linear ~linearize_terminator =
   List.iter
     (fun label ->
       let b = Hashtbl.find cfg.blocks label in
-      print_block ppf label b ~basic_to_linear ~linearize_terminator)
+      print_block ppf label b ~linearize_basic ~linearize_terminator)
     layout

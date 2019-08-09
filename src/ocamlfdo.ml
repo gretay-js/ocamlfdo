@@ -234,6 +234,12 @@ let call_ocamlopt args ~phase =
   (* CR change main to *)
   Optmain.main ()
 
+let report_linear ~name title f =
+  Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
+
+let report_cfg ~name title cfg =
+  Report.with_outchannel ~name ~title ~sub:"lin" Cfg_builder.print cfg
+
 let check_equal f ~new_body =
   let open Linear in
   let rec equal i1 i2 =
@@ -255,8 +261,8 @@ let check_equal f ~new_body =
   if not (equal f.fun_body new_body) then (
     let name = X86_proc.string_of_symbol "" f.fun_name in
     (* Separate files for before and after to make it easier to diff *)
-    Report.linear ~name "Before" f;
-    Report.linear ~name "After" { f with fun_body = new_body };
+    report_linear ~name "Before" f;
+    report_linear ~name "After" { f with fun_body = new_body };
     if !strict then
       failwithf
         "Conversion from linear to cfg and back to linear is not an \
@@ -272,6 +278,7 @@ let print_linear msg f =
 let process_linear ~f file =
   let open Linear in
   let linear_program = read file in
+  Cmm.set_label linear_program.last_label;
   let items =
     List.map linear_program.items ~f:(function
       | Func d ->
@@ -285,10 +292,7 @@ let process_linear ~f file =
   { linear_program with items }
 
 let save file result =
-  let filename, extension = Filename.split_extension file in
-  let filename =
-    sprintf "%s.fdo.%s" filename (Option.value extension ~default:"")
-  in
+  let filename = file ^ "-fdo" in
   Linear.write filename result
 
 let process ~f file =
@@ -351,13 +355,12 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
    -dcmm -dlinear in the compiler, etc. *)
 let write_reorder_report f c newf newc =
   if not (phys_equal c newc) then (
-    let open Report in
     (* Separate files for before and after make it easier to diff *)
     let name = X86_proc.string_of_symbol "" f.Linear.fun_name in
-    linear ~name "Before-Reorder" f cfg;
-    linear ~name "After-Reorder" newf;
-    cfg ~name "Before-Reorder" (fun oc -> Cfg_builder.print oc c);
-    cfg ~name "After-Reorder" (fun oc -> Cfg_builder.print oc newc) )
+    report_linear ~name "Before-Reorder" f;
+    report_linear ~name "After-Reorder" newf;
+    report_cfg ~name "Before-Reorder" c;
+    report_cfg ~name "After-Reorder" newc )
 
 (* If we eliminate dead blocks before a transformation then some algorithms
    might not apply because they rely on perf data based on original

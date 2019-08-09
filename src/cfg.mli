@@ -139,7 +139,8 @@ val print :
   out_channel ->
   t ->
   label list ->
-  basic_to_linear:(basic instruction ->
+  linearize_basic:(basic instruction ->
+                  (* next, but not labeling the argument for easier fold *)
                   Linear.instruction ->
                   Linear.instruction) ->
   linearize_terminator:(terminator instruction -> Linear.instruction) ->

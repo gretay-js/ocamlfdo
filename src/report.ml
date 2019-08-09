@@ -22,35 +22,41 @@ let get_id name =
     incr last_id;
     !last_id - 1 )
 
-let get_filename name title sub =
+(* Some names come out too long. This function shortens them or depending on
+   whether they are write-only, or need to be reused. *)
+let get_filename ~name ~title ~sub =
   let filename = sprintf "%s-%s.%s.%s" name title sub extension in
   if String.length name < 255 then filename
   else
     sprintf "%s-%d-%s.%s.%s" (String.prefix name 200) (get_id name) title
       sub extension
 
-let linear ~name title formatter =
-  let filename = get_filename name title "lin" in
+let with_outchannel ~name ~title ~sub printer x =
+  let filename = get_filename ~name ~title ~sub in
+  let out_channel = Out_channel.create filename in
+  Misc.try_finally
+    (fun () -> printer out_channel x)
+    ~always:(fun () -> Out_channel.close out_channel)
+
+let with_ppf ~name ~title ~sub formatter x =
+  let filename = get_filename ~name ~title ~sub in
   let out_channel = Out_channel.create filename in
   let ppf = Format.formatter_of_out_channel out_channel in
-  formatter ppf;
-  Out_channel.close out_channel
-
-let cfg ~name title printer =
-  let filename = get_filename name title "cfg" in
-  let out_channel = Out_channel.create filename in
-  printer out_channel;
-  Out_channel.close out_channel
+  Misc.try_finally
+    (fun () -> formatter ppf x)
+    ~always:(fun () ->
+      Format.pp_print_flush ppf ();
+      Out_channel.close out_channel)
 
 let filename = sprintf "summary.%s" extension
 
-let out_channel = Out_channel.create filename
+let summary_oc = Out_channel.create filename
 
 let log msg =
   if !verbose then printf "%s" msg;
-  Printf.fprintf out_channel "%s%s" msg
+  Printf.fprintf summary_oc "%s%s" msg
     (if String.is_suffix msg ~suffix:"\n" then "" else "\n")
 
 let finish () =
   if !verbose then printf "Written summary to %s\n" filename;
-  Out_channel.close out_channel
+  Out_channel.close summary_oc

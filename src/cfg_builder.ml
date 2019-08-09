@@ -22,7 +22,7 @@ module Layout = struct
   type t = label list
 end
 
-let verbose = false
+let verbose = true
 
 type t = {
   (* The graph itself *)
@@ -302,6 +302,9 @@ let rec create_blocks t i block ~trap_depth =
           (Printf.sprintf
              "End of function without terminator for block %d\n" block.start)
   | Llabel start ->
+      if verbose then
+        Printf.printf "Llabel start=%d, block.start=%d\n" start block.start;
+
       (* Add the previos block, if it did not have an explicit terminator. *)
       if not (Hashtbl.mem t.cfg.blocks block.start) then (
         (* Previous block falls through. Add start as explicit successor. *)
@@ -340,6 +343,7 @@ let rec create_blocks t i block ~trap_depth =
       add_terminator (Raise kind);
       create_blocks t i.next block ~trap_depth
   | Lbranch lbl ->
+      if verbose then Printf.printf "Lbranch %d\n" lbl;
       let successors = [ (Always, lbl) ] in
       assert (has_label i.next);
       record_trap_depth_at_label t lbl ~trap_depth;
@@ -523,11 +527,6 @@ let compute_id_to_label t =
   in
   t.id_to_label <- List.fold_left fold_block Numbers.Int.Map.empty t.layout
 
-type 'a id = {
-  i : 'a;
-  id : int;
-}
-
 let from_linear (f : Linear.fundecl) ~preserve_orig_labels =
   let t = make_empty_cfg f.fun_name ~preserve_orig_labels in
   (* CR gyorsh: label of the function entry must not conflict with existing
@@ -561,7 +560,7 @@ let make_simple_linear desc next =
   }
 
 (* Set desc and next from inputs and copy the rest from i *)
-let to_linear_instr ~i desc next extra_debug =
+let to_linear_instr ?extra_debug ~i desc next =
   let dbg =
     match extra_debug with
     | None -> i.dbg
@@ -570,11 +569,11 @@ let to_linear_instr ~i desc next extra_debug =
   in
   { desc; next; arg = i.arg; res = i.res; dbg; live = i.live }
 
-let basic_to_linear t i next =
+let basic_to_linear ?extra_debug i next =
   let desc = from_basic i.desc in
-  to_linear_instr t desc next ~i
+  to_linear_instr desc next ~i ?extra_debug
 
-let linearize_terminator t terminator ~next =
+let linearize_terminator ?extra_debug terminator ~next =
   let desc_list =
     match terminator.desc with
     | Return -> [ Lreturn ]
@@ -626,7 +625,9 @@ let linearize_terminator t terminator ~next =
             ]
         | _ -> assert false )
   in
-  List.fold_right (to_linear_instr t ~i:terminator) desc_list next.insn
+  List.fold_right
+    (to_linear_instr ?extra_debug ~i:terminator)
+    desc_list next.insn
 
 let need_label t block pred_block =
   (* Can we drop the start label for this block or not? *)
@@ -666,6 +667,7 @@ let adjust_trap t body block pred_block =
 (* CR gyorsh: handle duplicate labels in new layout: print the same block
    more than once. *)
 let to_linear t ~extra_debug =
+  let extra_debug = if extra_debug then Some (get_name t) else None in
   let layout = Array.of_list t.layout in
   let len = Array.length layout in
   let next = ref labelled_insn_end in
@@ -676,10 +678,10 @@ let to_linear t ~extra_debug =
     let block = Hashtbl.find t.cfg.blocks label in
     assert (label = block.start);
     let terminator =
-      linearize_terminator t block.terminator ~next:!next ~extra_debug
+      linearize_terminator ?extra_debug block.terminator ~next:!next
     in
     let body =
-      List.fold_right basic_to_linear t block.body terminator ~extra_debug
+      List.fold_right (basic_to_linear ?extra_debug) block.body terminator
     in
     let insn =
       if i = 0 then body (* Entry block of the function. Don't add label. *)
@@ -698,8 +700,11 @@ let to_linear t ~extra_debug =
   !next.insn
 
 let print oc t =
-  Cfg.print oc t.cfg t.layout ~basic_to_linear
-    ~linearize_terminator:(linearize_terminator t ~next:labelled_insn_end)
+  let extra_debug = None in
+  Cfg.print oc t.cfg t.layout
+    ~linearize_basic:(basic_to_linear ?extra_debug)
+    ~linearize_terminator:
+      (linearize_terminator ?extra_debug ~next:labelled_insn_end)
 
 (* Simplify CFG *)
 (* CR gyorsh: needs more testing. *)
