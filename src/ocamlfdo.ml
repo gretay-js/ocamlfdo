@@ -277,7 +277,7 @@ let print_linear msg f =
       Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let process_linear ~f file =
-  let open Linear in
+  let open Linear_format in
   let linear_program = read file in
   Cmm.set_label linear_program.last_label;
   let items =
@@ -294,7 +294,7 @@ let process_linear ~f file =
 
 let save file result =
   let filename = file ^ "-fdo" in
-  Linear.write filename result
+  Linear_format.write filename result
 
 let process ~f file =
   (* CR gyorsh: identify format based on the file extension and magic

@@ -17,6 +17,7 @@
    representation. However, it makes otherwise identical linear IRs to fail
    comparisons when we use the algorithm to. *)
 open Core
+open Ocamlcfg
 
 let verbose = ref true
 

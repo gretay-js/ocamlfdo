@@ -15,7 +15,7 @@
 open Core
 open Loc
 open Block_info
-
+open Ocamlcfg
 let verbose = ref true
 
 (* Map basic blocks of this function to breakdown of execution counts *)

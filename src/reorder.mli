@@ -12,6 +12,7 @@
 (*                                                                        *)
 (**************************************************************************)
 open Core
+open Ocamlcfg
 
 (* Maps functions to layout of the function, which is essentially a
    permutation of original ids. Sparse, i.e., only contains functions whose
