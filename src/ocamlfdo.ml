@@ -271,35 +271,23 @@ let check_equal f ~new_body =
         name () )
 
 let print_linear msg f =
-  if true then
-    if !verbose then (
-      printf "%s processing %s\n" f.Linear.fun_name msg;
-      Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
+  if !verbose then (
+    printf "%s processing %s\n" f.Linear.fun_name msg;
+    Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let process_linear ~f file =
+  let out_filename = file ^ "-fdo" in
   let open Linear_format in
-  let linear_program = read file in
-  Cmm.set_label linear_program.last_label;
-  let items =
-    List.map linear_program.items ~f:(function
-      | Func d ->
-          Func { d with decl = f d.decl }
-          (* CR gyorsh: d.contains_calls may become inaccurate if an
-             optimization deletes calls, for example dead code elimination,
-             but we cannot recompute it, because it is target-dependent:
-             selection.ml can redefine mark_call or mark_c_tailcall. *)
-      | Data d -> Data d)
-  in
-  { linear_program with items }
-
-let save file result =
-  let filename = file ^ "-fdo" in
-  Linear_format.write filename result
+  restore file
+  |> List.map ~f:(function
+       | Func d -> Func (f d)
+       | Data d -> Data d)
+  |> save out_filename
 
 let process ~f file =
   (* CR gyorsh: identify format based on the file extension and magic
      number. *)
-  process_linear ~f file |> save file
+  process_linear ~f file
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
   let algo =
@@ -787,10 +775,11 @@ let main_command =
        who invoke ocamlopt directly, and have lots of different options \
        for profile\n\
        generation and testing of various intermediate outputs.\n")
-    [ ("decode", decode_command);
+    [
+      ("decode", decode_command);
       ("opt", opt_command);
       ("compile", split_command);
-      ("compile-with-callbacks", callback_command)
+      ("compile-with-callbacks", callback_command);
     ]
 
 let () = Command.run main_command
