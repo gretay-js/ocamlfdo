@@ -29,19 +29,23 @@ type t = {
   mutable malformed_traces : Execount.t;
   (* Counters that refer to this function, uses raw addresses. *)
   (* CR: This can be dropped after cfg_count is constructed, to save memory. *)
-  agg : Aggregated_perf_profile.t
+  agg : Aggregated_perf_profile.t;
+  (* crc of the function's linear ir *)
+  linear_crc : string option;
 }
 [@@deriving sexp]
 
 let mk ~id ~name ~start ~finish =
-  { id;
+  {
+    id;
     name;
     start;
     finish;
     has_linearids = false;
     count = 0L;
     malformed_traces = 0L;
-    agg = Aggregated_perf_profile.empty ()
+    agg = Aggregated_perf_profile.empty ();
+    linear_crc = None;
   }
 
 (* Descending order of execution counts (reverse order of compare).Tie

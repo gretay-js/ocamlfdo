@@ -25,11 +25,16 @@ type t = {
   (* map func id to func info *)
   functions : Func.t Hashtbl.M(Int).t;
   (* map func id to cfg_info of that function. *)
+  (* sparse, only holds functions that have cfg *and* execounts. *)
+  (* logically it should be defined inside Func.t but it creates a cyclic
+     dependency between . The advantage of the current design is smaller
+     space that a Func takes if it doesn't have a cfg_info *)
   execounts : Cfg_info.t Hashtbl.M(Int).t;
-      (* sparse, only holds functions that have cfg *and* execounts. *)
-      (* logically it should be defined inside Func.t but it creates a
-         cyclic dependency between . The advantage of the current design is
-         smaller space that a Func takes if it doesn't have a cfg_info *)
+  (* map name of compilation unit or function to its md5 digest. Currently
+     contains only crcs of linear IR. Not using Caml.Digest.t because it
+     does not have sexp. Not using Core's Digest because digests generated
+     by the compiler using Caml.Digest might disagree. *)
+  crcs : Md5.t Hashtbl.M(String).t;
 }
 [@@deriving sexp]
 
@@ -39,6 +44,7 @@ let mk size =
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
     execounts = Hashtbl.create (module Int);
+    crcs = Hashtbl.create (module String);
   }
 
 let get_func t addr =
@@ -210,6 +216,7 @@ let write t filename =
     printf "Writing aggregated decoded profile to %s\n" filename;
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
+
   Out_channel.close chan
 
 let write_top_functions t filename =

@@ -34,6 +34,32 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
+(* Symbols in the binary with a special naming sceme to communite crc of the
+   linear IR it was compiled from. This is used to ensure that the profile
+   is only applied to IR that it was obtained from.
+
+   format: <crc_symbol_prefix><unit_name><crc_symbol_sep><crc_hex> example:
+   caml_-_cRc_-_Ocamlfdo-123415810438DFE5 *)
+let crc_symbol_prefix = "caml___cRc___"
+
+let crc_symbol_sep = '_'
+
+let crc_symbol_mk name crc =
+  sprintf "%s%s%c%s" crc_symbol_prefix name crc_symbol_sep (Md5.to_hex crc)
+
+let emit_crc_symbols crcs =
+  let open Cmm in
+  Hashtbl.fold crcs ~init:[] ~f:(fun ~key:name ~data:crc items ->
+      let symbol = crc_symbol_mk name crc in
+      Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
+
+let load_crcs locations (linearid_profile : Aggregated_decoded_profile.t) =
+  Elf_locations.iter_symbols locations ~prefix:crc_symbol_prefix
+    ~f:(fun ~suffix:s ->
+      let name, hex = String.rsplit2_exn s ~on:crc_symbol_sep in
+      let crc = Md5.from_hex hex in
+      Hashtbl.add_exn linearid_profile.crcs ~key:name ~data:crc)
+
 let setup_profile locations config ~perf_profile_filename
     ~bolt_profile_filename =
   (* CR gyorsh: decoding raw perf data should be separate from reordering
@@ -102,6 +128,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   let linearid_profile =
     Aggregated_decoded_profile.create locations aggr_perf_profile
   in
+  load_crcs locations linearid_profile;
+
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs. *)
   Aggregated_decoded_profile.write linearid_profile
@@ -275,48 +303,85 @@ let print_linear msg f =
     printf "%s processing %s\n" f.Linear.fun_name msg;
     Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
-let process_linear ~f file =
-  let out_filename = file ^ "-fdo" in
-  let open Linear_format in
-  restore file
-  |> List.map ~f:(function
-       | Func d -> Func (f d)
-       | Data d -> Data d)
-  |> save out_filename
+let check_consistency_unit crcs name crc file ~if_not_found =
+  Hashtbl.find_and_call crcs name
+    ~if_found:(fun old_crc ->
+      if not (Digest.equal old_crc crc) then
+        failwithf
+          "Linear IR for %s from file %s does not match the version of \
+           this IR used for creating the profile.\n\
+           old crc: %s\n\
+           new crc: %s\n"
+          name file (Md5.to_hex old_crc) (Md5.to_hex crc) ())
+    ~if_not_found
 
-let process ~f file =
+let process file ~transform ~check_unit_crc ~extra_debug =
   (* CR gyorsh: identify format based on the file extension and magic
      number. *)
-  process_linear ~f file
+  let out_filename = file ^ "-fdo" in
+  let open Linear_format in
+  let ui, crc = restore file in
+  check_unit_crc ui.unit_name crc file;
+  ui.items <-
+    List.map ui.items ~f:(function
+      | Func f -> Func (transform f)
+      | Data dl -> Data dl);
+  if extra_debug then
+    ui.items <- ui.items @ [ Data (emit_crc_symbols crcs) ];
+  save out_filename ui
 
-let optimize files ~fdo_profile ~reorder_blocks ~extra_debug =
-  let algo =
-    match fdo_profile with
-    | None -> Reorder.Identity
-    | Some fdo_profile ->
-        let linearid_profile =
-          Aggregated_decoded_profile.read fdo_profile
-        in
-        let config =
-          {
-            (Config_reorder.default (fdo_profile ^ ".new")) with
-            reorder_blocks;
-          }
-        in
-        Reorder.Profile (linearid_profile, config)
-  in
-  let transform f =
-    print_linear "Before" f;
-    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
-    (* eliminate fallthrough implies dead block elimination *)
-    Cfg_builder.eliminate_fallthrough_blocks cfg;
-    let new_cfg = Reorder.reorder ~algo cfg in
-    let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
-    let fnew = { f with fun_body = new_body } in
-    print_linear "After" fnew;
-    fnew
-  in
-  List.iter files ~f:(process ~f:transform)
+let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+    ~func_crc =
+  match fdo_profile with
+  | None ->
+      let algo = Reorder.Identity in
+      let crcs = Hashtbl.create (module String) in
+      let check_unit_crc = unit_crc_find_or_add crcs in
+      let check_fun_crc = unit_crc_find_or_add crcs in
+      (algo, check_unit_crc, check_fun_crc)
+  | Some fdo_profile ->
+      let linearid_profile = Aggregated_decoded_profile.read fdo_profile in
+      let config =
+        {
+          (Config_reorder.default (fdo_profile ^ ".new")) with
+          reorder_blocks;
+        }
+      in
+      let algo = Reorder.Profile (linearid_profile, config) in
+      let check_unit_crc = unit_crc_find_or_fail linearid_profile.crcs in
+      let check_fun_crc = unit_crc_find_or_fail linearid_profile.crcs in
+      let algo, crcs =
+        match fdo_profile with
+        | None -> (Reorder.Identity, Hashtbl.create)
+        | Some fdo_profile ->
+            let linearid_profile =
+              Aggregated_decoded_profile.read fdo_profile
+            in
+            let config =
+              {
+                (Config_reorder.default (fdo_profile ^ ".new")) with
+                reorder_blocks;
+              }
+            in
+            Reorder.Profile (linearid_profile, config)
+      in
+      let check_unit_crc = if unit_crc then check_unit_crc else Fun.id in
+      let check_fun_crc f =
+        if func_crc then check_consistency_fun else ()
+      in
+      let transform f ~algo =
+        print_linear "Before" f;
+        let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
+        (* eliminate fallthrough implies dead block elimination *)
+        Cfg_builder.eliminate_fallthrough_blocks cfg;
+        let new_cfg = Reorder.reorder ~algo cfg in
+        let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
+        let fnew = { f with fun_body = new_body } in
+        print_linear "After" fnew;
+        fnew
+      in
+      let transform = transform ~algo in
+      List.iter files ~f:(process ~transform ~check_unit_crc ~extra_debug)
 
 (* (* Compute the list of input linear ir files from [files] and [args] *)
  * let open Ocaml_locations in
@@ -419,8 +484,7 @@ let main ~binary_filename ~perf_profile_filename ~raw_layout_filename
   in
   (* This is broken currently, we need to call split compilation here or
      something to check *)
-  if not (List.is_empty files) then
-    List.iter files ~f:(process ~f:transform)
+  if not (List.is_empty files) then List.iter files ~f:(process ~transform)
   else (
     (* install a callback from the compiler *)
     Reoptimize.setup ~f:transform;
@@ -530,6 +594,16 @@ let flag_extra_debug =
   Command.Param.(
     flag "-extra-debug" no_arg
       ~doc:" add extra debug info for profile decoding")
+
+let flag_unit_crc =
+  Command.Param.(
+    flag "-md5-unit" no_arg
+      ~doc:" use md5 per compilation unit to detect source changes")
+
+let flag_func_crc =
+  Command.Param.(
+    flag "-md5-fun" no_arg
+      ~doc:" use md5 per function to detect source changes")
 
 let anon_files =
   Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
@@ -737,11 +811,15 @@ let opt_command =
       and extra_debug = flag_extra_debug
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
+      and unit_crc = flag_unit_crc
+      and func_crc = flag_func_crc
       and files = anon_files in
       verbose := v;
       if q then verbose := false;
       if !verbose && List.is_empty files then printf "No input files\n";
-      fun () -> optimize files ~fdo_profile ~reorder_blocks ~extra_debug)
+      fun () ->
+        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+          ~func_crc)
 
 let split_command =
   (* old_command *)
