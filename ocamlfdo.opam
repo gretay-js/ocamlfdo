@@ -1,0 +1,22 @@
+opam-version: "2.0"
+name: "ocamlfdo"
+maintainer: "Greta Yorsh <gyorsh@janestreet.com>"
+authors: "Greta Yorsh <gyorsh@janestreet.com>"
+homepage: "https://github.com/gretay-js/ocamlfdo"
+bug-reports: "https://github.com/gretay-js/ocamlfdo/issues"
+license: "GNU Lesser General Public License version 2.1"
+dev-repo: "git+https://gretay-js/ocamlfdo.git"
+build: [
+  ["dune" "subst"] {pinned}
+  ["dune" "build" "-p" name "-j" jobs]
+]
+depends: [
+  "ocaml" {>= "4.07"}
+  "dune" {build & >= "1.8"}
+]
+synopsis: "Feedback-directed optimizer for OCaml"
+description: "OCamlFDO is a tool for Feedback-Directed Optimization (FDO)
+of OCaml programs.
+It takes as input execution profiles of Ocaml native code collected with Linux Perf.
+The profiles are used at compile time to guide optimization decisions.
+The current version supports only code layout optimizations. "
