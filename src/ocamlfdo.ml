@@ -27,6 +27,13 @@ let time f x =
   printf "Execution time: %s\n" (Span.to_string (abs_diff stop start));
   fx
 
+let print_linear msg f =
+  if !verbose then (
+    printf "%s processing %s\n" f.Linear.fun_name msg;
+    Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
+
+let make_fdo_filename file = file ^ "-fdo"
+
 let load_locations binary_filename =
   let elf_locations =
     Elf_locations.create ~elf_executable:binary_filename
@@ -34,83 +41,17 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-(* Symbols in the binary with a special naming sceme to communite crc of the
-   linear IR it was compiled from. This is used to ensure that the profile
-   is only applied to IR that it was obtained from.
-
-   format: <crc_symbol_prefix><unit_name><crc_symbol_sep><crc_hex> example:
-   caml_-_cRc_-_Ocamlfdo-123415810438DFE5 *)
-let crc_symbol_prefix = "caml___cRc___"
-
-let crc_symbol_sep = '_'
-
-let crc_symbol_mk name crc =
-  sprintf "%s%s%c%s" crc_symbol_prefix name crc_symbol_sep (Md5.to_hex crc)
-
-let emit_crc_symbols crcs =
-  let open Cmm in
-  Hashtbl.fold crcs ~init:[] ~f:(fun ~key:name ~data:crc items ->
-      let symbol = crc_symbol_mk name crc in
-      Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
-
-let load_crcs locations (linearid_profile : Aggregated_decoded_profile.t) =
-  Elf_locations.iter_symbols locations ~prefix:crc_symbol_prefix
-    ~f:(fun s ->
-      let suffix = String.chop_prefix_exn s ~prefix:crc_symbol_prefix in
-      let name, hex = String.rsplit2_exn s ~on:crc_symbol_sep in
-      let crc = Md5.of_hex_exn hex in
-      Hashtbl.add_exn linearid_profile.crcs ~key:name ~data:crc)
-
-let setup_profile locations config ~perf_profile_filename
-    ~bolt_profile_filename =
-  (* CR gyorsh: decoding raw perf data should be separate from reordering
-     algorithm setup. *)
-  (* CR gyorsh: check buildid of the samples. Use owee? *)
-  (* CR gyorsh: Check pid of the samples. *)
-
-  (* First aggregate raw profile and then decode it. *)
-  let aggr_perf_profile =
-    Perf_profile.read_and_aggregate perf_profile_filename
-  in
-  let linearid_profile =
-    Aggregated_decoded_profile.create locations aggr_perf_profile
-  in
-  if !verbose then (
-    (* Save some info to files for testing *)
-    (* CR gyorsh: write_top is here just for testing! *)
-    (* in the case we want to use cfg info for function reordering. *)
-    Aggregated_decoded_profile.write_top_functions linearid_profile
-      (Config_reorder.get_linker_script_filename config "prelim");
-
-    (* For testing, output the computed profile in bolt format *)
-    let gen_bolt_fdata =
-      Config_reorder.get_bolt_fdata_filename config "prelim"
-    in
-    Bolt_profile.save linearid_profile aggr_perf_profile
-      ~filename:gen_bolt_fdata locations;
-
-    (* For testing, output the computed profile in "decoded bolt" format. *)
-    let gen_decoded_bolt =
-      Config_reorder.get_bolt_decoded_filename config "prelim"
-    in
-    Decoded_bolt_profile.save linearid_profile aggr_perf_profile
-      ~filename:gen_decoded_bolt;
-
-    (* For testing, read in bolt format, decode, and write to file. *)
-    match bolt_profile_filename with
-    | None -> ()
-    | Some bolt_profile_filename ->
-        let decoded_bolt_profile =
-          Decoded_bolt_profile.create ~filename:bolt_profile_filename
-            locations
-        in
-        let ref_decoded_bolt =
-          Config_reorder.get_bolt_decoded_filename config "ref"
-        in
-        Decoded_bolt_profile.write decoded_bolt_profile
-          ~filename:ref_decoded_bolt );
-
-  linearid_profile
+let load_crcs locations tbl =
+  let prefix = Crcs.symbol_prefix in
+  let prefix_len = String.length prefix in
+  let on = Crcs.symbol_sep in
+  Elf_locations.iter_symbols locations ~f:(fun s ->
+      match String.chop_prefix s ~prefix with
+      | None -> ()
+      | Some suffix ->
+          let name, hex = String.rsplit2_exn suffix ~on in
+          let crc = Md5.of_hex_exn hex in
+          Hashtbl.add_exn tbl ~key:name ~data:crc)
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_filename ~linearid_profile_filename ~write_linker_script
@@ -129,7 +70,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   let linearid_profile =
     Aggregated_decoded_profile.create locations aggr_perf_profile
   in
-  load_crcs locations linearid_profile;
+  load_crcs locations linearid_profile.crcs;
 
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs. *)
@@ -212,50 +153,28 @@ let check_equal f ~new_body =
          identity function %s.\n"
         name () )
 
-let print_linear msg f =
-  if !verbose then (
-    printf "%s processing %s\n" f.Linear.fun_name msg;
-    Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
-
-let check_consistency_unit crcs name crc file ~if_not_found =
-  Hashtbl.find_and_call crcs name
-    ~if_found:(fun old_crc ->
-      if not (Md5.equal old_crc crc) then
-        failwithf
-          "Linear IR for %s from file %s does not match the version of \
-           this IR used for creating the profile.\n\
-           old crc: %s\n\
-           new crc: %s\n"
-          name file (Md5.to_hex old_crc) (Md5.to_hex crc) ())
-    ~if_not_found
-
-let make_fdo_filename file = file ^ "-fdo"
-
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-      ~func_crc =
-  let options =
-  match fdo_profile with
-  | None ->
-      let algo = Reorder.Identity in
-      let crcs = Hashtbl.create (module String) in
-      let check_unit_crc = unit_crc_find_or_add in
-      let check_fun_crc = fun_crc_find_or_add in
-      (algo, check_unit_crc, check_fun_crc, crc)
-  | Some fdo_profile ->
-      let linearid_profile = Aggregated_decoded_profile.read fdo_profile in
-      let config =
-        {
-          (Config_reorder.default (fdo_profile ^ ".new")) with
-          reorder_blocks;
-        }
-      in
-      let algo = Reorder.Profile (linearid_profile, config) in
-      let check_unit_crc = unit_crc_find_or_fail in
-      let check_fun_crc = fun_crc_find_or_fail in
-      let crcs = linearid_profile.crcs
+    ~func_crc =
+  let algo, crcs =
+    match fdo_profile with
+    | None ->
+        let algo = Reorder.Identity in
+        let crcs = Crcs.Create in
+        (algo, crcs)
+    | Some fdo_profile ->
+        let linearid_profile =
+          Aggregated_decoded_profile.read fdo_profile
+        in
+        let config =
+          {
+            (Config_reorder.default (fdo_profile ^ ".new")) with
+            reorder_blocks;
+          }
+        in
+        let algo = Reorder.Profile (linearid_profile, config) in
+        let crcs = Crcs.Compare linearid_profile.crcs in
+        (algo, crcs)
   in
-  let check_unit_crc = if unit_crc then check_unit_crc else Fun.id in
-  let check_fun_crc = if func_crc then check_fun_crc else Fun.id in
   let transform f =
     print_linear "Before" f;
     let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
@@ -273,14 +192,16 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     let out_filename = make_fdo_filename file in
     let open Linear_format in
     let ui, crc = restore file in
-    check_unit_crc ui.unit_name crc file;
+    if unit_crc then Crcs.check_unit crcs ~name:ui.unit_name crc ~file;
     ui.items <-
       List.map ui.items ~f:(function
-        | Func f -> Func (transform f)
+        | Func f ->
+            if func_crc then Crcs.check_fun crcs f ~file;
+            Func (transform f)
         | Data dl -> Data dl);
-    if extra_debug then
-      ui.items <- ui.items @ [ Data (emit_crc_symbols crcs) ];
-    save out_filename ui
+    if extra_debug && (unit_crc || func_crc) then
+      (ui.items <- ui.items @ [ Data (Crcs.emit_symbols crcs) ])
+        save out_filename ui
   in
   List.iter files ~f:process
 

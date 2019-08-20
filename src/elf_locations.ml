@@ -621,15 +621,9 @@ let find_functions t functions =
               | false -> () ) )
       | _ -> ())
 
-let iter_symbols t ~prefix ~f =
-  let prefix_len = String.length prefix in
-  let check_symbol s =
-    let open Owee_elf.Symbol_table.Symbol in
-    match name s t.strtab with
-    | None -> ()
-    | Some sn ->
-        let sn_len = String.length sn in
-        if prefix_len <= sn_len && String.sub sn 0 prefix_len = prefix then
-          f sn
-  in
-  Owee_elf.Symbol_table.iter t.symtab ~f:check_symbol
+let iter_symbols t ~f =
+  Owee_elf.Symbol_table.iter t.symtab ~f:(fun s ->
+      let open Owee_elf.Symbol_table.Symbol in
+      match name s t.strtab with
+      | None -> ()
+      | Some sn -> f sn)
