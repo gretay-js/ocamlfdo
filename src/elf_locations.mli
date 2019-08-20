@@ -50,4 +50,4 @@ val reset_cache : t -> unit
 (* Iterate over the symbols whose names match the [prefix] and apply the
    function [f] to the suffix of each name. It hides the details of symbol
    representation in the underlying elf library. *)
-val iter_symbols : t -> prefix:string -> f:(suffix:string -> unit) -> unit
+val iter_symbols : t -> prefix:string -> f:(string -> unit) -> unit

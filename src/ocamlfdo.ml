@@ -55,9 +55,10 @@ let emit_crc_symbols crcs =
 
 let load_crcs locations (linearid_profile : Aggregated_decoded_profile.t) =
   Elf_locations.iter_symbols locations ~prefix:crc_symbol_prefix
-    ~f:(fun ~suffix:s ->
+    ~f:(fun s ->
+      let suffix = String.chop_prefix_exn s ~prefix:crc_symbol_prefix in
       let name, hex = String.rsplit2_exn s ~on:crc_symbol_sep in
-      let crc = Md5.from_hex hex in
+      let crc = Md5.of_hex_exn hex in
       Hashtbl.add_exn linearid_profile.crcs ~key:name ~data:crc)
 
 let setup_profile locations config ~perf_profile_filename
@@ -306,7 +307,7 @@ let print_linear msg f =
 let check_consistency_unit crcs name crc file ~if_not_found =
   Hashtbl.find_and_call crcs name
     ~if_found:(fun old_crc ->
-      if not (Digest.equal old_crc crc) then
+      if not (Md5.equal old_crc crc) then
         failwithf
           "Linear IR for %s from file %s does not match the version of \
            this IR used for creating the profile.\n\
@@ -315,7 +316,7 @@ let check_consistency_unit crcs name crc file ~if_not_found =
           name file (Md5.to_hex old_crc) (Md5.to_hex crc) ())
     ~if_not_found
 
-let process file ~transform ~check_unit_crc ~extra_debug =
+let process file crcs ~transform ~check_unit_crc ~extra_debug =
   (* CR gyorsh: identify format based on the file extension and magic
      number. *)
   let out_filename = file ^ "-fdo" in
@@ -336,9 +337,9 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   | None ->
       let algo = Reorder.Identity in
       let crcs = Hashtbl.create (module String) in
-      let check_unit_crc = unit_crc_find_or_add crcs in
-      let check_fun_crc = unit_crc_find_or_add crcs in
-      (algo, check_unit_crc, check_fun_crc)
+      let check_unit_crc = unit_crc_find_or_add in
+      let check_fun_crc = fun_crc_find_or_add in
+      (algo, check_unit_crc, check_fun_crc, crc)
   | Some fdo_profile ->
       let linearid_profile = Aggregated_decoded_profile.read fdo_profile in
       let config =
@@ -348,23 +349,9 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         }
       in
       let algo = Reorder.Profile (linearid_profile, config) in
-      let check_unit_crc = unit_crc_find_or_fail linearid_profile.crcs in
-      let check_fun_crc = unit_crc_find_or_fail linearid_profile.crcs in
-      let algo, crcs =
-        match fdo_profile with
-        | None -> (Reorder.Identity, Hashtbl.create)
-        | Some fdo_profile ->
-            let linearid_profile =
-              Aggregated_decoded_profile.read fdo_profile
-            in
-            let config =
-              {
-                (Config_reorder.default (fdo_profile ^ ".new")) with
-                reorder_blocks;
-              }
-            in
-            Reorder.Profile (linearid_profile, config)
-      in
+      let check_unit_crc = unit_crc_find_or_fail in
+      let check_fun_crc = fun_crc_find_or_fail in
+      let crcs = linearid_profile.crcs in
       let check_unit_crc = if unit_crc then check_unit_crc else Fun.id in
       let check_fun_crc f =
         if func_crc then check_consistency_fun else ()
