@@ -54,7 +54,8 @@ let summary_oc = Out_channel.create filename
 let log msg =
   if !verbose then printf "%s" msg;
   Printf.fprintf summary_oc "%s%s" msg
-    (if String.is_suffix msg ~suffix:"\n" then "" else "\n")
+    (if String.is_suffix msg ~suffix:"\n" then "" else "\n");
+  Out_channel.flush summary_oc
 
 let finish () =
   if !verbose then printf "Written summary to %s\n" filename;

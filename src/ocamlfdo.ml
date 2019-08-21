@@ -27,9 +27,10 @@ let time f x =
   fx
 
 let print_linear msg f =
-  if !verbose then (
-    printf "%s processing %s\n" f.Linear.fun_name msg;
-    Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
+  if false then
+    if !verbose then (
+      printf "%s processing %s\n" f.Linear.fun_name msg;
+      Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
 
 let make_fdo_filename file = file ^ "-fdo"
 
@@ -112,7 +113,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
 
 let override_sys_argv args =
   let len = Array.length args in
-  assert (Array.length Sys.argv < len);
+  assert (not (Array.length Sys.argv < len));
   Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:0 ~len;
   Obj.truncate (Obj.repr Sys.argv) len
 
@@ -121,17 +122,35 @@ type phase =
   | Emit
 
 let call_ocamlopt args phase =
+  printf "call ocamlopt with %d args\n" (List.length args);
+
   (* Set debug "-g" to emit dwarf locations. *)
-  let phase_flags =
-    match phase with
-    | None -> []
-    | Some Compile ->
-        [ "-stop-after"; "linearize"; "-save-ir-after"; "linearize" ]
-    | Some Emit -> [ "-start-from"; "emit" ]
-  in
-  let argv = List.concat [ [ "-g" ]; args; phase_flags ] |> List.to_array in
+  ( match phase with
+  | None -> ()
+  | Some Compile ->
+      if !verbose then printf "stage COMPILE\n";
+      let open Clflags in
+      stop_after := Some Compiler_pass.Linearize;
+      set_save_ir_after Compiler_pass.Linearize true;
+      debug := true;
+      compile_only := true
+  | Some Emit ->
+      if !verbose then printf "stage EMIT\n";
+      let open Clflags in
+      stop_after := None;
+      start_from := Some Compiler_pass.Emit;
+      set_save_ir_after Compiler_pass.Linearize false;
+      compile_only := false;
+      debug := true );
+  let argv = List.to_array (Sys.argv.(0) :: args) in
+  if !verbose then (
+    printf "calling ";
+    Array.iter argv ~f:(fun s -> printf " %s" s);
+    printf "\n" );
+
   override_sys_argv argv;
-  Optmain.main ()
+  Optmain.main ();
+  printf "finished!\n"
 
 let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
@@ -173,7 +192,15 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   let algo, crcs =
     match fdo_profile with
     | None ->
-        let algo = Reorder.Identity in
+        let algo =
+          let open Config_reorder.Reorder_blocks in
+          match reorder_blocks with
+          | Random -> Reorder.Random (Random.State.make_self_init ())
+          | No -> Reorder.Identity
+          | Opt ->
+              failwith
+                "-reorder-blocks opt is not allowed without -fdo-profile"
+        in
         let crcs = Crcs.(mk Create) in
         (algo, crcs)
     | Some fdo_profile ->
@@ -206,8 +233,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
        number. *)
     let out_filename = make_fdo_filename file in
     let open Linear_format in
-    let ui, hex = restore file in
-    let crc = Md5.of_hex_exn hex in
+    let ui, crc = restore file in
+    let crc = Md5.of_hex_exn (Caml.Digest.to_hex crc) in
     if unit_crc then Crcs.add_unit crcs ~name:ui.unit_name crc ~file;
     ui.items <-
       List.map ui.items ~f:(function
@@ -263,7 +290,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         []
     | Some args ->
         if !verbose then (
-          printf "ocamlopt ";
+          printf "ocamlopt";
           List.iter ~f:(fun s -> printf " %s" s) args;
           printf "\n" );
 
@@ -273,19 +300,22 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
             else None)
   in
   let args = Option.value args ~default:[] in
-  match files with
+  let finish () = Report.finish () in
+  at_exit finish;
+  ( match files with
   | [] -> call_ocamlopt args None
   | _ ->
       call_ocamlopt args (Some Compile);
-      optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-        ~func_crc ~report;
+      optimize [] (* files *) ~fdo_profile ~reorder_blocks ~extra_debug
+        ~unit_crc ~func_crc ~report;
       let args =
-        List.filter_map args ~f:(fun s ->
+        List.map args ~f:(fun s ->
             if is_filename Source s then
-              Some (make_filename Linear s |> make_fdo_filename)
-            else Some s)
+              make_filename Linear s |> make_fdo_filename
+            else s)
       in
-      call_ocamlopt args (Some Emit)
+      call_ocamlopt args (Some Emit) );
+  finish ()
 
 (* Command line options based on a variant type *)
 (* print all variants in option's help string *)
@@ -448,15 +478,15 @@ let opt_command =
     ~readme:(fun () ->
       "\n\
        For example:\n\
-      \       $ ocamlfdo opt -fdo-profile myexe.fdo-profile \
-       foo.cmir-linear bar.cmir-linear\n\
+       $ ocamlfdo opt -fdo-profile myexe.fdo-profile foo.cmir-linear \
+       bar.cmir-linear\n\
        reads a profile from myexe.fdo-profile file, uses it\n\
        to optimize foo.cmir-linear and bar.cmir-linear and save the result \
        to\n\
        foo.cmir-linear-fdo and bar.cmir-linear-fdo.\n\
        The intermediate representation .cmir-linear files can be obtained by\n\
        $ ocamlopt -save-ir-after linearize foo.ml bar.ml <other options>\n\
-       The decoded profile can be obtained by running \"ocamlfdo decode\"")
+       The decoded profile can be obtained by running \"ocamlfdo decode\".")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -480,28 +510,28 @@ let compile_command =
       "\n\
        For example:\n\
        $ ocamlfdo compile -fdo-profile myexe.fdo-profile -- <standard \
-       ocamlopt options including -o myexe>is the same as the following 3 \
-       steps:\n\n\
-      \        (1) invoke ocamlopt with \"-save-ir-after linearize \
-       -stop-after linearize\" in addition to the options specified after \
-       '--'.\n\
-       (2) invoke 'ocamlfdo opt -fdo-profile myexe.fdo-profile' with the \
-       list ofintermediate representation files .cmir-linear produced in \
-       step (1).(3) invoke 'ocamlopt -start-from emit' with updated \
-       .cmir-linear files produced\n\
-      \            in step (2) and the rest of the options specified after \
-       '--'.\n\
+       ocamlopt options including -o myexe>\n\
+       is the same as the following 3 steps:\n\n\
+       (1) invoke ocamlopt with \"-save-ir-after linearize -stop-after \
+       linearize\" \n\
+      \    in addition to the options specified after '--'.\n\
+       (2) invoke 'ocamlfdo opt -fdo-profile myexe.fdo-profile' \n\
+      \    with the list ofintermediate representation files .cmir-linear \
+       produced in step (1).\n\
+       (3) invoke 'ocamlopt -start-from emit'\n\
+      \    with updated .cmir-linear files produced in step (2) \n\
+      \    and the rest of the options specified after  '--'.\n\n\
        All the options provided to 'ocamlfdo compile' before and after \
        '--' are passed to 'ocamlfdo opt' and 'ocamlopt' respectively, \
        except file names which are adjusted according to the step.\n\n\
-      \        This command turns ocamlfdo into a wrapper of ocamlopt that \
-       can be used\n\
+       This command turns ocamlfdo into a wrapper of ocamlopt that can be \
+       used\n\
       \   as a drop-in replacement. It allows users to run ocamlfdo \
        directly,\n\
       \   without the need to modify their build process. The downside is \
        that\n\
       \   optimizing builds repeat a lot of redundant work.\n\n\
-      \   Limitations: For linking, it assumes that the user of invokes \
+       Limitations: For linking, it assumes that the user of invokes \
        ocamlopt\n\
       \   with '-ccopt \"-Xlinker --script=linker-script\"' and that \
        linker-script\n\
@@ -532,6 +562,7 @@ let compile_command =
       in
       verbose := v;
       if q then verbose := false;
+      Reorder.verbose := !verbose;
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
           ~func_crc ~report)

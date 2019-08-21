@@ -30,6 +30,10 @@ type reorder_algo =
   | Cfg of layout
   | Profile of Aggregated_decoded_profile.t * Config_reorder.t
 
+let print_layout layout =
+  List.iter layout ~f:(fun lbl -> printf " %d" lbl);
+  printf "\n"
+
 let validate cfg new_cfg_layout =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
   (* Make sure the new layout is just a permutation. CR gyorsh: do we need
@@ -46,7 +50,12 @@ let validate cfg new_cfg_layout =
     else (
       assert (List.length new_cfg_layout <= orig_len);
       assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) );
-    Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg)) )
+    Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
+    if !verbose then (
+      printf "orig: ";
+      print_layout orig_cfg_layout;
+      printf "new:  ";
+      print_layout new_cfg_layout ) )
 
 let reorder_random cfg ~random_state =
   (* Ensure entry exit invariants *)
@@ -158,6 +167,11 @@ let reorder_profile cfg linearid_profile config =
   let name = Cfg_builder.get_name cfg in
   (* Compute cfg execounts even if reordering is not enabled. They can be
      saved to a file for later use. *)
+  (* Check if function-specific profile has already been computed. it
+     doesn't make sense in the current setup, because all parallel jenga
+     processes will be accessing the same file for write, but it sould work
+     when we change the way profiles are stored to allow faster parallel
+     access. *)
   let cfg_info = Aggregated_decoded_profile.add linearid_profile name cfg in
   (* could write to file intermediate per-function profiles. It would save
      recomping the counters but that's not long and there would be many
@@ -177,9 +191,7 @@ let reorder ~algo cfg =
   | Identity ->
       if !verbose then (
         printf "Don't reorder. Current layout=";
-        List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl ->
-            printf " %d" lbl);
-        printf "\n" );
+        print_layout (Cfg_builder.get_layout cfg) );
       cfg
   | Random random_state -> reorder_random cfg ~random_state
   | Cfg layout -> reorder_rel_layout cfg ~layout

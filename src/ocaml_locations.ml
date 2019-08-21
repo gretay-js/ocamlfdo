@@ -24,16 +24,16 @@ type t =
 
 (* CR gyorsh: what are all the source file extensions we should support? *)
 let extension = function
-  | Linear -> ".linear"
+  | Linear -> ".cmir-linear"
   | Source -> ".ml"
 
 let suffix = function
-  | Linear -> [ ".linear" ]
+  | Linear -> [ ".cmir-linear" ]
   | Source -> [ ".ml"; ".mli"; ".c"; ".h" ]
 
 let is_filename t s = String.is_suffix s ~suffix:(extension t)
 
-let make_filename t s = s ^ extension t
+let make_filename t s = Filename.chop_extension s ^ extension t
 
 let decode_line locations ~program_counter func t =
   match Elf_locations.resolve_from_cache ~program_counter locations with
@@ -43,6 +43,7 @@ let decode_line locations ~program_counter func t =
       None
   | Some (file, line) -> (
       if !verbose then Printf.printf "%s:%d\n" file line;
+
       (* Check that the filename has support suffix and return it. *)
       match
         List.find (suffix t) ~f:(fun s -> String.is_suffix file ~suffix:s)
@@ -51,22 +52,23 @@ let decode_line locations ~program_counter func t =
           Report.log (sprintf "Ignoring %s in %s\n" func file);
           None
       | Some suffix -> (
-        match t with
-        | Source -> Some (file, line)
-        | Linear -> (
-          (* Checks that debug info is relative to the input function, i.e.,
-             the name of the "file" matches the name of the function. We
-             check that the function symbol name from the binary matches the
-             function name encoded as filename into our special dwarf info. *)
-          match String.chop_suffix file ~suffix with
-          | None ->
-              Report.log (sprintf "Ignoring %s in %s\n" func file);
-              None
-          | Some func_name_dwarf ->
-              if func_name_dwarf = func then Some (file, line)
-              else
-                failwithf "func_name_dwarf = %s func = %s\n" func_name_dwarf
-                  func () ) ) )
+          match t with
+          | Source -> Some (file, line)
+          | Linear -> (
+              (* Checks that debug info is relative to the input function,
+                 i.e., the name of the "file" matches the name of the
+                 function. We check that the function symbol name from the
+                 binary matches the function name encoded as filename into
+                 our special dwarf info. *)
+              match String.chop_suffix file ~suffix with
+              | None ->
+                  Report.log (sprintf "Ignoring %s in %s\n" func file);
+                  None
+              | Some func_name_dwarf ->
+                  if func_name_dwarf = func then Some (file, line)
+                  else
+                    failwithf "func_name_dwarf = %s func = %s\n"
+                      func_name_dwarf func () ) ) )
 
 let to_address locations name line t =
   let file =
