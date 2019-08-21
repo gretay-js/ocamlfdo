@@ -15,7 +15,7 @@
 
 open Core
 
-let verbose = ref true
+let verbose = ref false
 
 type mispredict_flag =
   | M
@@ -31,7 +31,7 @@ type br = {
   from_addr : Addr.t;
   to_addr : Addr.t;
   mispredict : mispredict_flag;
-  index : int
+  index : int;
       (* Position on the stack, with 0 being the most recent branch. This
          field is only used for only for validation. *)
       (* cycles : int; *)
@@ -41,7 +41,7 @@ type br = {
 type sample = {
   ip : Addr.t;
   (* instruction pointer where the sample was taken *)
-  brstack : br list (* branch stack is the last branch record (LBR) *)
+  brstack : br list; (* branch stack is the last branch record (LBR) *)
 }
 [@@deriving compare, sexp]
 
@@ -64,12 +64,14 @@ let parse_br index s =
       ( match a with
       | "A" | "-" -> ()
       | _ -> failwithf "Cannot parse mispredict flag %s in %s" a s () );
+
       (* Parse and ignore cycles. CR gyorsh: use for optimizations. *)
       let _cycles = Int.of_string c in
-      { from_addr = Int64.of_string from_addr;
+      {
+        from_addr = Int64.of_string from_addr;
         to_addr = Int64.of_string to_addr;
         index;
-        mispredict
+        mispredict;
       }
   | _ -> failwithf "Cannot parse %s\n" s ()
 
@@ -98,15 +100,16 @@ let row_to_sample ~keep_pid row =
       if keep_pid pid then (
         if !verbose then printf "parsing ip %s\n" ip;
         let sample =
-          { ip = Int64.of_string (hex ip);
-            brstack = snd (parse_brstack (0, []) rest)
+          {
+            ip = Int64.of_string (hex ip);
+            brstack = snd (parse_brstack (0, []) rest);
           }
         in
         if !verbose then (
           printf "raw brstack=%s\n" row;
           printf "parsed brstack=";
           List.iter sample.brstack ~f:(fun br ->
-              printf "0x%Lx/0x%Lx " br.from_addr br.to_addr );
+              printf "0x%Lx/0x%Lx " br.from_addr br.to_addr);
           printf "\n" );
         Some sample )
       else None
@@ -140,7 +143,7 @@ let read ?(expected_pid = None) filename =
     In_channel.fold_lines chan ~init:[] ~f:(fun acc row ->
         match row_to_sample ~keep_pid row with
         | None -> acc
-        | Some sample -> sample :: acc )
+        | Some sample -> sample :: acc)
   in
   In_channel.close chan;
   if !verbose then (
@@ -152,14 +155,14 @@ let read ?(expected_pid = None) filename =
 type stats = {
   ignored : int;
   total : int;
-  lbr : int
+  lbr : int;
 }
 
 let read_and_aggregate ?(expected_pid = None) filename =
   if !verbose then printf "Aggregate perf profile from %s.\n" filename;
   let inc table key =
     Hashtbl.update table key ~f:(fun v ->
-        Int64.(1L + Option.value ~default:0L v) )
+        Int64.(1L + Option.value ~default:0L v))
   in
   let aggregated = Aggregated_perf_profile.empty () in
   (* CR gyorsh: aggregate during parsing of perf profile *)
@@ -168,7 +171,8 @@ let read_and_aggregate ?(expected_pid = None) filename =
     List.iter sample.brstack ~f:(fun br ->
         let key = (br.from_addr, br.to_addr) in
         inc aggregated.branches key;
-        if mispredicted br.mispredict then inc aggregated.mispredicts key );
+        if mispredicted br.mispredict then inc aggregated.mispredicts key);
+
     (* Instructions executed between branches can be inferred from brstack *)
     ignore
       ( List.fold sample.brstack ~init:None ~f:(fun prev cur ->
@@ -187,6 +191,7 @@ let read_and_aggregate ?(expected_pid = None) filename =
                       "Malformed trace ignored 0x%Lx->0x%Lx (from_addr >= \
                        to_addr)\n"
                       from_addr to_addr;
+
                 (* There appear to be a problem with perf output: last LBR
                    entry is repeated twice sometimes. It may be related to
                    the recent problem mentioned in a patch for perf script:
@@ -194,9 +199,14 @@ let read_and_aggregate ?(expected_pid = None) filename =
                    https://github.com/torvalds/linux/commit
                    /61f611593f2c90547cb09c0bf6977414454a27e6 *)
                 inc aggregated.traces key;
-                Some cur )
+                Some cur)
         : br option )
   in
+  (* let cmd =
+   *   [ "perf"; "script"; "-F"; "pid,ip,brstack"; "-i"; filename ]
+   *   |> String.concat ~sep:" "
+   * in
+   * Sys.command_exn cmd *)
   let chan = In_channel.create filename in
   let keep_pid = check_keep_pid ?expected_pid in
   let empty_stats = { ignored = 0; total = 0; lbr = 0 } in
@@ -204,16 +214,18 @@ let read_and_aggregate ?(expected_pid = None) filename =
     In_channel.fold_lines chan ~init:empty_stats ~f:(fun stats row ->
         match row_to_sample ~keep_pid row with
         | None ->
-            { stats with
+            {
+              stats with
               ignored = stats.ignored + 1;
-              total = stats.total + 1
+              total = stats.total + 1;
             }
         | Some sample ->
             aggregate sample;
-            { stats with
+            {
+              stats with
               total = stats.total + 1;
-              lbr = stats.lbr + List.length sample.brstack
-            } )
+              lbr = stats.lbr + List.length sample.brstack;
+            })
   in
   In_channel.close chan;
   if !verbose then (
