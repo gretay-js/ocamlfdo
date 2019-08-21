@@ -11,6 +11,8 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
+open Core
+
 (* map name to the corresponding md5 *)
 type tbl = Md5.t Hashtbl.M(String).t
 
@@ -27,7 +29,7 @@ let mk kind = { kind; acc = Hashtbl.create (module String) }
 
 let check_and_add t ~name crc ~file =
   (* Check *)
-  ( match t with
+  ( match t.kind with
   | Create -> ()
   | Compare tbl ->
       Hashtbl.find_and_call tbl name
@@ -41,14 +43,14 @@ let check_and_add t ~name crc ~file =
               name file (Md5.to_hex old_crc) (Md5.to_hex crc) ())
         ~if_not_found:(fun name ->
           failwithf
-            "Linear IR for %s from file %s was not used for creatingthe \
+            "Linear IR for %s from file %s was not used for creating the \
              profile.\n\
-             old crc: %s\n\
-             new crc: %s\n") );
+             new crc: %s\n"
+            name file (Md5.to_hex crc) ()) );
 
   (* Add to accumulator *)
-  Hashtbl.update acc name ~f:(function
-    | None -> Some crc
+  Hashtbl.update t.acc name ~f:(function
+    | None -> crc
     | Some old_crc ->
         if Md5.equal old_crc crc then
           failwithf
@@ -66,9 +68,9 @@ let check_and_add t ~name crc ~file =
 let add_unit t ~name crc ~file = check_and_add t ~name crc ~file
 
 let add_fun t f ~file =
-  let name = f.fun_name in
-  let crc = Md5.digest_bytes (Marshal.to_bytes f) in
-  check_and_add t ~name crc file
+  let name = f.Linear.fun_name in
+  let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
+  check_and_add t ~name crc ~file
 
 (* Symbols in the binary with a special naming sceme to communite crc of the
    linear IR it was compiled from. This is used to ensure that the profile
@@ -81,13 +83,17 @@ let symbol_prefix = "caml___cRc___"
 let symbol_sep = '_'
 
 let mk_symbol name crc =
-  sprintf "%s%s%c%s" crc_symbol_prefix name crc_symbol_sep (Md5.to_hex crc)
+  sprintf "%s%s%c%s" symbol_prefix name symbol_sep (Md5.to_hex crc)
 
 (* Creates the symbols and clears the accumulator *)
 let emit_symbols t =
-  if not (Hashtbl.is_empty t.acc) then (
+  if Hashtbl.is_empty t.acc then []
+  else
     let open Cmm in
-    Hashtbl.fold t.acc ~init:[] ~f:(fun ~key:name ~data:crc items ->
-        let symbol = mk_symbol name crc in
-        Cglobal_symbol symbol :: Cdefine_symbol symbol :: items);
-    Hashtbl.reset t.acc )
+    let items =
+      Hashtbl.fold t.acc ~init:[] ~f:(fun ~key:name ~data:crc items ->
+          let symbol = mk_symbol name crc in
+          Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
+    in
+    Hashtbl.clear t.acc;
+    items

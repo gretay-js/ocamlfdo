@@ -12,7 +12,6 @@
 (*                                                                        *)
 (**************************************************************************)
 open Core
-open Layouts
 open Ocamlcfg
 
 let verbose = ref false
@@ -43,7 +42,6 @@ let load_locations binary_filename =
 
 let load_crcs locations tbl =
   let prefix = Crcs.symbol_prefix in
-  let prefix_len = String.length prefix in
   let on = Crcs.symbol_sep in
   Elf_locations.iter_symbols locations ~f:(fun s ->
       match String.chop_prefix s ~prefix with
@@ -102,11 +100,27 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
         failwith "Not implemented" );
   ()
 
+(* From 4.09/4.10 we should be able to use this hack instead of
+   Obj.truncate. See https://github.com/ocaml/ocaml/pull/2279 *)
+
+(* external caml_sys_modify_argv : string array -> unit =
+ *   "caml_sys_modify_argv"
+ *
+ * let override_sys_argv new_argv =
+ *   caml_sys_modify_argv new_argv;
+ *   Arg.current := 0 *)
+
+let override_sys_argv args =
+  let len = Array.length args in
+  assert (Array.length Sys.argv < len);
+  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:0 ~len;
+  Obj.truncate (Obj.repr Sys.argv) len
+
 type phase =
   | Compile
   | Emit
 
-let call_ocamlopt args ~phase =
+let call_ocamlopt args phase =
   (* Set debug "-g" to emit dwarf locations. *)
   let phase_flags =
     match phase with
@@ -116,7 +130,8 @@ let call_ocamlopt args ~phase =
     | Some Emit -> [ "-start-from"; "emit" ]
   in
   let argv = List.concat [ [ "-g" ]; args; phase_flags ] |> List.to_array in
-  Optmain.main (* argv *) ()
+  override_sys_argv argv;
+  Optmain.main ()
 
 let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
@@ -154,12 +169,12 @@ let check_equal f ~new_body =
         name () )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc =
+    ~func_crc ~report:_ =
   let algo, crcs =
     match fdo_profile with
     | None ->
         let algo = Reorder.Identity in
-        let crcs = Crcs.Create in
+        let crcs = Crcs.(mk Create) in
         (algo, crcs)
     | Some fdo_profile ->
         let linearid_profile =
@@ -172,7 +187,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
           }
         in
         let algo = Reorder.Profile (linearid_profile, config) in
-        let crcs = Crcs.Compare linearid_profile.crcs in
+        let crcs = Crcs.(mk (Compare linearid_profile.crcs)) in
         (algo, crcs)
   in
   let transform f =
@@ -191,17 +206,20 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
        number. *)
     let out_filename = make_fdo_filename file in
     let open Linear_format in
-    let ui, crc = restore file in
-    if unit_crc then Crcs.check_unit crcs ~name:ui.unit_name crc ~file;
+    let ui, hex = restore file in
+    let crc = Md5.of_hex_exn hex in
+    if unit_crc then Crcs.add_unit crcs ~name:ui.unit_name crc ~file;
     ui.items <-
       List.map ui.items ~f:(function
         | Func f ->
-            if func_crc then Crcs.check_fun crcs f ~file;
+            if func_crc then Crcs.add_fun crcs f ~file;
             Func (transform f)
         | Data dl -> Data dl);
-    if extra_debug && (unit_crc || func_crc) then
-      (ui.items <- ui.items @ [ Data (Crcs.emit_symbols crcs) ])
-        save out_filename ui
+    ( if extra_debug && (unit_crc || func_crc) then
+      match Crcs.emit_symbols crcs with
+      | [] -> ()
+      | dl -> ui.items <- ui.items @ [ Data dl ] );
+    save out_filename ui
   in
   List.iter files ~f:process
 
@@ -230,6 +248,10 @@ let write_reorder_report f c newf newc =
    but having less code to deal with when computing layout will be more
    efficient. *)
 
+(* CR gyorsh: call emit directly after optimize. the problem is restoring
+   global settings (such as clflags) that were determined from command line
+   and environment etc is currently very cumbersome and highly dependent on
+   the compiler internals. *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     ~func_crc ~report =
   let open Ocaml_locations in
@@ -250,10 +272,11 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
             if is_filename Source s then Some (make_filename Linear s)
             else None)
   in
+  let args = Option.value args ~default:[] in
   match files with
   | [] -> call_ocamlopt args None
   | _ ->
-      call_ocamlopt args (Some compile);
+      call_ocamlopt args (Some Compile);
       optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         ~func_crc ~report;
       let args =
@@ -262,7 +285,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
               Some (make_filename Linear s |> make_fdo_filename)
             else Some s)
       in
-      call_ocamlopt args (Some emit)
+      call_ocamlopt args (Some Emit)
 
 (* Command line options based on a variant type *)
 (* print all variants in option's help string *)
@@ -334,6 +357,12 @@ module Commonflag = struct
   let flag_linker_script_filename =
     { name = "-linker-script"; doc = "filename link script"; aliases = [] }
 end
+
+let flag_report =
+  Command.Param.(
+    flag "-fdo-report" no_arg
+      ~doc:
+        " emit .fdo.org files showing FDO decisions (e.g., blocks reordered)")
 
 let flag_v =
   Command.Param.(flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose")
@@ -464,7 +493,29 @@ let compile_command =
        '--'.\n\
        All the options provided to 'ocamlfdo compile' before and after \
        '--' are passed to 'ocamlfdo opt' and 'ocamlopt' respectively, \
-       except file names which are adjusted according to the step.")
+       except file names which are adjusted according to the step.\n\n\
+      \        This command turns ocamlfdo into a wrapper of ocamlopt that \
+       can be used\n\
+      \   as a drop-in replacement. It allows users to run ocamlfdo \
+       directly,\n\
+      \   without the need to modify their build process. The downside is \
+       that\n\
+      \   optimizing builds repeat a lot of redundant work.\n\n\
+      \   Limitations: For linking, it assumes that the user of invokes \
+       ocamlopt\n\
+      \   with '-ccopt \"-Xlinker --script=linker-script\"' and that \
+       linker-script\n\
+      \   includes linker-script-hot or an alternative filename as \
+       specified by\n\
+      \   -linker-script option to 'ocamlfdo decode'. Note that \
+       linker-script-hot\n\
+      \   produced by 'ocamlfdo decode' is specific to Linux/GNU. It can be\n\
+      \   manually transformed to other formats. Note also that using the \
+       script\n\
+      \   for function reordering on a different system requires ocaml \
+       support for\n\
+      \   named function sections (not available currently on macos and \
+       windows).\n\n\n")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -475,8 +526,9 @@ let compile_command =
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and args =
-        flag "--" escape
-          ~doc:"ocamlopt_args standard options passed to ocamlopt"
+        Command.Param.(
+          flag "--" escape
+            ~doc:"ocamlopt_args standard options passed to ocamlopt")
       in
       verbose := v;
       if q then verbose := false;
