@@ -47,10 +47,20 @@ let load_crcs locations tbl =
   Elf_locations.iter_symbols locations ~f:(fun s ->
       match String.chop_prefix s ~prefix with
       | None -> ()
-      | Some suffix ->
+      | Some suffix -> (
           let name, hex = String.rsplit2_exn suffix ~on in
           let crc = Md5.of_hex_exn hex in
-          Hashtbl.add_exn tbl ~key:name ~data:crc)
+          if !verbose then (
+            printf "crc_symbol=%s\n" s;
+            printf "name=%s hex=%s\n" name hex );
+          match Hashtbl.find tbl name with
+          | None -> Hashtbl.set tbl ~key:name ~data:crc
+          | Some old_crc ->
+              (* The symbol can appear multiple times if it enters more than
+                 one symbol tables, e.g., both static and dynamic. *)
+              if not (Md5.equal old_crc crc) then
+                failwithf "Duplicate crc for %s\nold:%s\nnew:%s\n" name
+                  (Md5.to_hex old_crc) (Md5.to_hex crc) () ))
 
 let save_linker_script filename functions =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
