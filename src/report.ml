@@ -1,6 +1,6 @@
 open Core
 
-let verbose = ref false
+let verbose = ref true
 
 let extension = "fdo.org"
 
@@ -49,14 +49,23 @@ let with_ppf ~name ~title ~sub formatter x =
 
 let filename = sprintf "summary.%s" extension
 
-let summary_oc = Out_channel.create filename
+let summary_oc = ref None
 
 let log msg =
   if !verbose then printf "%s" msg;
-  Printf.fprintf summary_oc "%s%s" msg
-    (if String.is_suffix msg ~suffix:"\n" then "" else "\n");
-  Out_channel.flush summary_oc
+  match !summary_oc with
+  | None -> ()
+  | Some oc ->
+      Printf.fprintf oc "%s%s" msg
+        (if String.is_suffix msg ~suffix:"\n" then "" else "\n");
+      Out_channel.flush oc
+
+let start () =
+  if !verbose then printf "Creating summary file %s\n" filename;
+  summary_oc := Some (Out_channel.create filename)
 
 let finish () =
   if !verbose then printf "Written summary to %s\n" filename;
-  Out_channel.close summary_oc
+  match !summary_oc with
+  | None -> ()
+  | Some oc -> Out_channel.close oc

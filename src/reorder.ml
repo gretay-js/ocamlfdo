@@ -23,8 +23,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Profile of Aggregated_decoded_profile.t
 
-let print_list msg l =
-  if !verbose then printf !"%s: %{sexp:int list}\n" msg l
+let print_list msg l = Report.log (sprintf !"%s: %{sexp:int list}\n" msg l)
 
 (* All dead blocks should have been eliminated by earlier compiler stages,
    but the functionality for doing it is not fully-implemented yet, and some
@@ -32,11 +31,14 @@ let print_list msg l =
    representation. However, it makes otherwise identical linear IRs to fail
    comparisons when we use the algorithm. *)
 let check cfg new_cfg_layout =
-  if !validate then
-    let orig_cfg_layout = Cfg_builder.get_layout cfg in
-    (* Make sure the new layout is just a permutation. CR gyorsh: do we need
-       to handle block duplication here? *)
-    if not (new_cfg_layout = orig_cfg_layout) then (
+  let orig_cfg_layout = Cfg_builder.get_layout cfg in
+  if not (new_cfg_layout = orig_cfg_layout) then (
+    Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
+    print_list "orig" orig_cfg_layout;
+    print_list "new " new_cfg_layout;
+    if !validate then
+      (* Make sure the new layout is just a permutation. CR gyorsh: do we
+         need to handle block duplication here? *)
       let compare = Int.compare in
       let orig_len = List.length orig_cfg_layout in
       if Cfg_builder.preserve_orig_labels cfg then (
@@ -47,10 +49,7 @@ let check cfg new_cfg_layout =
           = List.sort orig_cfg_layout ~compare ) )
       else (
         assert (List.length new_cfg_layout <= orig_len);
-        assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) );
-      Report.log (sprintf "Reordered %s\n" (Cfg_builder.get_name cfg));
-      print_list "orig" orig_cfg_layout;
-      print_list "new" new_cfg_layout )
+        assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) ) )
 
 let reorder_random cfg ~random_state =
   (* Ensure entry exit invariants *)
@@ -65,9 +64,7 @@ let reorder_random cfg ~random_state =
 (* Basic block layout using clustering algorihtm. *)
 let reorder_opt cfg_info cfg =
   let orig_cfg_layout = Cfg_builder.get_layout cfg in
-  print_list "orig" orig_cfg_layout;
   let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout cfg_info in
-  print_list "new" new_cfg_layout;
   check cfg new_cfg_layout;
   Cfg_builder.set_layout cfg new_cfg_layout
 

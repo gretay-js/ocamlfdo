@@ -216,7 +216,6 @@ let write t filename =
     printf "Writing aggregated decoded profile to %s\n" filename;
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
-
   Out_channel.close chan
 
 let top_functions t =

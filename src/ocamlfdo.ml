@@ -137,7 +137,7 @@ let check_equal f ~new_body =
         name () )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report:_ =
+    ~func_crc =
   let profile =
     match fdo_profile with
     | None -> None
@@ -316,6 +316,13 @@ let flag_extra_debug =
       ~doc:
         " add extra debug info to generated code to enable profile decoding")
 
+let flag_crc =
+  Command.Param.(
+    flag "-md5" no_arg
+      ~doc:
+        " use md5 to detect source changes at function and compilation \
+         unit level (implies both -md5-unit and -md5-fun)")
+
 let flag_unit_crc =
   Command.Param.(
     flag "-md5-unit" no_arg
@@ -402,13 +409,18 @@ let opt_command =
       and report = flag_report
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
+      and crc = flag_crc
       and files = anon_files in
       verbose := v;
       if q then verbose := false;
+      let unit_crc = unit_crc || crc in
+      let func_crc = func_crc || crc in
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
+        if report then Report.start ();
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report)
+          ~func_crc;
+        if report then Report.finish ())
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
