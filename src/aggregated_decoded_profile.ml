@@ -219,14 +219,12 @@ let write t filename =
 
   Out_channel.close chan
 
-let write_top_functions t filename =
-  if !verbose then printf "Writing top functions to %s\n" filename;
-
+let top_functions t =
   (* Sort functions using preliminary function-level execution counts in
      descending order. *)
   let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
   let fl = List.map sorted ~f:(fun func -> func.name) in
-  Layouts.Func_layout.write_linker_script fl filename
+  fl
 
 (* Translate linear ids of this function's locations to cfg labels within
    this function, find the corresponding basic blocks and update their

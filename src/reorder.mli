@@ -11,26 +11,15 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Core
 open Ocamlcfg
-
-(* Maps functions to layout of the function, which is essentially a
-   permutation of original ids. Sparse, i.e., only contains functions whose
-   layout changed. *)
-type layout = int list String.Map.t
 
 type reorder_algo =
   | Identity
-  | Random of Random.State.t
-  | Linear of layout
-  | Cfg of layout
-  | Profile of
-      (* locations is used only for testing/debugging *)
-      Aggregated_decoded_profile.t
-      * Config_reorder.t
+  | Random of Core.Random.State.t
+  | Profile of Aggregated_decoded_profile.t
 
-val reorder : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
-
-val finish : reorder_algo -> unit
+val apply : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
 
 val verbose : bool ref
+
+val validate : bool ref

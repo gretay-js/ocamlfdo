@@ -52,6 +52,12 @@ let load_crcs locations tbl =
           let crc = Md5.of_hex_exn hex in
           Hashtbl.add_exn tbl ~key:name ~data:crc)
 
+let save_linker_script filename functions =
+  if !verbose then printf "Writing linker script hot to %s\n" filename;
+  let chan = Out_channel.create filename in
+  List.iter functions ~f:(fun name -> fprintf chan "*(.text.%s)\n" name);
+  Out_channel.close chan
+
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_filename ~linearid_profile_filename ~write_linker_script
     =
@@ -86,16 +92,10 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     if !verbose then
       printf "Writing linker script hot to %s\n" linker_script_filename;
     match reorder_functions with
-    | No ->
-        if !verbose then
-          printf
-            "Warning: reorder functions is not enabled. Writing top \
-             functions anyway.\n";
-        Aggregated_decoded_profile.write_top_functions linearid_profile
-          linker_script_filename
+    | No -> ()
     | Execounts ->
-        Aggregated_decoded_profile.write_top_functions linearid_profile
-          linker_script_filename
+        Aggregated_decoded_profile.top_functions linearid_profile
+        |> save_linker_script linker_script_filename
     | Hot_clusters ->
         (* Do we ever need the cfg to decide on function order? *)
         failwith "Not implemented" );
@@ -138,40 +138,34 @@ let check_equal f ~new_body =
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     ~func_crc ~report:_ =
-  let algo, crcs =
+  let profile =
     match fdo_profile with
-    | None ->
-        let algo =
-          let open Config_reorder.Reorder_blocks in
-          match reorder_blocks with
-          | Random -> Reorder.Random (Random.State.make_self_init ())
-          | No -> Reorder.Identity
-          | Opt ->
-              failwith
-                "-reorder-blocks opt is not allowed without -fdo-profile"
-        in
-        let crcs = Crcs.(mk Create) in
-        (algo, crcs)
-    | Some fdo_profile ->
-        let linearid_profile =
-          Aggregated_decoded_profile.read fdo_profile
-        in
-        let config =
-          {
-            (Config_reorder.default (fdo_profile ^ ".new")) with
-            reorder_blocks;
-          }
-        in
-        let algo = Reorder.Profile (linearid_profile, config) in
-        let crcs = Crcs.(mk (Compare linearid_profile.crcs)) in
-        (algo, crcs)
+    | None -> None
+    | Some filename -> Some (Aggregated_decoded_profile.read filename)
+  in
+  let algo =
+    let open Config_reorder.Reorder_blocks in
+    match reorder_blocks with
+    | No -> Reorder.Identity
+    | Random -> Reorder.Random (Random.State.make_self_init ())
+    | Opt -> (
+        match profile with
+        | None ->
+            failwith
+              "-reorder-blocks opt is not allowed without -fdo-profile"
+        | Some profile -> Reorder.Profile profile )
+  in
+  let crcs =
+    match profile with
+    | None -> Crcs.(mk Create)
+    | Some profile -> Crcs.(mk (Compare profile.crcs))
   in
   let transform f =
     print_linear "Before" f;
     let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
     (* eliminate fallthrough implies dead block elimination *)
     Cfg_builder.eliminate_fallthrough_blocks cfg;
-    let new_cfg = Reorder.reorder ~algo cfg in
+    let new_cfg = Reorder.apply ~algo cfg in
     let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
     let fnew = { f with fun_body = new_body } in
     print_linear "After" fnew;
