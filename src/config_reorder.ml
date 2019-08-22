@@ -33,7 +33,7 @@ module Reorder_functions = struct
     | Hot_clusters
   [@@deriving enumerate]
 
-  let default = No
+  let default = Execounts
 
   let to_string = function
     | No -> "no"

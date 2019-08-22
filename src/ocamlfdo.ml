@@ -71,7 +71,6 @@ let save_linker_script filename functions =
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_filename ~linearid_profile_filename ~write_linker_script
     =
-  let open Config_reorder.Reorder_functions in
   let locations = load_locations binary_filename in
   let linearid_profile_filename =
     match linearid_profile_filename with
@@ -96,11 +95,16 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   if write_linker_script then (
     let linker_script_filename =
       match linker_script_filename with
-      | None -> binary_filename ^ ".linear-script-hot"
+      | None -> "linker-script-hot"
+      (* The default name does not depend on the input executable, so that
+         the default template link-script can refer to it and won't need to
+         be updated or written per executable. *)
+      (* binary_filename ^ ".linker-script-hot" *)
       | Some f -> f
     in
     if !verbose then
       printf "Writing linker script hot to %s\n" linker_script_filename;
+    let open Config_reorder.Reorder_functions in
     match reorder_functions with
     | No -> ()
     | Execounts ->
