@@ -30,8 +30,6 @@ type t = {
   (* Counters that refer to this function, uses raw addresses. *)
   (* CR: This can be dropped after cfg_count is constructed, to save memory. *)
   agg : Aggregated_perf_profile.t;
-  (* crc of the function's linear ir *)
-  linear_crc : string option;
 }
 [@@deriving sexp]
 
@@ -45,7 +43,6 @@ let mk ~id ~name ~start ~finish =
     count = 0L;
     malformed_traces = 0L;
     agg = Aggregated_perf_profile.empty ();
-    linear_crc = None;
   }
 
 (* Descending order of execution counts (reverse order of compare).Tie
