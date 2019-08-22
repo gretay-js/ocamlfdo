@@ -8,6 +8,7 @@
         compiler-libs.bytecomp
         compiler-libs.optcomp
         parsexp_io
+        shexp.process
         ocamlcfg)
  (preprocess (pps ppx_jane ppx_csv_conv ppx_variants_conv)))
 
