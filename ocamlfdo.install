@@ -1,0 +1,11 @@
+lib: [
+  "_build/install/default/lib/ocamlfdo/META"
+  "_build/install/default/lib/ocamlfdo/dune-package"
+  "_build/install/default/lib/ocamlfdo/opam"
+]
+bin: [
+  "_build/install/default/bin/ocamlfdo"
+]
+doc: [
+  "_build/install/default/doc/ocamlfdo/README.md"
+]

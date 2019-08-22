@@ -12,5 +12,8 @@
         ocamlcfg)
  (preprocess (pps ppx_jane ppx_csv_conv ppx_variants_conv)))
 
+(install
+ (section bin)
+ (files (ocamlfdo.exe as ocamlfdo)))
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))
