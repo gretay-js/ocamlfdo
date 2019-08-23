@@ -16,6 +16,7 @@ open Core
 open Loc
 open Block_info
 open Ocamlcfg
+
 let verbose = ref true
 
 (* Map basic blocks of this function to breakdown of execution counts *)
@@ -58,7 +59,7 @@ let get_block_info t (block : Cfg.block) =
           "make new block info for block.start=%d first_id=%d \
            terminator_id=%d\n"
           block.start first_id terminator_id;
-      Block_info.mk ~label:block.start ~first_id ~terminator_id )
+      Block_info.mk ~label:block.start ~first_id ~terminator_id)
 
 let record t block ~count =
   let b = get_block_info t block in
@@ -83,7 +84,7 @@ let prev_instr linearid block =
     ignore
       ( List.fold block.body ~init:None ~f:(fun prev instr ->
             if instr.id = linearid then raise (Found_prev prev)
-            else Some instr )
+            else Some instr)
         : Cfg.basic Cfg.instruction option );
     None
   with Found_prev prev -> prev
@@ -98,16 +99,17 @@ let get_block (loc : Loc.t) cfg =
           rel.id rel.offset );
       None
   | Some dbg -> (
-    match Cfg_builder.id_to_label cfg dbg.line with
-    | None ->
-        failwithf "No cfg label for linearid %d in %s" dbg.line dbg.file ()
-    | Some label -> (
-      match Cfg_builder.get_block cfg label with
-      | Some block -> Some block
+      match Cfg_builder.id_to_label cfg dbg.line with
       | None ->
-          failwithf
-            "Can't find cfg basic block labeled %d for linearid %d in %s\n"
-            label dbg.line dbg.file () ) )
+          failwithf "No cfg label for linearid %d in %s" dbg.line dbg.file
+            ()
+      | Some label -> (
+          match Cfg_builder.get_block cfg label with
+          | Some block -> Some block
+          | None ->
+              failwithf
+                "Can't find cfg basic block labeled %d for linearid %d in %s\n"
+                label dbg.line dbg.file () ) )
 
 let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
     =
@@ -143,13 +145,14 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       assert (to_block_first_id = to_linearid);
       let bi = get_block_info t from_block in
       let b =
-        { Block_info.target = Some to_loc;
+        {
+          Block_info.target = Some to_loc;
           target_label = Some to_block.start;
           target_id = Some to_block_first_id;
           intra = true;
           fallthrough = false;
           taken = count;
-          mispredicts
+          mispredicts;
         }
       in
       if from_block.terminator.id = from_linearid then (
@@ -190,6 +193,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
           count from_loc.addr
   | Some from_block -> (
       record t from_block ~count;
+
       (* Find the corresponding instruction and update its counters. The
          instruction is either a terminator or a call.*)
       let linearid = get_linearid from_loc in
@@ -203,13 +207,14 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
             assert false
         | Return | Raise _ ->
             let b =
-              { Block_info.target = Some to_loc;
+              {
+                Block_info.target = Some to_loc;
                 target_label = None;
                 target_id = None;
                 intra = false;
                 fallthrough = false;
                 taken = count;
-                mispredicts
+                mispredicts;
               }
             in
             Block_info.add_branch bi b
@@ -219,20 +224,21 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
         | None -> assert false
         (* we've checked before for presence of dbg info *)
         | Some instr -> (
-          match instr.desc with
-          | Call _ ->
-              let b =
-                { Block_info.target = Some to_loc;
-                  target_label = None;
-                  target_id = None;
-                  intra = false;
-                  fallthrough = false;
-                  taken = count;
-                  mispredicts
-                }
-              in
-              Block_info.add_call bi ~callsite:from_loc ~callee:b
-          | _ -> assert false ) )
+            match instr.desc with
+            | Call _ ->
+                let b =
+                  {
+                    Block_info.target = Some to_loc;
+                    target_label = None;
+                    target_id = None;
+                    intra = false;
+                    fallthrough = false;
+                    taken = count;
+                    mispredicts;
+                  }
+                in
+                Block_info.add_call bi ~callsite:from_loc ~callee:b
+            | _ -> assert false ) )
 
 let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
     cfg =
@@ -260,6 +266,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
             count to_loc.addr
     | Some to_block -> (
         record t to_block ~count;
+
         (* Find the corresponding instruction and update its counters.*)
         let linearid = get_linearid to_loc in
         let _bi = get_block_info t to_block in
@@ -316,7 +323,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
                          to_first_instr_linid=%d to_linearid=%d%s\n"
                         from_loc.addr to_loc.addr first_instr_linearid
                         linearid
-                        (terminator_to_string pred.terminator.desc) )
+                        (terminator_to_string pred.terminator.desc))
               to_block.predecessors
           in
           if first_instr_linearid = linearid then find_prev_block_call ()
@@ -372,8 +379,10 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
         from_lbl to_lbl;
       List.iter fallthrough ~f:(fun lbl -> printf " %d" lbl);
       printf "\nlayout=";
-      List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl -> printf " %d" lbl);
+      List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl ->
+          printf " %d" lbl);
       printf "\n" );
+
     (* Check that all terminators fall through *)
     let check_fallthrough src_lbl dst_lbl =
       let block = Option.value_exn (Cfg_builder.get_block cfg src_lbl) in
@@ -386,7 +395,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
                src_block.successor_labels:\n"
               func.name from_lbl to_lbl src_lbl dst_lbl;
             List.iter (Cfg.successor_labels block) ~f:(fun lbl ->
-                printf "%d\n" lbl ) );
+                printf "%d\n" lbl) );
           if List.mem (Cfg.successor_labels block) dst_lbl ~equal:Int.equal
           then src_lbl
           else (
@@ -410,6 +419,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
     assert (
       from_lbl
       = List.fold_right fallthrough ~init:to_lbl ~f:check_fallthrough );
+
     (* Account only for the intermediate blocks in the trace. Endpoint
        blocks of the trace are accounted for when we handled their LBR
        branches. *)
@@ -426,13 +436,14 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
       in
       let bi = get_block_info t src_block in
       let b =
-        { Block_info.target = None;
+        {
+          Block_info.target = None;
           target_label = Some dst_lbl;
           target_id = Some target_bi.first_id;
           intra = true;
           fallthrough = true;
           taken = count;
-          mispredicts = 0L
+          mispredicts = 0L;
         }
       in
       if !verbose then
@@ -464,36 +475,36 @@ let record_trace t from_loc to_loc count (func : Func.t) cfg =
   match (from_loc.rel, to_loc.rel) with
   | Some from_rel, Some to_rel
     when from_rel.id = func.id && to_rel.id = func.id -> (
-    match (get_block from_loc cfg, get_block to_loc cfg) with
-    | Some from_block, Some to_block when from_block.start = to_block.start
-      ->
-        if !verbose then
-          if from_block.start = to_block.start then
+      match (get_block from_loc cfg, get_block to_loc cfg) with
+      | Some from_block, Some to_block
+        when from_block.start = to_block.start ->
+          if !verbose then
+            if from_block.start = to_block.start then
+              printf
+                "No fallthroughs in trace with count %Ld from 0x%Lx to \
+                 0x%Lx:from_block = to_block\n"
+                count from_loc.addr to_loc.addr;
+          record t from_block ~count
+      | Some from_block, Some to_block ->
+          if !verbose then
             printf
-              "No fallthroughs in trace with count %Ld from 0x%Lx to \
-               0x%Lx:from_block = to_block\n"
+              "trace (from_addr=0x%Lx,to_addr=0x%Lx)=> \
+               (from_linid=%d,to_linid=%d)=> (from_block=%d,to_block=%d)\n"
+              from_loc.addr to_loc.addr
+              (let from_dbg = Option.value_exn from_loc.dbg in
+               from_dbg.line)
+              (let to_dbg = Option.value_exn to_loc.dbg in
+               to_dbg.line)
+              from_block.start to_block.start;
+          compute_fallthrough_execounts t from_block.start to_block.start
+            count func cfg
+      | _ ->
+          if !verbose then
+            printf
+              "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot \
+               map to_loc or from_loc to cfg blocks.\n"
               count from_loc.addr to_loc.addr;
-        record t from_block ~count
-    | Some from_block, Some to_block ->
-        if !verbose then
-          printf
-            "trace (from_addr=0x%Lx,to_addr=0x%Lx)=> \
-             (from_linid=%d,to_linid=%d)=> (from_block=%d,to_block=%d)\n"
-            from_loc.addr to_loc.addr
-            (let from_dbg = Option.value_exn from_loc.dbg in
-             from_dbg.line)
-            (let to_dbg = Option.value_exn to_loc.dbg in
-             to_dbg.line)
-            from_block.start to_block.start;
-        compute_fallthrough_execounts t from_block.start to_block.start
-          count func cfg
-    | _ ->
-        if !verbose then
-          printf
-            "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot map \
-             to_loc or from_loc to cfg blocks.\n"
-            count from_loc.addr to_loc.addr;
-        mal func count )
+          mal func count )
   | _ ->
       if !verbose then
         printf

@@ -15,7 +15,7 @@ open Core
 open Loc
 open Func
 
-let verbose = ref true
+let verbose = ref false
 
 type t = {
   (* map raw addresses to locations *)
@@ -167,7 +167,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   let add key =
     if not (Caml.Hashtbl.mem addresses key) then
       Caml.Hashtbl.add addresses key ()
-    else printf "Found key 0x%Lx\n" key
+    else if !verbose then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =
     add fa;

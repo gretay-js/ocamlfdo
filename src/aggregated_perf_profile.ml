@@ -13,7 +13,7 @@
 (**************************************************************************)
 open Core
 
-let verbose = ref true
+let verbose = ref false
 
 module P = struct
   (* Pair of addresses *)
@@ -27,16 +27,17 @@ type t = {
   mispredicts : Execount.t Hashtbl.M(P).t;
   (* number of times the branch was mispredicted: branch target mispredicted
      or branch direction was mispredicted. *)
-  traces : Execount.t Hashtbl.M(P).t
+  traces : Execount.t Hashtbl.M(P).t;
       (* execution count: number of times the trace was taken. *)
 }
 [@@deriving sexp]
 
 let empty () =
-  { instructions = Hashtbl.create (module Addr);
+  {
+    instructions = Hashtbl.create (module Addr);
     branches = Hashtbl.create (module P);
     mispredicts = Hashtbl.create (module P);
-    traces = Hashtbl.create (module P)
+    traces = Hashtbl.create (module P);
   }
 
 let read filename =

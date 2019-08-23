@@ -86,9 +86,10 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_filename ~linearid_profile_filename ~write_linker_script
     =
   let locations = load_locations binary_filename in
+  let dirname = Filename.(realpath (dirname binary_filename)) in
   let linearid_profile_filename =
     match linearid_profile_filename with
-    | None -> binary_filename ^ ".fdo-profile"
+    | None -> dirname ^ "/fdo-profile"
     | Some f -> f
   in
   (* First aggregate raw profile and then decode it. *)
@@ -109,7 +110,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   if write_linker_script then (
     let linker_script_filename =
       match linker_script_filename with
-      | None -> "linker-script-hot"
+      | None -> dirname ^ "/linker-script-hot"
       (* The default name does not depend on the input executable, so that
          the default template link-script can refer to it and won't need to
          be updated or written per executable. *)
@@ -270,13 +271,16 @@ let call_ocamlopt args phase =
   let open Shexp_process.Infix in
   let ec = eval (spawn ocamlopt args >>= wait) in
   if !verbose then
-    Printf.printf !"ocamlopt exit code = %{sexp:Exit_status.t}\n" ec
+    Printf.printf !"ocamlopt exit code = %{sexp:Exit_status.t}\n" ec;
+  match ec with
+  | Exited 0 -> ()
+  | _ -> failwith "Call to ocamlopt failed"
 
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report =
+    ~func_crc ~report ~use_linker_script =
   let open Ocaml_locations in
   let files =
-    (* check command line to args to call ocamlopt *)
+    (* change command line to args to call ocamlopt *)
     match args with
     | None | Some [] ->
         if !verbose then printf "Missing compilation command\n";
@@ -293,9 +297,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
             else None)
   in
   let args = Option.value args ~default:[] in
-  let finish () = Report.finish () in
-  at_exit finish;
-  ( match files with
+  match files with
   | [] -> call_ocamlopt args None
   | _ ->
       call_ocamlopt args (Some Compile);
@@ -307,8 +309,25 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
               make_filename Linear s |> make_fdo_filename
             else s)
       in
-      call_ocamlopt args (Some Emit) );
-  finish ()
+      (* add linker script *)
+      let linker_script_template =
+        Filename.dirname Sys.executable_name
+        ^ "/../etc/ocamlfdo/linker-script"
+      in
+      let linker_script =
+        if is_some fdo_profile && use_linker_script then (
+          let linkarg =
+            [ "-ccopt"; sprintf "-Wl,--script=%s" linker_script_template ]
+          in
+          if !verbose then
+            Printf.printf
+              "Adding template link script to ocamlopt command line:\n%s\n"
+              (String.concat ~sep:" " linkarg);
+          linkarg )
+        else []
+      in
+      let args = linker_script @ args in
+      call_ocamlopt args (Some Emit)
 
 (* CR gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -407,7 +426,11 @@ module Commonflag = struct
     }
 
   let flag_linker_script_filename =
-    { name = "-linker-script"; doc = "filename link script"; aliases = [] }
+    {
+      name = "-linker-script";
+      doc = "filename linker script";
+      aliases = [];
+    }
 end
 
 let flag_report =
@@ -588,6 +611,8 @@ let compile_command =
       and report = flag_report
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
+      and crc = flag_crc
+      and no_linker_script = flag_no_linker_script
       and args =
         Command.Param.(
           flag "--" escape
@@ -595,9 +620,12 @@ let compile_command =
       in
       verbose := v;
       if q then quiet ();
+      let use_linker_script = not no_linker_script in
+      let unit_crc = unit_crc || crc in
+      let func_crc = func_crc || crc in
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report)
+          ~func_crc ~report ~use_linker_script)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
