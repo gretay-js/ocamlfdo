@@ -50,3 +50,5 @@ val reset_cache : t -> unit
 (* Iterate over the symbols and apply the function [f] to their names. It
    hides the details of symbol representation in the underlying ELF library. *)
 val iter_symbols : t -> f:(string -> unit) -> unit
+
+val verbose : bool ref

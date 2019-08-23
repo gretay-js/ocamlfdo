@@ -35,7 +35,7 @@ type t = {
   inverse : (string, (int, Int64.t) Hashtbl.t) Hashtbl.t;
 }
 
-let verbose = false
+let verbose = ref false
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [ Unix.O_RDONLY ] 0 in
@@ -86,7 +86,7 @@ let resolve_from_dwarf t ~f =
   match Owee_elf.find_section t.sections ".debug_line" with
   | None -> ()
   | Some section ->
-      if verbose then
+      if !verbose then
         Printf.printf
           "Found section  name=%s addr=0x%Lx offset=0x%Lx size=0x%Lx\n"
           section.sh_name_str section.sh_addr section.sh_offset
@@ -128,7 +128,7 @@ let reset_cache t =
     Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n" msg h m
       ratio
   in
-  if verbose then (
+  if !verbose then (
     report "loc" t.hits t.misses;
     report "fun" t.fun_hits t.fun_misses );
   Hashtbl.clear t.resolved;
@@ -153,7 +153,7 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
   match prev with
   | None -> ()
   | Some prev ->
-      if verbose then (
+      if !verbose then (
         Printf.printf "find_range prev.state.filename=%s .addr=0x%Lx\n"
           prev.state.filename prev.state.address;
         Printf.printf "find_range cur.state.filename=%s .addr=0x%Lx\n"
@@ -161,21 +161,21 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
       let filename =
         match prev.filename with
         | None ->
-            if verbose then
+            if !verbose then
               Printf.printf
                 "find_range at prev=0x%Lx: prev.filename=None, use \
                  prev.state.filename=%s\n"
                 prev.state.address prev.state.filename;
             prev.state.filename
         | Some filename ->
-            if verbose then
+            if !verbose then
               Printf.printf "find_range filename=%s\n" filename;
             filename
       in
       assert (prev.state.address <= cur.state.address);
       if start <= prev.state.address && finish >= prev.state.address then (
         let line = prev.state.line in
-        if verbose then
+        if !verbose then
           Printf.printf "Caching loc 0x%Lx %s %d\n" prev.state.address
             filename line;
         let res = Some (filename, line) in
@@ -183,14 +183,14 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
           let tbl =
             match Hashtbl.find_opt t.inverse filename with
             | None ->
-                if verbose then
+                if !verbose then
                   Printf.printf "creating a new func table for %s %d\n"
                     filename line;
                 let tbl = Hashtbl.create 42 in
                 Hashtbl.add t.inverse filename tbl;
                 tbl
             | Some tbl ->
-                if verbose then
+                if !verbose then
                   Printf.printf
                     "found func table with %d entries for %s %d\n"
                     (Hashtbl.length tbl) filename line;
@@ -198,13 +198,13 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
           in
           match Hashtbl.find_opt tbl line with
           | None ->
-              if verbose then
+              if !verbose then
                 Printf.printf
                   "adding new entry to line table for %s %d: 0x%Lx\n"
                   filename line prev.state.address;
               Hashtbl.add tbl line prev.state.address
           | Some addr ->
-              if verbose then
+              if !verbose then
                 Printf.printf "found entry in line table for %s %d: 0x%Lx\n"
                   filename line addr );
         if fill_gaps then
@@ -227,14 +227,14 @@ let find_offsets t ~start ~finish ~addresses cur prev =
         let filename =
           match prev.filename with
           | None ->
-              if verbose then Printf.printf "find_offsets filename=None\n";
+              if !verbose then Printf.printf "find_offsets filename=None\n";
               prev.state.filename
           | Some filename ->
-              if verbose then
+              if !verbose then
                 Printf.printf "find_offsets filename=%s\n" filename;
               filename
         in
-        if verbose then
+        if !verbose then
           Printf.printf "Caching loc 0x%Lx %s %d\n" prev.state.address
             filename prev.state.line;
         let res = Some (filename, prev.state.line) in
@@ -252,7 +252,7 @@ let _resolve_function t ~sym =
   let start = Owee_elf.Symbol_table.Symbol.value sym in
   let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
   let finish = Int64.add start size in
-  if verbose then
+  if !verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
       start size finish;
 
@@ -272,7 +272,7 @@ let resolve_offsets t ~sym offsets =
   let addresses =
     List.map (fun i -> Int64.add start (Int64.of_int i)) offsets
   in
-  if verbose then
+  if !verbose then
     Printf.printf
       "Resolving function offsets for cache: (0x%Lx,0x%Lx,0x%Lx)\n" start
       size finish;
@@ -289,24 +289,24 @@ let find ~program_counter cur prev =
         program_counter >= prev.state.address
         && program_counter < cur.state.address
       then (
-        if verbose then (
+        if !verbose then (
           Printf.printf "find prev.state.filename=%s .addr=0x%Lx\n"
             prev.state.filename prev.state.address;
           Printf.printf "find cur.state.filename=%s .addr=0x%Lx\n"
             cur.state.filename cur.state.address );
         match prev.filename with
         | None ->
-            if verbose then Printf.printf "find filename=None\n";
+            if !verbose then Printf.printf "find filename=None\n";
             raise (FoundLoc (prev.state.filename, prev.state.line))
         | Some filename ->
-            if verbose then Printf.printf "find filename=%s\n" filename;
+            if !verbose then Printf.printf "find filename=%s\n" filename;
             raise (FoundLoc (filename, prev.state.line)) )
 
 let find_all ~t ~addresses cur prev =
   match prev with
   | None -> ()
   | Some prev ->
-      if verbose then (
+      if !verbose then (
         Printf.printf "find_all prev.state.filename=%s .addr=0x%Lx\n"
           prev.state.filename prev.state.address;
         Printf.printf "find_all cur.state.filename=%s .addr=0x%Lx\n"
@@ -314,14 +314,14 @@ let find_all ~t ~addresses cur prev =
       let filename =
         match prev.filename with
         | None ->
-            if verbose then
+            if !verbose then
               Printf.printf
                 "find_all at prev=0x%Lx: filename=None, use prev %s\n"
                 prev.state.address prev.state.filename;
             prev.state.filename
         | Some filename -> filename
       in
-      if verbose then
+      if !verbose then
         Printf.printf "find_all at 0x%Lx: using filename=%s\n"
           prev.state.address filename;
 
@@ -335,10 +335,10 @@ let find_all ~t ~addresses cur prev =
         if Int64.compare pc cur.state.address < 0 then (
           ( match Hashtbl.find_opt addresses pc with
           | None ->
-              if verbose then Printf.printf "find_all: ignored 0x%Lx\n" pc;
+              if !verbose then Printf.printf "find_all: ignored 0x%Lx\n" pc;
               ()
           | Some _ ->
-              if verbose then Printf.printf "find_all: resolved 0x%Lx\n" pc;
+              if !verbose then Printf.printf "find_all: resolved 0x%Lx\n" pc;
               Hashtbl.add t.resolved pc (Some (filename, prev.state.line))
           );
           loop (Int64.add pc 1L) )
@@ -348,20 +348,20 @@ let find_all ~t ~addresses cur prev =
 let resolve_all t addresses =
   let len = Hashtbl.length addresses in
   if len > 0 then (
-    if verbose then
+    if !verbose then
       Printf.printf "resolve_all: input size=%d unique addresses\n" len;
     Hashtbl.filter_map_inplace
       (fun k d -> if Hashtbl.mem t.resolved k then None else Some d)
       addresses;
     let l = Hashtbl.length addresses in
-    if verbose && l < len then
+    if !verbose && l < len then
       Printf.printf "resolve_all: input size=%d unresolved addresses\n" l;
     let start = Hashtbl.length t.resolved in
     resolve_from_dwarf t ~f:(find_all ~t ~addresses);
     let stop = Hashtbl.length t.resolved in
     let n = stop - start in
     assert (n <= len);
-    if verbose then (
+    if !verbose then (
       Printf.printf "resolve_all: resolved %d addresses\n" n;
       Printf.printf "resolve_all: not resolved %d addresses\n" (len - n) ) )
 
@@ -372,7 +372,7 @@ let resolve_pc t ~program_counter =
     None
   with FoundLoc (filename, line) ->
     let result = Some (filename, line) in
-    if verbose then
+    if !verbose then
       Printf.printf "Caching loc 0x%Lx %s %d\n" program_counter filename
         line;
     Hashtbl.add t.resolved program_counter result;
@@ -382,12 +382,12 @@ let resolve_from_cache t ~program_counter =
   match Hashtbl.find t.resolved program_counter with
   | resolved ->
       t.hits <- t.hits + 1;
-      if verbose then
+      if !verbose then
         Printf.printf "Found loc in cache 0x%Lx\n" program_counter;
       resolved
   | exception Not_found ->
       t.misses <- t.misses + 1;
-      if verbose then
+      if !verbose then
         Printf.printf "Cannot resolve from cache 0x%Lx\n" program_counter;
       None
 
@@ -395,12 +395,12 @@ let resolve t ~program_counter =
   match Hashtbl.find t.resolved program_counter with
   | resolved ->
       t.hits <- t.hits + 1;
-      if verbose then
+      if !verbose then
         Printf.printf "Found loc in cache 0x%Lx\n" program_counter;
       resolved
   | exception Not_found ->
       t.misses <- t.misses + 1;
-      if verbose then Printf.printf "Caching loc 0x%Lx\n" program_counter;
+      if !verbose then Printf.printf "Caching loc 0x%Lx\n" program_counter;
       resolve_pc t ~program_counter
 
 let function_at_pc t ~program_counter:address =
@@ -412,7 +412,7 @@ let function_at_pc t ~program_counter:address =
   | sym :: _ -> Owee_elf.Symbol_table.Symbol.name sym t.strtab
 
 let report msg name program_counter =
-  if verbose then
+  if !verbose then
     Printf.printf "%s 0x%Lx:%s\n" msg program_counter
       ( match name with
       | None -> "none"
@@ -453,7 +453,7 @@ let resolve_function_containing t ~program_counter =
                 let start = Owee_elf.Symbol_table.Symbol.value sym in
                 let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
                 let finish = Int64.add start size in
-                if verbose then
+                if !verbose then
                   Printf.printf
                     "Find func sym: start=0x%Lx finish=0x%Lx pc=0x%Lx\n"
                     start finish program_counter;
@@ -475,7 +475,7 @@ let resolve_function_containing t ~program_counter =
                 then (
                   match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
                   | None ->
-                      if verbose then
+                      if !verbose then
                         Printf.printf "Symbol without a name at 0x%Lx\n"
                           start;
                       report "Caching fun " None program_counter;
@@ -517,7 +517,7 @@ let resolve_function_starting_at t ~program_counter ~reset =
         | [] -> None
         | sym :: tail ->
             let start = Owee_elf.Symbol_table.Symbol.value sym in
-            if verbose then
+            if !verbose then
               Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n" start
                 program_counter;
 
@@ -540,7 +540,7 @@ let resolve_function_starting_at t ~program_counter ~reset =
       name
 
 let _resolve_function_offsets t ~program_counter offsets ~reset =
-  if verbose then
+  if !verbose then
     Printf.printf "Resolve function offsets, start=0x%Lx\n" program_counter;
   let syms =
     Owee_elf.Symbol_table.functions_enclosing_address t.symtab
@@ -551,7 +551,7 @@ let _resolve_function_offsets t ~program_counter offsets ~reset =
     | [] -> None
     | sym :: tail ->
         let start = Owee_elf.Symbol_table.Symbol.value sym in
-        if verbose then
+        if !verbose then
           Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n" start
             program_counter;
 
@@ -574,26 +574,26 @@ let _resolve_function_offsets t ~program_counter offsets ~reset =
 let resolve_range t ~start ~finish ~with_inverse =
   (* find function addresses *)
   assert (start < finish);
-  if verbose then
+  if !verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx)%s\n" start
       finish
       (if with_inverse then " with inverse" else "");
   let oldlen = Hashtbl.length t.inverse in
   resolve_from_dwarf t
     ~f:(find_range t ~start ~finish ~fill_gaps:false ~with_inverse);
-  if verbose then
+  if !verbose then
     Printf.printf "inverse entries before=%d after=%d\n" oldlen
       (Hashtbl.length t.inverse)
 
 let to_address t file line =
-  if verbose then Printf.printf "to_address of %s:%d" file line;
+  if !verbose then Printf.printf "to_address of %s:%d" file line;
   match Hashtbl.find_opt t.inverse file with
   | None ->
-      if verbose then Printf.printf " function not found\n";
+      if !verbose then Printf.printf " function not found\n";
       None
   | Some tbl ->
       let addr = Hashtbl.find_opt tbl line in
-      ( if verbose then
+      ( if !verbose then
         match addr with
         | None -> Printf.printf " line not found\n"
         | Some addr -> Printf.printf " addr 0x%Lx\n" addr );
@@ -614,7 +614,7 @@ let find_functions t functions =
                       let start = Owee_elf.Symbol_table.Symbol.value sym in
                       Hashtbl.replace functions name (Some start)
                   | Some _ ->
-                      if verbose then
+                      if !verbose then
                         Printf.printf
                           "find_functions surprised to see again  %s\n" name
                   )

@@ -27,3 +27,5 @@ val save_fallthrough :
   Aggregated_decoded_profile.t -> filename:string -> unit
 
 val write : t -> filename:string -> unit
+
+val verbose : bool ref

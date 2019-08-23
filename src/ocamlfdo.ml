@@ -18,6 +18,20 @@ let verbose = ref false
 
 let strict = ref false
 
+let quiet () =
+  verbose := false;
+  Perf_profile.verbose := false;
+  Aggregated_decoded_profile.verbose := false;
+  Aggregated_perf_profile.verbose := false;
+  Bolt_profile.verbose := false;
+  Decoded_bolt_profile.verbose := false;
+  Cfg_info.verbose := false;
+  Clusters.verbose := false;
+  Elf_locations.verbose := false;
+  Ocaml_locations.verbose := false;
+  Reorder.verbose := false;
+  Report.verbose := false
+
 let time f x =
   let open Time in
   let start = now () in
@@ -233,37 +247,30 @@ type phase =
   | Emit
 
 let call_ocamlopt args phase =
-  printf "call ocamlopt with %d args\n" (List.length args);
-
-  (* Set debug "-g" to emit dwarf locations. *)
-  ( match phase with
-  | None -> ()
-  | Some Compile ->
-      if !verbose then printf "stage COMPILE\n";
-      let open Clflags in
-      stop_after := Some Compiler_pass.Linearize;
-      set_save_ir_after Compiler_pass.Linearize true;
-      debug := true;
-      compile_only := true
-  | Some Emit ->
-      if !verbose then printf "stage EMIT\n";
-      let open Clflags in
-      stop_after := None;
-      start_from := Some Compiler_pass.Emit;
-      set_save_ir_after Compiler_pass.Linearize false;
-      compile_only := false;
-      debug := true );
-  let argv = List.to_array (Sys.argv.(0) :: args) in
+  let phase_flags =
+    (* Set debug "-g" to emit dwarf locations. *)
+    match phase with
+    | None -> []
+    | Some Compile ->
+        if !verbose then printf "stage COMPILE\n";
+        [ "-g"; "-stop-after"; "linearize"; "-save-ir-after"; "linearize" ]
+    | Some Emit ->
+        if !verbose then printf "stage EMIT\n";
+        [ "-g"; "-start-from"; "emit" ]
+  in
+  let args = args @ phase_flags in
+  (* CR: how to get the correct path to ocamlopt, there may be multiple? *)
+  let ocamlopt = "ocamlopt" in
   if !verbose then (
-    printf "calling ";
-    Array.iter argv ~f:(fun s -> printf " %s" s);
+    printf "calling %s" ocamlopt;
+    List.iter args ~f:(fun s -> printf " %s" s);
     printf "\n" );
 
-  override_sys_argv argv;
-
-  (* how to spawn one process rather than 2? *)
-  Optmain.main ();
-  printf "finished!\n"
+  let open Shexp_process in
+  let open Shexp_process.Infix in
+  let ec = eval (spawn ocamlopt args >>= wait) in
+  if !verbose then
+    Printf.printf !"ocamlopt exit code = %{sexp:Exit_status.t}\n" ec
 
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     ~func_crc ~report =
@@ -346,18 +353,17 @@ module type Alt = sig
 end
 
 module AltFlag (M : Alt) = struct
-  let names =
-    assert (not (List.contains_dup ~compare M.all));
-    List.map M.all ~f:(fun m ->
-        if m = M.default then M.to_string m ^ " (default)"
-        else M.to_string m)
-
   let of_string s = List.find_exn M.all ~f:(fun t -> s = M.to_string t)
 
   let alternatives heading =
-    sprintf "%s: %s" heading (String.concat ~sep:"," names)
+    let names = List.map M.all ~f:M.to_string in
+    let default = M.(to_string default) in
+    sprintf "%s: %s. Default: %s." heading
+      (String.concat ~sep:"," names)
+      default
 
   let mk name ~doc =
+    assert (not (List.contains_dup ~compare M.all));
     Command.Param.(
       flag name
         (optional_with_default M.default (Command.Arg_type.create of_string))
@@ -395,8 +401,8 @@ module Commonflag = struct
 
   let flag_linearid_profile_filename =
     {
-      name = "-linearid-profile";
-      aliases = [ "-fdo-profile" ];
+      name = "-fdo-profile";
+      aliases = [ "-linearid-profile" ];
       doc = "filename decoded profile";
     }
 
@@ -453,7 +459,8 @@ let flag_reorder_blocks =
 
 let flag_reorder_functions =
   let module RF = AltFlag (Config_reorder.Reorder_functions) in
-  RF.mk "-reorder-functions" ~doc:"heuristics for reordering functions"
+  RF.mk "-reorder-functions"
+    ~doc:"heuristics used for function layout generated in linker script"
 
 let decode_command =
   Command.basic
@@ -487,7 +494,7 @@ let decode_command =
         Commonflag.(optional flag_linker_script_filename)
       and no_linker_script = flag_no_linker_script in
       verbose := v;
-      if q then verbose := false;
+      if q then quiet ();
       let write_linker_script = not no_linker_script in
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
@@ -522,7 +529,7 @@ let opt_command =
       and crc = flag_crc
       and files = anon_files in
       verbose := v;
-      if q then verbose := false;
+      if q then quiet ();
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
       if !verbose && List.is_empty files then printf "No input files\n";
@@ -587,8 +594,7 @@ let compile_command =
             ~doc:"ocamlopt_args standard options passed to ocamlopt")
       in
       verbose := v;
-      if q then verbose := false;
-      Reorder.verbose := !verbose;
+      if q then quiet ();
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
           ~func_crc ~report)

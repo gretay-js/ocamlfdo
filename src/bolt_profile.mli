@@ -25,7 +25,7 @@ module Bolt_branch : sig
     src : Bolt_loc.t;
     dst : Bolt_loc.t;
     mis : Int64.t;
-    count : Int64.t
+    count : Int64.t;
   }
 end
 
@@ -52,3 +52,5 @@ val save_fallthrough :
 val read : filename:string -> t
 
 val write : t -> filename:string -> unit
+
+val verbose : bool ref

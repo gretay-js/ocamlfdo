@@ -32,3 +32,5 @@ val is_filename : t -> string -> bool
 
 (* append the expected extension *)
 val make_filename : t -> string -> string
+
+val verbose : bool ref

@@ -1,6 +1,6 @@
 open Core
 
-let verbose = ref true
+let verbose = ref false
 
 let extension = "fdo.org"
 
