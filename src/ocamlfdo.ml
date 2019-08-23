@@ -151,7 +151,8 @@ let check_equal f ~new_body =
         name () )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc =
+    ~func_crc ~report =
+  if report then Report.start ();
   let profile =
     match fdo_profile with
     | None -> None
@@ -205,7 +206,102 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
       | dl -> ui.items <- ui.items @ [ Data dl ] );
     save out_filename ui
   in
-  List.iter files ~f:process
+  List.iter files ~f:process;
+  if report then Report.finish ()
+
+(* Ideally, we should pass args directop to optmain. Currently, there are
+   some uses of Sys.argv in optmain and makedepend that prevent it. Once
+   that is fixed, we won't need the hack of override_sys_argv at all. *)
+(* From 4.09/4.10 we should be able to use this hack instead of
+   Obj.truncate. See https://github.com/ocaml/ocaml/pull/2279 *)
+
+(* external caml_sys_modify_argv : string array -> unit =
+ *   "caml_sys_modify_argv"
+ *
+ * let override_sys_argv new_argv =
+ *   caml_sys_modify_argv new_argv;
+ *   Arg.current := 0 *)
+
+let override_sys_argv args =
+  let len = Array.length args in
+  assert (not (Array.length Sys.argv < len));
+  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:0 ~len;
+  Obj.truncate (Obj.repr Sys.argv) len
+
+type phase =
+  | Compile
+  | Emit
+
+let call_ocamlopt args phase =
+  printf "call ocamlopt with %d args\n" (List.length args);
+
+  (* Set debug "-g" to emit dwarf locations. *)
+  ( match phase with
+  | None -> ()
+  | Some Compile ->
+      if !verbose then printf "stage COMPILE\n";
+      let open Clflags in
+      stop_after := Some Compiler_pass.Linearize;
+      set_save_ir_after Compiler_pass.Linearize true;
+      debug := true;
+      compile_only := true
+  | Some Emit ->
+      if !verbose then printf "stage EMIT\n";
+      let open Clflags in
+      stop_after := None;
+      start_from := Some Compiler_pass.Emit;
+      set_save_ir_after Compiler_pass.Linearize false;
+      compile_only := false;
+      debug := true );
+  let argv = List.to_array (Sys.argv.(0) :: args) in
+  if !verbose then (
+    printf "calling ";
+    Array.iter argv ~f:(fun s -> printf " %s" s);
+    printf "\n" );
+
+  override_sys_argv argv;
+
+  (* how to spawn one process rather than 2? *)
+  Optmain.main ();
+  printf "finished!\n"
+
+let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+    ~func_crc ~report =
+  let open Ocaml_locations in
+  let files =
+    (* check command line to args to call ocamlopt *)
+    match args with
+    | None | Some [] ->
+        if !verbose then printf "Missing compilation command\n";
+        []
+    | Some args ->
+        if !verbose then (
+          printf "ocamlopt";
+          List.iter ~f:(fun s -> printf " %s" s) args;
+          printf "\n" );
+
+        (* Compute the names of linear ir files from [args] *)
+        List.filter_map args ~f:(fun s ->
+            if is_filename Source s then Some (make_filename Linear s)
+            else None)
+  in
+  let args = Option.value args ~default:[] in
+  let finish () = Report.finish () in
+  at_exit finish;
+  ( match files with
+  | [] -> call_ocamlopt args None
+  | _ ->
+      call_ocamlopt args (Some Compile);
+      optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+        ~func_crc ~report;
+      let args =
+        List.map args ~f:(fun s ->
+            if is_filename Source s then
+              make_filename Linear s |> make_fdo_filename
+            else s)
+      in
+      call_ocamlopt args (Some Emit) );
+  finish ()
 
 (* CR gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -431,10 +527,71 @@ let opt_command =
       let func_crc = func_crc || crc in
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
-        if report then Report.start ();
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc;
-        if report then Report.finish ())
+          ~func_crc ~report)
+
+let compile_command =
+  Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
+    ~readme:(fun () ->
+      "\n\
+       For example:\n\
+       $ ocamlfdo compile -fdo-profile myexe.fdo-profile -- <standard \
+       ocamlopt options including -o myexe>\n\
+       is the same as the following 3 steps:\n\n\
+       (1) invoke ocamlopt with \"-save-ir-after linearize -stop-after \
+       linearize\" \n\
+      \    in addition to the options specified after '--'.\n\
+       (2) invoke 'ocamlfdo opt -fdo-profile myexe.fdo-profile' \n\
+      \    with the list ofintermediate representation files .cmir-linear \
+       produced in step (1).\n\
+       (3) invoke 'ocamlopt -start-from emit'\n\
+      \    with updated .cmir-linear files produced in step (2) \n\
+      \    and the rest of the options specified after  '--'.\n\n\
+       All the options provided to 'ocamlfdo compile' before and after \
+       '--' are passed to 'ocamlfdo opt' and 'ocamlopt' respectively, \
+       except file names which are adjusted according to the step.\n\n\
+       This command turns ocamlfdo into a wrapper of ocamlopt that can be \
+       used\n\
+      \   as a drop-in replacement. It allows users to run ocamlfdo \
+       directly,\n\
+      \   without the need to modify their build process. The downside is \
+       that\n\
+      \   optimizing builds repeat a lot of redundant work.\n\n\
+       Limitations: For linking, it assumes that the user of invokes \
+       ocamlopt\n\
+      \   with '-ccopt \"-Xlinker --script=linker-script\"' and that \
+       linker-script\n\
+      \   includes linker-script-hot or an alternative filename as \
+       specified by\n\
+      \   -linker-script option to 'ocamlfdo decode'. Note that \
+       linker-script-hot\n\
+      \   produced by 'ocamlfdo decode' is specific to Linux/GNU. It can be\n\
+      \   manually transformed to other formats. Note also that using the \
+       script\n\
+      \   for function reordering on a different system requires ocaml \
+       support for\n\
+      \   named function sections (not available currently on macos and \
+       windows).\n\n\n")
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and extra_debug = flag_extra_debug
+      and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
+      and reorder_blocks = flag_reorder_blocks
+      and report = flag_report
+      and unit_crc = flag_unit_crc
+      and func_crc = flag_func_crc
+      and args =
+        Command.Param.(
+          flag "--" escape
+            ~doc:"ocamlopt_args standard options passed to ocamlopt")
+      in
+      verbose := v;
+      if q then verbose := false;
+      Reorder.verbose := !verbose;
+      fun () ->
+        compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+          ~func_crc ~report)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
@@ -446,6 +603,10 @@ let main_command =
        Important: ocamlfdo relies on compiler-libs and thus the same build \
        of ocamlopt must be used for building both ocamlfdo and the \
        executable.")
-    [ ("decode", decode_command); ("opt", opt_command) ]
+    [
+      ("decode", decode_command);
+      ("opt", opt_command);
+      ("compile", compile_command);
+    ]
 
 let () = Command.run main_command

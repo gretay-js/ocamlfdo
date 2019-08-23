@@ -1,0 +1,4 @@
+(install
+ (files linker-script)
+ (section etc)
+ (package ocamlfdo))
