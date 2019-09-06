@@ -6,8 +6,7 @@
         owee
         core
         csvfields
-        ocaml-compiler-libs.common
-        ocaml-compiler-libs.optcomp
+        compiler-libs.optcomp
         parsexp_io
         shexp.process
         ocamlcfg)
