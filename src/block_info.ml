@@ -32,9 +32,9 @@ type b = {
   (* true for fallthrough targets where counts are inferred from LBR; false
      for branches that appeared explicitly in LBR *)
   mutable taken : Execount.t;
-  mispredicts : Execount.t
+  mispredicts : Execount.t;
 }
-[@@deriving sexp]
+[@@deriving sexp, compare]
 
 (* Function Must have at least one of target or target_label *)
 (* fallthrough blocks that were inferred from LBR but not directly sampled
@@ -44,9 +44,9 @@ type b = {
 (* call site info *)
 type c = {
   callsite : Loc.t;
-  mutable callees : b list
+  mutable callees : b list;
 }
-[@@deriving sexp]
+[@@deriving sexp, compare]
 
 (* Execution counts for a basic block *)
 type t = {
@@ -60,7 +60,7 @@ type t = {
   (* Number of times this block was executed. *)
   mutable branches : b list;
   (* Info about branch targets *)
-  mutable calls : c list (* Info about call targets *)
+  mutable calls : c list; (* Info about call targets *)
 }
 [@@deriving sexp]
 
@@ -76,32 +76,40 @@ let find branches branch =
   (* List.partition_tf *)
   List.find branches ~f:(fun b ->
       match (b.target, b.target_label, b.target_id) with
-      | Some t, _, _ when Some t = branch.target ->
+      | Some t, _, _
+        when [%compare.equal: Loc.t option] (Some t) branch.target ->
           assert (
-            b.target_label = branch.target_label
-            && b.target_id = branch.target_id );
+            [%compare.equal: Cfg_label.t option] b.target_label
+              branch.target_label
+            && [%compare.equal: int option] b.target_id branch.target_id );
           true
-      | None, Some tl, _ when Some tl = branch.target_label ->
-          assert (is_none branch.target && b.target_id = branch.target_id);
+      | None, Some tl, _
+        when [%compare.equal: Cfg_label.t option] (Some tl)
+               branch.target_label ->
+          assert (
+            is_none branch.target
+            && [%compare.equal: int option] b.target_id branch.target_id );
           true
-      | None, None, Some tid when Some tid = branch.target_id ->
+      | None, None, Some tid
+        when [%compare.equal: Cfg_label.t option] (Some tid)
+               branch.target_id ->
           assert (is_none branch.target && is_none branch.target_label);
           true
       | None, None, None -> assert false
-      | _ -> false )
+      | _ -> false)
 
 let add_call t ~callsite ~callee =
   (* Find the callsite's info *)
-  match List.find t.calls ~f:(fun c -> c.callsite = callsite) with
+  match List.find t.calls ~f:(fun c -> Loc.equal c.callsite callsite) with
   | None ->
       let c = { callsite; callees = [ callee ] } in
       t.calls <- c :: t.calls
   | Some c -> (
-    (* Invariant: unique entry per call target. *)
-    (* Find call target entry and update it. *)
-    match find c.callees callee with
-    | None -> c.callees <- callee :: c.callees
-    | _ -> assert false )
+      (* Invariant: unique entry per call target. *)
+      (* Find call target entry and update it. *)
+      match find c.callees callee with
+      | None -> c.callees <- callee :: c.callees
+      | _ -> assert false )
 
 (* Merge maintain unique targets *)
 let add_branch t b =
@@ -110,5 +118,7 @@ let add_branch t b =
   | Some br ->
       assert (b.intra && br.intra);
       assert (b.fallthrough && br.fallthrough);
-      assert (b.mispredicts = 0L && br.mispredicts = 0L);
+      assert (
+        Execount.equal b.mispredicts 0L && Execount.equal br.mispredicts 0L
+      );
       br.taken <- Int64.(br.taken + b.taken)

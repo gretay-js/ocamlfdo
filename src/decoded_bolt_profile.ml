@@ -73,12 +73,12 @@ let print_branch ~chan b =
     if print_notes then
       match (b.src, b.dst) with
       | Some src, Some dst
-        when src.name = dst.name
+        when String.equal src.name dst.name
              && String.is_prefix ~prefix:"caml" src.name
              && String.is_suffix ~suffix:"__entry" src.name ->
           "*"
       | Some src, Some dst
-        when src.name = dst.name
+        when String.equal src.name dst.name
              && String.is_prefix ~prefix:"caml_" src.name ->
           "**"
       | _ -> ""

@@ -191,7 +191,7 @@ let read_and_aggregate ?(expected_pid = None) filename =
                 let key = (from_addr, to_addr) in
                 if !verbose then
                   printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
-                if from_addr >= to_addr then
+                if Int64.(from_addr >= to_addr) then
                   if !verbose then
                     printf
                       "Malformed trace ignored 0x%Lx->0x%Lx (from_addr >= \

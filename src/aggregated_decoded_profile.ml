@@ -111,9 +111,9 @@ let get_func_id t ~name ~start ~finish =
   | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       assert (func.id = id);
-      assert (func.name = name);
-      assert (func.start = start);
-      assert (func.finish = finish);
+      assert (String.equal func.name name);
+      assert (Addr.equal func.start start);
+      assert (Addr.equal func.finish finish);
       func.id
 
 let decode_loc t locations addr =
@@ -274,7 +274,7 @@ let add t name cfg =
       None
   | Some id ->
       let func = Hashtbl.find_exn t.functions id in
-      if func.count > 0L && func.has_linearids then (
+      if Int64.(func.count > 0L) && func.has_linearids then (
         if !verbose then (
           printf "compute_cfg_execounts for %s\n" name;
           Ocamlcfg.Cfg_builder.print Out_channel.stdout cfg );

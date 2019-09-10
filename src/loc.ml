@@ -17,7 +17,7 @@
 open Core
 
 module Cfg_label = struct
-  type t = int [@@deriving compare, sexp, hash]
+  type t = int [@@deriving compare, sexp, hash, equal]
 end
 
 (* Dwarf info associated with a location *)
@@ -25,9 +25,9 @@ type dbg = {
   (* filename *)
   file : string;
   (* line number *)
-  line : int
+  line : int;
 }
-[@@deriving compare, sexp, hash]
+[@@deriving compare, sexp, hash, equal]
 
 type rel = {
   (* Unique id of the containing function symbol *)
@@ -35,15 +35,15 @@ type rel = {
   (* Offset from the start of the function *)
   offset : int;
   (* cfg label of the block containing this location *)
-  label : Cfg_label.t option
+  label : Cfg_label.t option;
 }
-[@@deriving compare, sexp, hash]
+[@@deriving compare, sexp, hash, equal]
 
 type t = {
   addr : Addr.t;
   (* Raw address in the original binary *)
   rel : rel option;
   (* Containing function info and relative offset *)
-  dbg : dbg option
+  dbg : dbg option;
 }
-[@@deriving sexp]
+[@@deriving sexp, compare, equal]

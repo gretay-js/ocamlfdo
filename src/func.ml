@@ -51,5 +51,5 @@ let mk ~id ~name ~start ~finish =
    and decodes locations. Change to tie breaker using id if speed becomes a
    problem. *)
 let compare f1 f2 =
-  let res = compare f2.count f1.count in
-  if res = 0 then compare f1.name f2.name else res
+  let res = Int64.compare f2.count f1.count in
+  if res = 0 then String.compare f1.name f2.name else res

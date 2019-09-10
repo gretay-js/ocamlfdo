@@ -1,3 +1,3 @@
 open Core
 
-type t = int64 [@@deriving sexp]
+type t = int64 [@@deriving sexp, compare, equal]

@@ -65,7 +65,7 @@ let decode_line locations ~program_counter func t =
                   Report.log (sprintf "Ignoring %s in %s\n" func file);
                   None
               | Some func_name_dwarf ->
-                  if func_name_dwarf = func then Some (file, line)
+                  if String.equal func_name_dwarf func then Some (file, line)
                   else
                     failwithf "func_name_dwarf = %s func = %s\n"
                       func_name_dwarf func () ) ) )

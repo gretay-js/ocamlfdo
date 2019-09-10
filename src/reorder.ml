@@ -12,6 +12,7 @@
 (*                                                                        *)
 (**************************************************************************)
 open Core
+open Core.Poly
 open Ocamlcfg
 
 let verbose = ref false

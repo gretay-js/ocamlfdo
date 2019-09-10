@@ -247,7 +247,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
      instr in the entry block. Return from call: branch target is a label
      after the call site. Exception handler: branch target is a trap
      handler. *)
-  if from_loc.addr < 0L then (
+  if Int64.(from_loc.addr < 0L) then (
     if
       (* [from_loc.addr] of this branch does not belong to the binary and
          usually to_addr cannot be target of jump because it is not a return

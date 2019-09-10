@@ -39,9 +39,9 @@ open Core
 
 let verbose = ref true
 
-type clusterid = int
+type clusterid = int [@@deriving compare]
 
-type weight = int64
+type weight = int64 [@@deriving compare]
 
 let entry_pos = 0
 
@@ -67,6 +67,7 @@ type edge = {
   dst : clusterid;
   weight : weight;
 }
+[@@deriving compare]
 
 (* Directed graph whose nodes are clusters. *)
 type 'd t = {
@@ -87,7 +88,7 @@ let init_layout original_layout execounts =
   let open Block_info in
   (* Makes a singleton cluster. data, id and pos must be unique *)
   let mk_node ~data ~weight ~pos ~id =
-    assert (weight >= 0L);
+    assert (Int64.(weight >= 0L));
 
     (* Cluster that contains the entry position of the original layout
        cannot be merged *after* another cluster. *)
@@ -95,7 +96,7 @@ let init_layout original_layout execounts =
     { id; weight; items = [ data ]; pos; can_be_merged }
   in
   let mk_edge ~src ~dst ~weight =
-    assert (weight >= 0L);
+    assert (Int64.(weight >= 0L));
     { src; dst; weight }
   in
   (* Initialize each block in its own cluster: cluster id is block's
@@ -133,8 +134,8 @@ let init_layout original_layout execounts =
    using their ids which are unique. Clusters that cannot be merged are at
    the end, ordered amongst them in the same way. *)
 let cluster_compare_frozen c1 c2 =
-  if c1.can_be_merged = c2.can_be_merged then
-    let res = compare c2.weight c1.weight in
+  if Bool.equal c1.can_be_merged c2.can_be_merged then
+    let res = compare_weight c2.weight c1.weight in
     if res = 0 then
       let res = compare c1.pos c2.pos in
       if res = 0 then compare c1.id c2.id else res
@@ -145,7 +146,7 @@ let cluster_compare_frozen c1 c2 =
 let cluster_compare_pos c1 c2 =
   let res = compare c1.pos c2.pos in
   if res = 0 then
-    let res = compare c1.weight c2.weight in
+    let res = compare_weight c1.weight c2.weight in
     if res = 0 then compare c1.id c2.id else res
   else res
 
@@ -153,12 +154,11 @@ let get_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
 (* Compare edges using weights, in descending order. Tie breaker on sources
    first, then on destinations. *)
-let edge_compare t e1 e2 =
-  let res = compare e2.weight e1.weight in
+let edge_compare e1 e2 =
+  let res = compare_weight e2.weight e1.weight in
   if res = 0 then
-    let res = compare (get_cluster t e1.src) (get_cluster t e2.src) in
-    if res = 0 then compare (get_cluster t e1.dst) (get_cluster t e2.dst)
-    else res
+    let res = compare_clusterid e1.src e2.src in
+    if res = 0 then compare_clusterid e1.dst e2.dst else res
   else res
 
 (* Merge two clusters. *)
@@ -199,7 +199,7 @@ let merge t c1 c2 =
      This is temporarily violated by the update above if for example the
      edges c1->c3 and c2->c3 are both present in the input. Merge them by
      adding their weights up. *)
-  let sorted = List.sort updated ~compare in
+  let sorted = List.sort updated ~compare:compare_edge in
   let merged =
     List.fold sorted ~init:[] ~f:(fun acc e1 ->
         if e1.src = e1.dst then (* remove self-loops *)
@@ -226,7 +226,7 @@ let find_max_pred t c =
         if e.dst = c.id then
           match max with
           | None -> Some e
-          | Some me -> if edge_compare t me e < 0 then Some e else max
+          | Some me -> if edge_compare me e < 0 then Some e else max
         else max)
   in
   match max with

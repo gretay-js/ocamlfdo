@@ -24,14 +24,14 @@ type b = {
   (* true for fallthrough targets where counts are inferred from LBR; false
      for branches that appeared explicitly in LBR *)
   mutable taken : Execount.t;
-  mispredicts : Execount.t
+  mispredicts : Execount.t;
 }
 [@@deriving sexp]
 
 (* call site info *)
 type c = {
   callsite : Loc.t;
-  mutable callees : b list
+  mutable callees : b list;
 }
 [@@deriving sexp]
 
@@ -46,7 +46,7 @@ type t = private {
   (* Number of times this block was executed. *)
   mutable branches : b list;
   (* Info about branch targets *)
-  mutable calls : c list (* Info about call targets *)
+  mutable calls : c list; (* Info about call targets *)
 }
 [@@deriving sexp]
 

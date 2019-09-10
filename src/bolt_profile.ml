@@ -22,7 +22,7 @@ module Kind = struct
     | Symbol
     | UnknownMem
     | Mem
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
 
   let to_string = function
     | UnknownSymbol -> "0"
@@ -87,15 +87,16 @@ module Bolt_branch = struct
 
   let of_string s =
     match String.split ~on:' ' s with
-    | [ src_kind;
-        src_name;
-        src_offset;
-        dst_kind;
-        dst_name;
-        dst_offset;
-        mis;
-        count
-      ] ->
+    | [
+     src_kind;
+     src_name;
+     src_offset;
+     dst_kind;
+     dst_name;
+     dst_offset;
+     mis;
+     count;
+    ] ->
         {
           src = Bolt_loc.of_strings src_kind src_name src_offset;
           dst = Bolt_loc.of_strings dst_kind dst_name dst_offset;
@@ -190,7 +191,10 @@ let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
   in
   let append_if_valid acc b =
     let open Bolt_branch in
-    if b.src.kind = UnknownSymbol && b.dst.kind = UnknownSymbol then acc
+    if
+      Kind.equal b.src.kind UnknownSymbol
+      && Kind.equal b.dst.kind UnknownSymbol
+    then acc
     else f acc b
   in
   let t =
