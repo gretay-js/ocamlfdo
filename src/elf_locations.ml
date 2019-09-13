@@ -18,8 +18,6 @@
 (* CR gyorsh: cleanup the file, we don't use all of the functions in it. *)
 [@@@ocaml.warning "+a-4-9-30-40-41-42"]
 
-open Owee
-
 type t = {
   map : Owee_buf.t;
   sections : Owee_elf.section array;
