@@ -14,12 +14,12 @@
 open Core
 open Loc
 
-(* CR: Improve different option fields. The reason for them is that we don't
-   always have all of the information: Loc.t, label, linearid. We can have
-   linearid from the cfg without having Loc.t if the the address didn't in
-   perf profile. We can reconstruct it but its expensive and we currently
-   only use it for debugging, see bolt_profile. Maybe use variant to
-   describe the kind of location we have? *)
+(* CR-soon gyorsh: Improve different option fields. The reason for them is
+   that we don't always have all of the information: Loc.t, label, linearid.
+   We can have linearid from the cfg without having Loc.t if the the address
+   didn't in perf profile. We can reconstruct it but its expensive and we
+   currently only use it for debugging, see bolt_profile. Maybe use variant
+   to describe the kind of location we have? *)
 
 (* Successor info *)
 type b = {

@@ -22,7 +22,8 @@ type t =
   | Source
   | Linear
 
-(* CR gyorsh: what are all the source file extensions we should support? *)
+(* CR-soon gyorsh: what are all the source file extensions we should
+   support? *)
 let extension = function
   | Linear -> ".cmir-linear"
   | Source -> ".ml"

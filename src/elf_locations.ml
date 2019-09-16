@@ -15,7 +15,8 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-(* CR gyorsh: cleanup the file, we don't use all of the functions in it. *)
+(* CR-soon gyorsh: cleanup the file, we don't use all of the functions in
+   it. *)
 [@@@ocaml.warning "+a-4-9-30-40-41-42"]
 
 type t = {
@@ -74,8 +75,8 @@ let create ~elf_executable =
         intervals_misses = 0;
       }
 
-(* CR mshinwell: tidy all this up. Also, the pinpointing of which row is the
-   correct one isn't great. *)
+(* CR-soon mshinwell: tidy all this up. Also, the pinpointing of which row
+   is the correct one isn't great. *)
 
 type l = {
   filename : string option;
@@ -256,8 +257,8 @@ let _resolve_function t ~sym =
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx,0x%Lx)\n"
       start size finish;
 
-  (* CR gyorsh: consider turning off fill_gaps for functions that are very
-     long or do not have any linear ids. *)
+  (* CR-soon gyorsh: consider turning off fill_gaps for functions that are
+     very long or do not have any linear ids. *)
   (* find dwarf locations for this function *)
   try
     resolve_from_dwarf t

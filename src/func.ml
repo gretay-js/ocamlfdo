@@ -28,7 +28,8 @@ type t = {
   (* number of fallthrough traces that didn't correspond to the cfg *)
   mutable malformed_traces : Execount.t;
   (* Counters that refer to this function, uses raw addresses. *)
-  (* CR: This can be dropped after cfg_count is constructed, to save memory. *)
+  (* CR-soon gyorsh: This can be dropped after cfg_count is constructed, to
+     save memory. *)
   agg : Aggregated_perf_profile.t;
 }
 [@@deriving sexp]

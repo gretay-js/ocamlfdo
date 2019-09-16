@@ -38,8 +38,8 @@ let check cfg new_cfg_layout =
     print_list "orig" orig_cfg_layout;
     print_list "new " new_cfg_layout;
     if !validate then
-      (* Make sure the new layout is just a permutation. CR gyorsh: do we
-         need to handle block duplication here? *)
+      (* Make sure the new layout is just a permutation. CR-soon gyorsh: do
+         we need to handle block duplication here? *)
       let compare = Int.compare in
       let orig_len = List.length orig_cfg_layout in
       if Cfg_builder.preserve_orig_labels cfg then (

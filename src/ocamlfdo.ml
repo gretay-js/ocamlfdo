@@ -218,7 +218,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     fnew
   in
   let process file =
-    (* CR gyorsh: identify format based on the file extension and magic
+    (* CR-soon gyorsh: identify format based on the file extension and magic
        number. *)
     let out_filename = make_fdo_filename file in
     let open Linear_format in
@@ -276,7 +276,8 @@ let call_ocamlopt args phase =
         [ "-g"; "-start-from"; "emit" ]
   in
   let args = args @ phase_flags in
-  (* CR: how to get the correct path to ocamlopt, there may be multiple? *)
+  (* CR-soon gyorsh: how to get the correct path to ocamlopt, there may be
+     multiple? *)
   let ocamlopt = "ocamlopt" in
   if !verbose then (
     printf "calling %s" ocamlopt;
@@ -345,10 +346,10 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
       let args = linker_script @ args in
       call_ocamlopt args (Some Emit)
 
-(* CR gyorsh: this is intended as a report at source level and human
+(* CR-soon gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
    Could share infrastructure with inlining report to map back to source
-   when reordering involves inlined functions. CR gyorsh: add separate
+   when reordering involves inlined functions. CR-soon gyorsh: add separate
    "dump" flags for all passes in ocamlfdo, printing to stdout similarly to
    -dcmm -dlinear in the compiler, etc. *)
 let write_reorder_report f c newf newc =
@@ -360,8 +361,8 @@ let write_reorder_report f c newf newc =
     report_cfg ~name "Before-Reorder" c;
     report_cfg ~name "After-Reorder" newc )
 
-(* CR gyorsh: If we eliminate dead blocks before a transformation then some
-   algorithms might not apply because they rely on perf data based on
+(* CR-soon gyorsh: If we eliminate dead blocks before a transformation then
+   some algorithms might not apply because they rely on perf data based on
    original instructions. On the other hand, for iterative fdo, if we don't
    have counters for an instruction, we don't know if it's because it is
    cold or because it wasn't there in the binary at all as it was eliminated
@@ -370,10 +371,10 @@ let write_reorder_report f c newf newc =
    but having less code to deal with when computing layout will be more
    efficient. *)
 
-(* CR gyorsh: call emit directly after optimize. the problem is restoring
-   global settings (such as clflags) that were determined from command line
-   and environment etc is currently very cumbersome and highly dependent on
-   the compiler internals. *)
+(* CR-soon gyorsh: call emit directly after optimize. the problem is
+   restoring global settings (such as clflags) that were determined from
+   command line and environment etc is currently very cumbersome and highly
+   dependent on the compiler internals. *)
 
 (* Command line options based on a variant type *)
 (* print all variants in option's help string *)

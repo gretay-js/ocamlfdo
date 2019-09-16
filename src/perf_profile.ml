@@ -65,7 +65,7 @@ let parse_br index s =
       | "A" | "-" -> ()
       | _ -> failwithf "Cannot parse mispredict flag %s in %s" a s () );
 
-      (* Parse and ignore cycles. CR gyorsh: use for optimizations. *)
+      (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
       let _cycles = Int.of_string c in
       {
         from_addr = Int64.of_string from_addr;
@@ -134,7 +134,7 @@ let perf_script_fold filename ~init ~f =
   let open Shexp_process.Infix in
   let perf = eval (find_executable_exn "perf") in
   let args = [ "script"; "-F"; "pid,ip,brstack"; "-i"; filename ] in
-  (* CR: lazy *)
+  (* CR-soon gyorsh: lazy *)
   let f x y = return (f x y) in
   let t = eval (run perf args |- fold_lines ~init ~f) in
   t
@@ -171,7 +171,7 @@ let read_and_aggregate ?(expected_pid = None) filename =
         Int64.(1L + Option.value ~default:0L v))
   in
   let aggregated = Aggregated_perf_profile.empty () in
-  (* CR gyorsh: aggregate during parsing of perf profile *)
+  (* CR-soon gyorsh: aggregate during parsing of perf profile *)
   let aggregate sample =
     inc aggregated.instructions sample.ip;
     List.iter sample.brstack ~f:(fun br ->
