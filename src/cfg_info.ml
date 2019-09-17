@@ -170,7 +170,7 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
             (* target must be a hanlder block *)
             assert (Cfg_builder.is_trap_handler cfg to_block.start)
         | Branch _ | Switch _ ->
-            let successors = Cfg.successor_labels from_block in
+            let successors = Cfg_builder.successor_labels cfg from_block in
             assert (List.mem successors to_block.start ~equal:Int.equal);
             Block_info.add_branch bi b )
       else
@@ -394,9 +394,12 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
                src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
               func.name from_lbl to_lbl src_lbl dst_lbl;
-            List.iter (Cfg.successor_labels block) ~f:(fun lbl ->
-                printf "%d\n" lbl) );
-          if List.mem (Cfg.successor_labels block) dst_lbl ~equal:Int.equal
+            List.iter (Cfg_builder.successor_labels cfg block)
+              ~f:(fun lbl -> printf "%d\n" lbl) );
+          if
+            List.mem
+              (Cfg_builder.successor_labels cfg block)
+              dst_lbl ~equal:Int.equal
           then src_lbl
           else (
             if !verbose then
