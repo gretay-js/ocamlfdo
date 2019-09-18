@@ -31,7 +31,9 @@ let quiet () =
   Elf_locations.verbose := false;
   Ocaml_locations.verbose := false;
   Reorder.verbose := false;
-  Report.verbose := false
+  Report.verbose := false;
+  Cfg_builder.verbose := false;
+  ()
 
 let time f x =
   let open Time in
@@ -135,7 +137,7 @@ let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
 
 let report_cfg ~name title cfg =
-  Report.with_outchannel ~name ~title ~sub:"lin" Cfg_builder.print cfg
+  Report.with_outchannel ~name ~title ~sub:"lin" (Cfg_builder.print "") cfg
 
 exception Not_equal_reg_array
 
@@ -456,6 +458,15 @@ let flag_report =
       ~doc:
         " emit .fdo.org files showing FDO decisions (e.g., blocks reordered)")
 
+let flag_dot =
+  Command.Param.(
+    flag "-dot" no_arg ~doc:" emit CFG in .dot format for debug")
+
+let flag_dot_show_instr =
+  Command.Param.(
+    flag "-dot-detailed" no_arg
+      ~doc:" emit detailed CFG in .dot format for debug")
+
 let flag_v =
   Command.Param.(flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose")
 
@@ -564,11 +575,15 @@ let opt_command =
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
+      and dot = flag_dot
+      and dot_show_instr = flag_dot_show_instr
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
       and files = anon_files in
       verbose := v;
+      Cfg_builder.dot_format := dot;
+      Cfg_builder.dot_show_instr := dot_show_instr;
       if q then quiet ();
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in

@@ -277,7 +277,7 @@ let add t name cfg =
       if Int64.(func.count > 0L) && func.has_linearids then (
         if !verbose then (
           printf "compute_cfg_execounts for %s\n" name;
-          Ocamlcfg.Cfg_builder.print Out_channel.stdout cfg );
+          Ocamlcfg.Cfg_builder.print "execount" Out_channel.stdout cfg );
         let cfg_info = create_cfg_info t func cfg in
         Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
         Some cfg_info )
