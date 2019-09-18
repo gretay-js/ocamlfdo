@@ -104,7 +104,7 @@ let get_block (loc : Loc.t) cfg =
           failwithf "No cfg label for linearid %d in %s" dbg.line dbg.file
             ()
       | Some label -> (
-          match Cfg_builder.get_block cfg label with
+          match Cfg.get_block cfg.cfg label with
           | Some block -> Some block
           | None ->
               failwithf
@@ -167,10 +167,10 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
               printf "Tailcall from linid=%d from_label=%d %Ld"
                 from_linearid from_block.start count
         | Raise _ ->
-            (* target must be a hanlder block *)
+            (* target must be a handler block *)
             assert (Cfg_builder.is_trap_handler cfg to_block.start)
         | Branch _ | Switch _ ->
-            let successors = Cfg_builder.successor_labels cfg from_block in
+            let successors = Cfg.successor_labels cfg.cfg from_block in
             assert (List.mem successors to_block.start ~equal:Int.equal);
             Block_info.add_branch bi b )
       else
@@ -284,7 +284,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
            profile. *)
         if
           first_instr_linearid = linearid
-          && ( to_block.start = Cfg_builder.entry_label cfg
+          && ( to_block.start = cfg.cfg.entry_label
              (* Callee *)
              || Cfg_builder.is_trap_handler cfg to_block.start
                 (* Exception handler *) )
@@ -310,7 +310,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
             Cfg.LabelSet.iter
               (fun pred_label ->
                 let pred =
-                  Option.value_exn (Cfg_builder.get_block cfg pred_label)
+                  Option.value_exn (Cfg.get_block cfg.cfg pred_label)
                 in
                 match pred.terminator.desc with
                 | Branch [ (Always, label) ] when label = to_block.start ->
@@ -366,8 +366,9 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
      including to_block *)
   try
     let fallthrough =
-      Cfg_builder.get_layout cfg
-      |> List.drop_while ~f:(fun lbl -> not (lbl = from_lbl))
+      List.drop_while
+        ~f:(fun lbl -> not (lbl = from_lbl))
+        Cfg_builder.(cfg.layout)
     in
     let fallthrough =
       match List.findi fallthrough ~f:(fun _ lbl -> lbl = to_lbl) with
@@ -379,13 +380,12 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
         from_lbl to_lbl;
       List.iter fallthrough ~f:(fun lbl -> printf " %d" lbl);
       printf "\nlayout=";
-      List.iter (Cfg_builder.get_layout cfg) ~f:(fun lbl ->
-          printf " %d" lbl);
+      List.iter Cfg_builder.(cfg.layout) ~f:(fun lbl -> printf " %d" lbl);
       printf "\n" );
 
     (* Check that all terminators fall through *)
     let check_fallthrough src_lbl dst_lbl =
-      let block = Option.value_exn (Cfg_builder.get_block cfg src_lbl) in
+      let block = Option.value_exn (Cfg.get_block cfg.cfg src_lbl) in
       match block.terminator.desc with
       | Branch _ | Switch _ ->
           if !verbose then (
@@ -394,11 +394,11 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
                src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
               func.name from_lbl to_lbl src_lbl dst_lbl;
-            List.iter (Cfg_builder.successor_labels cfg block)
-              ~f:(fun lbl -> printf "%d\n" lbl) );
+            List.iter (Cfg.successor_labels cfg.cfg block) ~f:(fun lbl ->
+                printf "%d\n" lbl) );
           if
             List.mem
-              (Cfg_builder.successor_labels cfg block)
+              (Cfg.successor_labels cfg.cfg block)
               dst_lbl ~equal:Int.equal
           then src_lbl
           else (
@@ -429,14 +429,10 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
     let record_fallthrough src_lbl dst_lbl =
       if !verbose then
         printf "record_fallthrough %d->%d count=%Ld\n" src_lbl dst_lbl count;
-      let dst_block =
-        Option.value_exn (Cfg_builder.get_block cfg dst_lbl)
-      in
+      let dst_block = Option.value_exn (Cfg.get_block cfg.cfg dst_lbl) in
       record t dst_block ~count;
       let target_bi = get_block_info t dst_block in
-      let src_block =
-        Option.value_exn (Cfg_builder.get_block cfg src_lbl)
-      in
+      let src_block = Option.value_exn (Cfg.get_block cfg.cfg src_lbl) in
       let bi = get_block_info t src_block in
       let b =
         {

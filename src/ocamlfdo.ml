@@ -137,7 +137,9 @@ let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
 
 let report_cfg ~name title cfg =
-  Report.with_outchannel ~name ~title ~sub:"lin" (Cfg_builder.print "") cfg
+  Report.with_outchannel ~name ~title ~sub:"lin"
+    (Cfg_to_linear.debug_print "")
+    cfg
 
 exception Not_equal_reg_array
 
@@ -210,11 +212,11 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   in
   let transform f =
     print_linear "Before" f;
-    let cfg = Cfg_builder.from_linear f ~preserve_orig_labels:false in
+    let cfg = Linear_to_cfg.run f ~preserve_orig_labels:false in
     (* eliminate fallthrough implies dead block elimination *)
-    Cfg_builder.eliminate_fallthrough_blocks cfg;
+    Eliminate.fallthrough_blocks cfg;
     let new_cfg = Reorder.apply ~algo cfg in
-    let new_body = Cfg_builder.to_linear new_cfg ~extra_debug in
+    let new_body = Cfg_to_linear.run new_cfg ~extra_debug in
     let fnew = { f with fun_body = new_body } in
     print_linear "After" fnew;
     fnew
@@ -575,15 +577,11 @@ let opt_command =
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
-      and dot = flag_dot
-      and dot_show_instr = flag_dot_show_instr
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
       and files = anon_files in
       verbose := v;
-      Cfg_builder.dot_format := dot;
-      Cfg_builder.dot_show_instr := dot_show_instr;
       if q then quiet ();
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
