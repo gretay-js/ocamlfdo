@@ -15,7 +15,7 @@ open Core
 open Loc
 open Func
 
-let verbose = ref false
+let verbose = ref true
 
 type t = {
   (* map raw addresses to locations *)

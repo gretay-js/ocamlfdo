@@ -36,7 +36,7 @@ type t = {
   inverse : (string, (int, Int64.t) Hashtbl.t) Hashtbl.t;
 }
 
-let verbose = ref false
+let verbose = ref true
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable [ Unix.O_RDONLY ] 0 in
