@@ -15,7 +15,7 @@
 (*   special exception on linking described in the file LICENSE.          *)
 (*                                                                        *)
 (**************************************************************************)
-open Base
+open Core
 
 type 'a interval = {
   l : Int64.t;
@@ -23,9 +23,12 @@ type 'a interval = {
   v : 'a;
 }
 
+(* Interval's lower bound is the key. *)
 type 'a t = 'a interval Map.M(Int64).t
 
 let empty = Map.empty (module Int64)
+
+let _verbose = true
 
 let enclosing t a =
   match Map.closest_key t `Less_or_equal_to a with
@@ -33,31 +36,41 @@ let enclosing t a =
   | Some (_, interval) ->
       let open Int64 in
       assert (interval.l <= a);
-      if a <= interval.r then Some interval else None
+      if a < interval.r then Some interval else None
 
-(* Checks if t contains k *)
-let contains t k =
-  match enclosing t k with
-  | None -> false
-  | Some _ -> true
+let _print msg = function
+  | None -> printf "%s: none\n" msg
+  | Some i -> printf "%s: [0x%Lx, 0x%Lx]\n" msg i.l i.r
 
-(* Checks if t has an interval strictly contained in i, assuming that t does
-   not contain i.l and i.r themselves. *)
-let contained t i =
-  match Map.closest_key t `Less_than i.r with
-  | None -> false
-  | Some (_, interval) ->
-      let open Int64 in
-      assert (interval.l < i.r);
-      assert (interval.r < i.r);
-      i.l < interval.l
+(* Checks whether [i] is disjoint from all the intervals in t. *)
+let disjoint t i =
+  (* Find intervals in [t] that are immediately below and above [i.l], and
+     check their boundaries: below.r <= i.l and i.r <= above.l *)
+
+  (* use functions not a variables for short-circuit evaluation *)
+  let check_below () =
+    match Map.closest_key t `Less_or_equal_to i.l with
+    | None -> true
+    | Some (_, below) ->
+        let open Int64 in
+        assert (below.l <= i.l);
+        if below.r <= i.l then true else false
+  in
+  let check_above () =
+    match Map.closest_key t `Greater_than i.l with
+    | None -> true
+    | Some (_, above) ->
+        let open Int64 in
+        assert (i.l <= above.l);
+        if i.r <= above.l then true else false
+  in
+  check_below () && check_above ()
 
 let insert t interval =
-  (* Check that the new interval is disjoint from all existing intervals *)
-  (* First, check that the bounds are not contained in another interval *)
-  assert (not (contains t interval.l));
-  assert (not (contains t interval.r));
+  (* Non-empty intervals only *)
+  assert (interval.l < interval.r);
 
-  (* Second, check that there is no interval contained between the bounds. *)
-  assert (not (contained t interval));
+  (* Check that the new interval is disjoint from all existing intervals in
+     [t] *)
+  assert (disjoint t interval);
   Map.add_exn t ~key:interval.l ~data:interval
