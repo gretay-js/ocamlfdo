@@ -449,7 +449,10 @@ let resolve_function_containing t ~program_counter =
           in
           let rec find_func syms =
             match syms with
-            | [] -> None
+            | [] ->
+                report "Caching fun " None program_counter;
+                Hashtbl.add t.resolved_fun program_counter None;
+                None
             | sym :: tail ->
                 let start = Owee_elf.Symbol_table.Symbol.value sym in
                 let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
@@ -465,8 +468,14 @@ let resolve_function_containing t ~program_counter =
                    end of interval covers the start of the next symbol. This
                    may be a bug in Owee, or maybe intentional, but we can
                    work around it here. *)
-                if
-                  start = program_counter
+                if start = program_counter && size = 0L then (
+                  Printf.printf
+                    "Enclosing function is of size 0: start=0x%Lx \
+                     finish=0x%Lx pc=0x%Lx\n"
+                    start finish program_counter;
+                  find_func tail )
+                else if
+                  (size > 0L && start = program_counter)
                   || (* size is sometimes 0 even when the function is
                         non-empty *)
                      (start < program_counter && program_counter < finish)

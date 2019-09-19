@@ -40,6 +40,40 @@ let first_id (block : Cfg.block) =
   | [] -> block.terminator.id
   | hd :: _ -> hd.id
 
+(* Some Linear instructions don't generate any code on some platforms. There
+   might not be any execounters associated with them.
+
+   Check that [id] can be the first instruction emitted in this block, even
+   though the actual first instruction in Linear IR may be different.
+
+   This is used as a safety check when mapping execution counters to blocks.
+
+   We don't know what the backends actually generate, so this check is only
+   an approximation. At the time of writing this, these are the only
+   instructions that might not result in any code, on some backend.
+
+   Some of these instructions result in dwarf info (such as cfi directives),
+   and may even result in a debug .loc line that is not associated with any
+   assembly instruction and may bedirectly followed by another .loc.
+
+   Both .loc will be associated with the same code address in Dwarf debug
+   line programs, but usually only the last one is recorded in the profile
+   (and likely will be, as it is the closed one associated with the address,
+   although both .loc will be associated with the same address). *)
+let can_be_first_emitted_id id (block : Cfg.block) =
+  let open Cfg in
+  let rec check_first body =
+    match body with
+    | [] -> block.terminator.id = id
+    | hd :: tl -> (
+        if hd.id = id then true
+        else
+          match hd.desc with
+          | Reloadretaddr | Prologue | Poptrap -> check_first tl
+          | _ -> false )
+  in
+  check_first block.body
+
 let get_block_info t (block : Cfg.block) =
   Hashtbl.find_or_add t block.start ~default:(fun () ->
       let terminator_id =
@@ -142,7 +176,16 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       let from_linearid = get_linearid from_loc in
       let to_linearid = get_linearid to_loc in
       let to_block_first_id = first_id to_block in
-      assert (to_block_first_id = to_linearid);
+      if !verbose then
+        printf
+          "Intra branch count %Ld from 0x%Lx (id=%d,lbl=%d) to 0x%Lx \
+           (id=%d,lbl=%d,first_id=%d)\n"
+          count from_loc.addr from_linearid from_block.start to_loc.addr
+          to_linearid to_block.start to_block_first_id;
+
+      assert (
+        to_block_first_id = to_linearid
+        || can_be_first_emitted_id to_linearid to_block );
       let bi = get_block_info t from_block in
       let b =
         {

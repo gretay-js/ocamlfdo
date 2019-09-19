@@ -13,6 +13,8 @@
 (**************************************************************************)
 open Core
 
+let verbose = ref true
+
 (* map name to the corresponding md5 *)
 type tbl = Md5.t Hashtbl.M(String).t
 
@@ -38,16 +40,17 @@ let check_and_add t ~name crc ~file =
             failwith
               (sprintf
                  "Linear IR for %s from file %s does not match the version \
-                  of this IR used for creating the profile.\n\
+                  of this IR used for creating the profiled binary.\n\
                  \               old crc: %s\n\
                  \               new crc: %s"
                  name file (Md5.to_hex old_crc) (Md5.to_hex crc)))
         ~if_not_found:(fun name ->
-          failwithf
-            "Linear IR for %s from file %s was not used for creating\n\
-            \                the profile.\n\
-            \                new crc: %s"
-            name file (Md5.to_hex crc) ()) );
+          if !verbose then
+            Printf.printf
+              "Linear IR for %s from file %s was not used for creating the \
+               profiled binary.\n\
+               new crc: %s"
+              name file (Md5.to_hex crc)) );
 
   (* Add to accumulator *)
   Hashtbl.update t.acc name ~f:(function

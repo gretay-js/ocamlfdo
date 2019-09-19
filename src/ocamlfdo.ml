@@ -15,7 +15,9 @@ open Core
 open Core.Poly
 open Ocamlcfg
 
-let verbose = ref false
+let verbosity_level = 0
+
+let verbose = ref true
 
 let strict = ref false
 
@@ -33,6 +35,7 @@ let quiet () =
   Reorder.verbose := false;
   Report.verbose := false;
   Cfg_builder.verbose := false;
+  Crcs.verbose := false;
   ()
 
 let time f x =
@@ -44,10 +47,11 @@ let time f x =
   fx
 
 let print_linear msg f =
-  if false then
+  if verbosity_level > 10 then
     if !verbose then (
       printf "%s processing %s\n" f.Linear.fun_name msg;
-      Format.kasprintf prerr_endline "@;%a" Printlinear.fundecl f )
+      Printlinear.fundecl Format.std_formatter f;
+      Format.pp_print_flush Format.std_formatter () )
 
 let make_fdo_filename file = file ^ "-fdo"
 

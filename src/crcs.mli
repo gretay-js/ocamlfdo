@@ -35,3 +35,5 @@ val emit_symbols : t -> Cmm.data_item list
 val symbol_prefix : string
 
 val symbol_sep : char
+
+val verbose : bool ref
