@@ -330,11 +330,7 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
         (* Find the corresponding instruction and update its counters.*)
         let linearid = get_linearid to_loc in
         let _bi = get_block_info t to_block in
-        let first_instr_linearid =
-          match to_block.body with
-          | [] -> to_block.terminator.id
-          | hd :: _ -> hd.id
-        in
+        let first_instr_linearid = first_id to_block in
         (* We could infer call targets from this info, but its not
            implemented yet because we don't have much use for it and it
            would change the way Block_info.add_call maps callsites using
@@ -343,7 +339,8 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
            can be installed at most once, as guaranteed by the aggregated
            profile. *)
         if
-          first_instr_linearid = linearid
+          ( first_instr_linearid = linearid
+          || can_be_first_emitted_id linearid to_block )
           && ( to_block.start = cfg.cfg.entry_label
              (* Callee *)
              || Cfg_builder.is_trap_handler cfg to_block.start
@@ -357,11 +354,13 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
             match instr.desc with
             | Call _ -> ()
             | _ ->
-                if !verbose then
+                if !verbose then (
                   printf
                     "record_entry failed at 0x%Lx -> 0x%Lx linid=%d \
                      unrecognized as call instr.id=%d\n"
                     from_loc.addr to_loc.addr linearid instr.id;
+                  Print.print_basic Format.std_formatter instr;
+                  Format.pp_print_flush Format.std_formatter () );
                 assert false
           in
           let find_prev_block_call () =
@@ -380,7 +379,8 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
                     if !verbose then
                       printf
                         "record_entry failed at 0x%Lx -> 0x%Lx \
-                         to_first_instr_linid=%d to_linearid=%d%s\n"
+                         to_first_instr_linid=%d to_linearid=%d\n\
+                         %s\n"
                         from_loc.addr to_loc.addr first_instr_linearid
                         linearid
                         (terminator_to_string pred.terminator.desc))

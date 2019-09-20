@@ -141,9 +141,7 @@ let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
 
 let report_cfg ~name title cfg =
-  Report.with_outchannel ~name ~title ~sub:"lin"
-    (Cfg_to_linear.debug_print "")
-    cfg
+  Report.with_outchannel ~name ~title ~sub:"lin" (Print.debug_print "") cfg
 
 exception Not_equal_reg_array
 

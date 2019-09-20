@@ -48,13 +48,17 @@ let mk size =
   }
 
 let get_func t addr =
-  let loc = Hashtbl.find_exn t.addr2loc addr in
-  match loc.rel with
-  | None -> None
-  | Some rel ->
-      let id = rel.id in
-      let func = Hashtbl.find_exn t.functions id in
-      Some func
+  match Hashtbl.find t.addr2loc addr with
+  | None ->
+      printf "Not found any cached location for address 0x%Lx\n" addr;
+      assert false
+  | Some loc -> (
+      match loc.rel with
+      | None -> None
+      | Some rel ->
+          let id = rel.id in
+          let func = Hashtbl.find_exn t.functions id in
+          Some func )
 
 (* Partition aggregated_perf to functions and calculate total execution
    counts of each function. Total execution count of a function is
@@ -280,8 +284,7 @@ let add t name cfg =
       if Int64.(func.count > 0L) && func.has_linearids then (
         if !verbose then (
           printf "compute_cfg_execounts for %s\n" name;
-          Ocamlcfg.Cfg_to_linear.debug_print "execount" Out_channel.stdout
-            cfg );
+          Ocamlcfg.Print.debug_print "execount" Out_channel.stdout cfg );
         let cfg_info = create_cfg_info t func cfg in
         Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
         Some cfg_info )
