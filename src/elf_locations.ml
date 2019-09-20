@@ -469,10 +469,11 @@ let resolve_function_containing t ~program_counter =
                    may be a bug in Owee, or maybe intentional, but we can
                    work around it here. *)
                 if start = program_counter && size = 0L then (
-                  Printf.printf
-                    "Enclosing function is of size 0: start=0x%Lx \
-                     finish=0x%Lx pc=0x%Lx\n"
-                    start finish program_counter;
+                  if !verbose then
+                    Printf.printf
+                      "Enclosing function is of size 0: start=0x%Lx \
+                       finish=0x%Lx pc=0x%Lx\n"
+                      start finish program_counter;
                   find_func tail )
                 else if
                   (size > 0L && start = program_counter)
