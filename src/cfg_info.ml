@@ -182,10 +182,6 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
            (id=%d,lbl=%d,first_id=%d)\n"
           count from_loc.addr from_linearid from_block.start to_loc.addr
           to_linearid to_block.start to_block_first_id;
-
-      assert (
-        to_block_first_id = to_linearid
-        || can_be_first_emitted_id to_linearid to_block );
       let bi = get_block_info t from_block in
       let b =
         {
@@ -201,18 +197,39 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       if from_block.terminator.id = from_linearid then (
         (* Find the corresponding successor *)
         match from_block.terminator.desc with
-        | Return
-        (* return from a recursive call *)
-        (* target must be right after a call *)
+        | Return ->
+            (* return from a recursive call *)
+            (* target must be right after a call *)
+            if !verbose then
+              printf "Return from (label=%d) to (label=%d)" from_block.start
+                to_block.start
+        (* CR-soon gyorsh: We could count the reverse of this edge as a
+           call. It's a bit tricky as we need to find the instruction right
+           before the to_loc and that is the callsite, and we need to
+           construct callee from the entry location of the current function
+           (cfg.entry_label). This will count the same call twice if both
+           call and return are sampled. We should try to discard matching
+           counts. *)
+        (* let call_site = callsite_of_return_site to_loc
+         * let cbi = get_block_info t (get_block call_site)
+         * let callee = { b with
+         *                (* start of this function *)
+         *                target_label = cfg.entry_label;
+         *                target = Some loc?;
+         *              } in
+         * add_call cbi ~callsite ~callee *)
         | Tailcall _ ->
-            (* tailcall *)
             if !verbose then
               printf "Tailcall from linid=%d from_label=%d %Ld"
-                from_linearid from_block.start count
+                from_linearid from_block.start count;
+            add_call bi ~callsite:from_loc ~callee:b
         | Raise _ ->
             (* target must be a handler block *)
             assert (Cfg_builder.is_trap_handler cfg to_block.start)
         | Branch _ | Switch _ ->
+            assert (
+              to_block_first_id = to_linearid
+              || can_be_first_emitted_id to_linearid to_block );
             let successors = Cfg.successor_labels cfg.cfg from_block in
             assert (List.mem successors to_block.start ~equal:Int.equal);
             Block_info.add_branch bi b )

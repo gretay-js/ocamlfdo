@@ -15,7 +15,7 @@ open Core
 open Loc
 open Func
 
-let verbose = ref true
+let verbose = ref false
 
 type t = {
   (* map raw addresses to locations *)
@@ -90,7 +90,8 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       let update_br func =
         func.count <- Int64.(func.count + data);
         Hashtbl.add_exn func.agg.branches ~key ~data;
-        Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts
+        if mispredicts > 0L then
+          Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts
       in
       process key update_br);
   Hashtbl.iteri agg.traces ~f:(fun ~key ~data ->
@@ -253,12 +254,14 @@ let create_cfg_info t func cfg =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
     in
     let ratio = Int64.(func.malformed_traces * 100L / total_traces) in
-    printf "Found %Ld malformed traces out of %Ld (%Ld)\n"
+    printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n"
       func.malformed_traces total_traces ratio );
 
   (* Associate branch counts with basic blocks *)
   Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
-      let mispredicts = Hashtbl.find_exn func.agg.mispredicts key in
+      let mispredicts =
+        Option.value (Hashtbl.find func.agg.mispredicts key) ~default:0L
+      in
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in

@@ -15,7 +15,7 @@ open Core
 open Core.Poly
 open Ocamlcfg
 
-let verbosity_level = 0
+let verbosity_level = 20
 
 let verbose = ref true
 

@@ -164,50 +164,76 @@ type stats = {
   lbr : int;
 }
 
+let inc table key =
+  Hashtbl.update table key ~f:(fun v ->
+      Int64.(1L + Option.value ~default:0L v))
+
+let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
+  (* Instructions executed between branches can be inferred from brstack *)
+  match prev with
+  | None -> ()
+  | Some prev ->
+      assert (prev.index = cur.index + 1);
+      let from_addr = prev.to_addr in
+      let to_addr = cur.from_addr in
+      if !verbose then printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
+
+      (* There appear to be a problem with perf output: last LBR entry is
+         repeated twice sometimes. It may be related to the recent problem
+         mentioned in a patch for perf script: Fix LBR skid dump problems in
+         brstackinsn https://github.com/torvalds/linux/commit
+         /61f611593f2c90547cb09c0bf6977414454a27e6 *)
+      let dup =
+        prev.from_addr = cur.from_addr && prev.to_addr = cur.to_addr
+      in
+      let mis_prev = mispredicted prev.mispredict in
+      let mis_cur = mispredicted cur.mispredict in
+      let fallthrough_backwards = from_addr >= to_addr in
+      if dup then
+        if !verbose then
+          printf
+            "Duplicate entry in LBR: 0x%Lx->0x%Lx mis_prev=%b mis_cur=%b \
+             last=%b (from_addr >= to_addr)=%b\n"
+            prev.from_addr prev.to_addr mis_prev mis_cur is_last
+            (from_addr >= to_addr);
+      if fallthrough_backwards then
+        if dup && is_last then (
+          if !verbose then
+            printf "Duplicated last LBR entry is ignored: 0x%Lx->0x%Lx\n"
+              from_addr to_addr )
+        else (
+          if !verbose then
+            printf
+              "Malformed trace detected that is not a result of a \
+               duplicated last entry 0x%Lx->0x%Lx (from_addr >= to_addr)\n"
+              from_addr to_addr;
+          assert false )
+      else
+        (* branches *)
+        let key = (cur.from_addr, cur.to_addr) in
+        inc aggregated.branches key;
+        if mispredicted cur.mispredict then inc aggregated.mispredicts key;
+
+        (* fallthrough traces *)
+        inc aggregated.traces key
+
+(* CR-soon gyorsh: aggregate during parsing of perf profile *)
+let rec aggregate_brstack prev brstack aggregated =
+  match brstack with
+  | [] -> ()
+  | cur :: tl ->
+      let is_last = List.is_empty tl in
+      aggregate_br prev cur is_last aggregated;
+      aggregate_brstack (Some cur) tl aggregated
+
+let aggregate sample (aggregated : Aggregated_perf_profile.t) =
+  inc aggregated.instructions sample.ip;
+  aggregate_brstack None sample.brstack aggregated
+
 let read_and_aggregate ?(expected_pid = None) filename =
   if !verbose then printf "Aggregate perf profile from %s.\n" filename;
-  let inc table key =
-    Hashtbl.update table key ~f:(fun v ->
-        Int64.(1L + Option.value ~default:0L v))
-  in
+
   let aggregated = Aggregated_perf_profile.empty () in
-  (* CR-soon gyorsh: aggregate during parsing of perf profile *)
-  let aggregate sample =
-    inc aggregated.instructions sample.ip;
-    List.iter sample.brstack ~f:(fun br ->
-        let key = (br.from_addr, br.to_addr) in
-        inc aggregated.branches key;
-        if mispredicted br.mispredict then inc aggregated.mispredicts key);
-
-    (* Instructions executed between branches can be inferred from brstack *)
-    ignore
-      ( List.fold sample.brstack ~init:None ~f:(fun prev cur ->
-            match prev with
-            | None -> Some cur
-            | Some prev ->
-                assert (prev.index = cur.index + 1);
-                let from_addr = prev.to_addr in
-                let to_addr = cur.from_addr in
-                let key = (from_addr, to_addr) in
-                if !verbose then
-                  printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
-                if Int64.(from_addr >= to_addr) then
-                  if !verbose then
-                    printf
-                      "Malformed trace ignored 0x%Lx->0x%Lx (from_addr >= \
-                       to_addr)\n"
-                      from_addr to_addr;
-
-                (* There appear to be a problem with perf output: last LBR
-                   entry is repeated twice sometimes. It may be related to
-                   the recent problem mentioned in a patch for perf script:
-                   Fix LBR skid dump problems in brstackinsn
-                   https://github.com/torvalds/linux/commit
-                   /61f611593f2c90547cb09c0bf6977414454a27e6 *)
-                inc aggregated.traces key;
-                Some cur)
-        : br option )
-  in
   let keep_pid = check_keep_pid ?expected_pid in
   let empty_stats = { ignored = 0; total = 0; lbr = 0 } in
   let f stats row =
@@ -215,7 +241,7 @@ let read_and_aggregate ?(expected_pid = None) filename =
     | None ->
         { stats with ignored = stats.ignored + 1; total = stats.total + 1 }
     | Some sample ->
-        aggregate sample;
+        aggregate sample aggregated;
         {
           stats with
           total = stats.total + 1;
