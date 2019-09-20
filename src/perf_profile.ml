@@ -196,18 +196,16 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
              last=%b (from_addr >= to_addr)=%b\n"
             prev.from_addr prev.to_addr mis_prev mis_cur is_last
             (from_addr >= to_addr);
-      if fallthrough_backwards then
+      if fallthrough_backwards then (
         if dup && is_last then (
           if !verbose then
             printf "Duplicated last LBR entry is ignored: 0x%Lx->0x%Lx\n"
               from_addr to_addr )
-        else (
-          if !verbose then
-            printf
-              "Malformed trace detected that is not a result of a \
-               duplicated last entry 0x%Lx->0x%Lx (from_addr >= to_addr)\n"
-              from_addr to_addr;
-          assert false )
+        else if !verbose then
+          printf
+            "Malformed trace is ignored 0x%Lx->0x%Lx (from_addr >= \
+             to_addr), it was not duplicated last entry.\n"
+            from_addr to_addr )
       else
         (* branches *)
         let key = (cur.from_addr, cur.to_addr) in
@@ -215,6 +213,7 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
         if mispredicted cur.mispredict then inc aggregated.mispredicts key;
 
         (* fallthrough traces *)
+        let key = (from_addr, to_addr) in
         inc aggregated.traces key
 
 (* CR-soon gyorsh: aggregate during parsing of perf profile *)
