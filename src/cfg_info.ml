@@ -350,41 +350,49 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
           (* Return from a call. Find predecessor instruction and check that
              it is a call. There could be more than one predecessor. We have
              enough information to find which one in some cases. *)
-          let record_call (instr : Cfg.basic Cfg.instruction) =
+          let is_call (instr : Cfg.basic Cfg.instruction) =
             match instr.desc with
-            | Call _ -> ()
-            | _ ->
-                if !verbose then (
-                  printf
-                    "record_entry failed at 0x%Lx -> 0x%Lx linid=%d \
-                     unrecognized as call instr.id=%d\n"
-                    from_loc.addr to_loc.addr linearid instr.id;
-                  Print.print_basic Format.std_formatter instr;
-                  Format.pp_print_flush Format.std_formatter () );
-                assert false
+            | Call _ | Entertrap -> true
+            | _ -> false
+          in
+          let record_call (instr : Cfg.basic Cfg.instruction) =
+            if not (is_call instr) then (
+              if !verbose then (
+                printf
+                  "record_entry failed at 0x%Lx -> 0x%Lx linid=%d \
+                   unrecognized as call instr.id=%d\n"
+                  from_loc.addr to_loc.addr linearid instr.id;
+                Print.print_basic Format.std_formatter instr;
+                Format.pp_print_flush Format.std_formatter ();
+                printf "\n" );
+              assert false )
           in
           let find_prev_block_call () =
             (* find a predecessor block that must end in a call and
                fallthrough. *)
-            Cfg.LabelSet.iter
-              (fun pred_label ->
-                let pred =
-                  Option.value_exn (Cfg.get_block cfg.cfg pred_label)
-                in
-                match pred.terminator.desc with
-                | Branch [ (Always, label) ] when label = to_block.start ->
-                    let last_instr = List.last_exn to_block.body in
-                    record_call last_instr
-                | _ ->
-                    if !verbose then
-                      printf
-                        "record_entry failed at 0x%Lx -> 0x%Lx \
-                         to_first_instr_linid=%d to_linearid=%d\n\
-                         %s\n"
-                        from_loc.addr to_loc.addr first_instr_linearid
-                        linearid
-                        (terminator_to_string pred.terminator.desc))
-              to_block.predecessors
+            let found =
+              Cfg.LabelSet.exists
+                (fun pred_label ->
+                  let pred =
+                    Option.value_exn (Cfg.get_block cfg.cfg pred_label)
+                  in
+                  match pred.terminator.desc with
+                  | Branch [ (Always, label) ] when label = to_block.start
+                    -> (
+                      match List.last to_block.body with
+                      | None ->
+                          (* could be the predecessor but we don't recurse
+                             further *)
+                          false
+                      | Some last_instr -> is_call last_instr )
+                  | _ -> false)
+                to_block.predecessors
+            in
+            if (not found) && !verbose then
+              printf
+                "record_entry failed at 0x%Lx -> 0x%Lx \
+                 to_first_instr_linid=%d to_linearid=%d\n\n"
+                from_loc.addr to_loc.addr first_instr_linearid linearid
           in
           if first_instr_linearid = linearid then find_prev_block_call ()
           else

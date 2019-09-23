@@ -259,7 +259,11 @@ let create_cfg_info t func cfg =
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
     in
-    let ratio = Int64.(func.malformed_traces * 100L / total_traces) in
+    let ratio =
+      if total_traces > 0L then
+        Int64.(func.malformed_traces * 100L / total_traces)
+      else 0L
+    in
     printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n"
       func.malformed_traces total_traces ratio );
 
