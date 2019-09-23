@@ -15,7 +15,7 @@
 
 open Core
 
-let verbose = ref false
+let verbose = ref true
 
 type mispredict_flag =
   | M
@@ -170,12 +170,18 @@ let inc table key =
 
 let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
   (* Instructions executed between branches can be inferred from brstack *)
+  let add_br () =
+    let key = (cur.from_addr, cur.to_addr) in
+    inc aggregated.branches key;
+    if mispredicted cur.mispredict then inc aggregated.mispredicts key
+  in
   match prev with
-  | None -> ()
+  | None -> add_br ()
   | Some prev ->
       assert (prev.index = cur.index + 1);
       let from_addr = prev.to_addr in
       let to_addr = cur.from_addr in
+      if !verbose then printf "cur 0x%Lx->0x%Lx\n" cur.from_addr cur.to_addr;
       if !verbose then printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
 
       (* There appear to be a problem with perf output: last LBR entry is
@@ -202,25 +208,24 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
           printf "Duplicated last LBR entry is ignored: 0x%Lx->0x%Lx\n"
             from_addr to_addr;
         if not fallthrough_backwards then
-          printf
-            "Duplicate last entry without fallthrough backwards is \
-             unexpected 0x%Lx->0x%Lx.\n"
-            from_addr to_addr )
-      else
+          if !verbose then
+            printf
+              "Duplicate last entry without fallthrough backwards is \
+               unexpected 0x%Lx->0x%Lx.\n"
+              from_addr to_addr )
+      else (
         (* branches *)
-        let key = (cur.from_addr, cur.to_addr) in
-        inc aggregated.branches key;
-        if mispredicted cur.mispredict then inc aggregated.mispredicts key;
+        add_br ();
 
+        (* fallthrough traces *)
         if fallthrough_backwards then
           printf
             "Malformed trace 0x%Lx->0x%Lx (from_addr >= to_addr), it was \
              not duplicated last entry.\n"
             from_addr to_addr
         else
-          (* fallthrough traces *)
           let key = (from_addr, to_addr) in
-          inc aggregated.traces key
+          inc aggregated.traces key )
 
 (* CR-soon gyorsh: aggregate during parsing of perf profile *)
 let rec aggregate_brstack prev brstack aggregated =

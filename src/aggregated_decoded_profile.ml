@@ -15,7 +15,7 @@ open Core
 open Loc
 open Func
 
-let verbose = ref false
+let verbose = ref true
 
 type t = {
   (* map raw addresses to locations *)
@@ -170,8 +170,9 @@ let create locations (agg : Aggregated_perf_profile.t) =
   (* Elf_locations does not use Core, so we need to create Caml.Hashtbl *)
   let addresses = Caml.Hashtbl.create len in
   let add key =
-    if not (Caml.Hashtbl.mem addresses key) then
-      Caml.Hashtbl.add addresses key ()
+    if not (Caml.Hashtbl.mem addresses key) then (
+      if !verbose then printf "Adding key 0x%Lx\n" key;
+      Caml.Hashtbl.add addresses key () )
     else if !verbose then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =
@@ -194,6 +195,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   Caml.Hashtbl.iter
     (fun addr _ ->
       let loc = decode_loc t locations addr in
+      if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
       Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc)
     addresses;
   create_func_execounts t agg;
