@@ -303,10 +303,13 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
 let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
     cfg =
   (* Branch into this function from another function, which may be unknown.
-     One of the following situations: Callee: branch target is the first
-     instr in the entry block. Return from call: branch target is a label
-     after the call site. Exception handler: branch target is a trap
-     handler. *)
+     One of the following situations:
+
+     Callee: branch target is the first instr in the entry block.
+
+     Return from call: branch target is a label after the call site.
+
+     Exception handler: branch target is a trap handler. *)
   if Int64.(from_loc.addr < 0L) then (
     if
       (* [from_loc.addr] of this branch does not belong to the binary and
@@ -324,91 +327,10 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
           printf
             "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
             count to_loc.addr
-    | Some to_block -> (
-        record t to_block ~count;
-
-        (* Find the corresponding instruction and update its counters.*)
-        let linearid = get_linearid to_loc in
-        let _bi = get_block_info t to_block in
-        let first_instr_linearid = first_id to_block in
-        (* We could infer call targets from this info, but its not
-           implemented yet because we don't have much use for it and it
-           would change the way Block_info.add_call maps callsites using
-           locations because we don't necessarily have a location for the
-           caller. Also note that add_call currently checks that each callee
-           can be installed at most once, as guaranteed by the aggregated
-           profile. *)
-        if
-          ( first_instr_linearid = linearid
-          || can_be_first_emitted_id linearid to_block )
-          && ( to_block.start = cfg.cfg.entry_label
-             (* Callee *)
-             || Cfg_builder.is_trap_handler cfg to_block.start
-                (* Exception handler *) )
-        then ( (* Block_info of potential callers can be updated *) )
-        else
-          (* Return from a call. Find predecessor instruction and check that
-             it is a call. There could be more than one predecessor. We have
-             enough information to find which one in some cases. *)
-          let is_call (instr : Cfg.basic Cfg.instruction) =
-            match instr.desc with
-            | Call _ | Entertrap -> true
-            | _ -> false
-          in
-          let record_call (instr : Cfg.basic Cfg.instruction) =
-            if not (is_call instr) then (
-              if !verbose then (
-                printf
-                  "record_entry failed at 0x%Lx -> 0x%Lx linid=%d \
-                   unrecognized as call instr.id=%d\n"
-                  from_loc.addr to_loc.addr linearid instr.id;
-                Print.print_basic Format.std_formatter instr;
-                Format.pp_print_flush Format.std_formatter ();
-                printf "\n" );
-              assert false )
-          in
-          let find_prev_block_call () =
-            (* find a predecessor block that must end in a call and
-               fallthrough. *)
-            let found =
-              Cfg.LabelSet.exists
-                (fun pred_label ->
-                  let pred =
-                    Option.value_exn (Cfg.get_block cfg.cfg pred_label)
-                  in
-                  match pred.terminator.desc with
-                  | Branch [ (Always, label) ] when label = to_block.start
-                    -> (
-                      match List.last to_block.body with
-                      | None ->
-                          (* could be the predecessor but we don't recurse
-                             further *)
-                          false
-                      | Some last_instr -> is_call last_instr )
-                  | _ -> false)
-                to_block.predecessors
-            in
-            if (not found) && !verbose then
-              printf
-                "record_entry failed at 0x%Lx -> 0x%Lx \
-                 to_first_instr_linid=%d to_linearid=%d\n\n"
-                from_loc.addr to_loc.addr first_instr_linearid linearid
-          in
-          if first_instr_linearid = linearid then find_prev_block_call ()
-          else
-            match prev_instr linearid to_block with
-            | Some instr -> record_call instr
-            | None -> (
-                (* instr with linearid must be the terminator *)
-                assert (to_block.terminator.id = linearid);
-                match to_block.body with
-                | [] ->
-                    (* empty body means the call was in one of the pred
-                       blocks *)
-                    find_prev_block_call ()
-                | _ ->
-                    let last_instr = List.last_exn to_block.body in
-                    record_call last_instr ) )
+    | Some to_block ->
+        (* CR-someday gyorsh: find the corresponding instruction and update
+           its counters.*)
+        record t to_block ~count
 
 (* Depending on the settings of perf record and the corresponding CPU
    configuration, LBR may capture different kinds of branches, including
