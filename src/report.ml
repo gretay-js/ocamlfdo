@@ -49,23 +49,16 @@ let with_ppf ~name ~title ~sub formatter x =
 
 let filename = sprintf "summary.%s" extension
 
-let summary_oc = ref None
-
 let log msg =
   if !verbose then printf "%s" msg;
-  match !summary_oc with
-  | None -> ()
-  | Some oc ->
+  Out_channel.with_file ~append:true ~binary:false filename ~f:(fun oc ->
       Printf.fprintf oc "%s%s" msg
-        (if String.is_suffix msg ~suffix:"\n" then "" else "\n");
-      Out_channel.flush oc
+        (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
 
 let start () =
   if !verbose then printf "Creating summary file %s\n" filename;
-  summary_oc := Some (Out_channel.create filename)
+  if Sys.file_exists_exn filename then (
+    if !verbose then printf "Removing old %s\n" filename;
+    Sys.remove filename )
 
-let finish () =
-  if !verbose then printf "Written summary to %s\n" filename;
-  match !summary_oc with
-  | None -> ()
-  | Some oc -> Out_channel.close oc
+let finish () = if !verbose then printf "Written summary to %s\n" filename
