@@ -33,7 +33,8 @@ let quiet () =
   Elf_locations.verbose := false;
   Ocaml_locations.verbose := false;
   Reorder.verbose := false;
-  Report.verbose := false;
+
+  (* Report.verbose := false; *)
   Cfg_builder.verbose := false;
   Crcs.verbose := false;
   ()
@@ -83,15 +84,43 @@ let load_crcs locations tbl =
                 failwithf "Duplicate crc for %s\nold:%s\nnew:%s\n" name
                   (Md5.to_hex old_crc) (Md5.to_hex crc) () ))
 
-let save_linker_script filename functions =
+let save_linker_script_hot filename functions =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
-  let chan = Out_channel.create filename in
-  List.iter functions ~f:(fun name -> fprintf chan "*(.text.%s)\n" name);
-  Out_channel.close chan
+  Out_channel.with_file filename ~f:(fun oc ->
+      List.iter functions ~f:(fun name ->
+          fprintf oc "*(.text.caml.%s)\n" name))
+
+let save_linker_script ~linker_script_template ~linker_script_hot
+    ~output_filename ~no_linker_script_hot =
+  let output_filename =
+    Option.value output_filename ~default:"linker-script"
+  in
+  let template =
+    Option.value linker_script_template ~default:"linker-script-template"
+  in
+  let hot = Option.value linker_script_hot ~default:"linker-script-hot" in
+  if !verbose then (
+    printf "Writing linker script to %s\n" output_filename;
+    printf "Template %s\n" template;
+    printf "Hot function layout %s\n" hot );
+  Out_channel.with_file output_filename ~f:(fun oc ->
+      In_channel.with_file template
+        ~f:
+          (In_channel.iter_lines ~f:(fun line ->
+               if
+                 String.equal (String.strip line)
+                   "INCLUDE linker-script-hot"
+               then (
+                 if not no_linker_script_hot then
+                   In_channel.with_file hot
+                     ~f:
+                       (In_channel.iter_lines ~f:(fun s ->
+                            fprintf oc "\t%s\n" s)) )
+               else Out_channel.fprintf oc "%s\n" line)))
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
-    ~linker_script_filename ~linearid_profile_filename ~write_linker_script
-    =
+    ~linker_script_hot_filename ~linearid_profile_filename
+    ~write_linker_script =
   let locations = load_locations binary_filename in
   let dirname = Filename.(realpath (dirname binary_filename)) in
   let linearid_profile_filename =
@@ -115,23 +144,23 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
 
   (* Create linker script *)
   if write_linker_script then (
-    let linker_script_filename =
-      match linker_script_filename with
-      | None -> dirname ^ "/linker-script-hot"
+    let linker_script_hot_filename =
+      Option.value linker_script_hot_filename
+        ~default:(binary_filename ^ ".linker-script")
       (* The default name does not depend on the input executable, so that
          the default template link-script can refer to it and won't need to
          be updated or written per executable. *)
       (* binary_filename ^ ".linker-script-hot" *)
-      | Some f -> f
+      (* dirname ^ "/linker-script-hot" *)
     in
     if !verbose then
-      printf "Writing linker script hot to %s\n" linker_script_filename;
+      printf "Writing linker script hot to %s\n" linker_script_hot_filename;
     let open Config_reorder.Reorder_functions in
     match reorder_functions with
     | No -> ()
     | Execounts ->
         Aggregated_decoded_profile.top_functions linearid_profile
-        |> save_linker_script linker_script_filename
+        |> save_linker_script_hot linker_script_hot_filename
     | Hot_clusters ->
         (* Do we ever need the cfg to decide on function order? *)
         failwith "Not implemented" );
@@ -448,10 +477,20 @@ module Commonflag = struct
       doc = "filename decoded profile";
     }
 
-  let flag_linker_script_filename =
+  let flag_output_filename =
+    { name = "-o"; doc = "filename output"; aliases = [] }
+
+  let flag_linker_script_template_filename =
     {
-      name = "-linker-script";
-      doc = "filename linker script";
+      name = "-linker-script-template";
+      doc = "filename linker script template";
+      aliases = [];
+    }
+
+  let flag_linker_script_hot_filename =
+    {
+      name = "-linker-script-hot";
+      doc = "filename hot functions layout for linker script";
       aliases = [];
     }
 end
@@ -476,10 +515,10 @@ let flag_v =
 
 let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
-let flag_no_linker_script =
+let flag_no_linker_script_hot =
   Command.Param.(
-    flag "-no-linker-script" no_arg
-      ~doc:" do not generate hot functions linker script")
+    flag "-no-linker-script-hot" no_arg
+      ~doc:" do not generate hot functions layout for linker script")
 
 let flag_extra_debug =
   Command.Param.(
@@ -545,15 +584,15 @@ let decode_command =
       and reorder_functions = flag_reorder_functions
       and linearid_profile_filename =
         Commonflag.(optional flag_linearid_profile_filename)
-      and linker_script_filename =
-        Commonflag.(optional flag_linker_script_filename)
-      and no_linker_script = flag_no_linker_script in
+      and linker_script_hot_filename =
+        Commonflag.(optional flag_linker_script_hot_filename)
+      and no_linker_script_hot = flag_no_linker_script_hot in
       verbose := v;
       if q then quiet ();
-      let write_linker_script = not no_linker_script in
+      let write_linker_script = not no_linker_script_hot in
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
-          ~linker_script_filename ~linearid_profile_filename
+          ~linker_script_hot_filename ~linearid_profile_filename
           ~write_linker_script)
 
 let opt_command =
@@ -644,7 +683,7 @@ let compile_command =
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
-      and no_linker_script = flag_no_linker_script
+      and no_linker_script_hot = flag_no_linker_script_hot
       and args =
         Command.Param.(
           flag "--" escape
@@ -652,12 +691,50 @@ let compile_command =
       in
       verbose := v;
       if q then quiet ();
-      let use_linker_script = not no_linker_script in
+      let use_linker_script = not no_linker_script_hot in
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
           ~func_crc ~report ~use_linker_script)
+
+let linker_script_command =
+  Command.basic
+    ~summary:
+      "Create linker script from a template and a layout of hot functions."
+    ~readme:(fun () ->
+      "Insert the hot functions from linker-script-hot into the template \
+       linker script, replacing the marker\n\
+       INCLUDE linker-script-hot\n\n\
+       A linker script can be obtained by running the command \"ld \
+       --verbose\" and patching the output. See the default template, \
+       distributed with the tool, in resources directory.\n\n\
+       Use \"ocamlfdo decode\" to generate hot function layout.\n\
+       This command performs a trivial transformation on the files.\n\
+       It is useful when the linker runs from a different directory than \
+       the one where the linker-script-hot file resides, such as when \
+       ocamlfdo is used in a build system.\n\n\n\
+      \       To generate a linker-script without function layout, use \
+       -no-linker-script-hot,\n\
+      \        which causes the marker to be removed and the hot function \
+       layout file\n\
+       is ignored. Without it, hot functions file must be present and \
+       correctly\n\
+      \ formatted as a linker script.\n")
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and output_filename = Commonflag.(optional flag_output_filename)
+      and linker_script_template =
+        Commonflag.(optional flag_linker_script_template_filename)
+      and linker_script_hot =
+        Commonflag.(optional flag_linker_script_hot_filename)
+      and no_linker_script_hot = flag_no_linker_script_hot in
+      verbose := v;
+      if q then quiet ();
+      fun () ->
+        save_linker_script ~linker_script_template ~linker_script_hot
+          ~output_filename ~no_linker_script_hot)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
@@ -672,6 +749,7 @@ let main_command =
     [
       ("decode", decode_command);
       ("opt", opt_command);
+      ("linker-script", linker_script_command);
       ("compile", compile_command);
     ]
 

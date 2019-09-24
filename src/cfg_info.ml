@@ -170,7 +170,7 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
            source to CFG\n"
           count from_loc.addr to_loc.addr;
       record t to_block ~count
-  | Some from_block, Some to_block -> (
+  | Some from_block, Some to_block ->
       record t from_block ~count;
       record t to_block ~count;
       let from_linearid = get_linearid from_loc in
@@ -234,13 +234,8 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
             assert (List.mem successors to_block.start ~equal:Int.equal);
             Block_info.add_branch bi b )
       else
-        (* recursive call, find the call instruction *)
-        let instr =
-          Option.value_exn (get_basic_instr from_linearid from_block)
-        in
-        match instr.desc with
-        | Cfg.Call _ -> add_call bi ~callsite:from_loc ~callee:b
-        | _ -> assert false )
+        ( (* CR-someday gyorsh: record calls *)
+          (* recursive call, find the call instruction *) )
 
 let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
     =
@@ -251,7 +246,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
         printf
           "Ignore inter branch count %Ld from 0x%Lx. Can't map to CFG.\n"
           count from_loc.addr
-  | Some from_block -> (
+  | Some from_block ->
       record t from_block ~count;
 
       (* Find the corresponding instruction and update its counters. The
@@ -262,10 +257,16 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       if terminator.id = linearid then
         (* terminator *)
         match terminator.desc with
-        | Branch _ | Switch _ | Tailcall _ ->
+        | Branch _ | Switch _ | Tailcall (Self _) ->
             (* can't branch outside the current function *)
+            if !verbose then
+              printf
+                "record_exit count=%Ld 0x%Lx->0x%Lx from_block.start=%d \
+                 terminator_id=%d.\n"
+                count from_loc.addr to_loc.addr from_block.start
+                terminator.id;
             assert false
-        | Return | Raise _ ->
+        | Tailcall (Func _) | Return | Raise _ ->
             let b =
               {
                 Block_info.target = Some to_loc;
@@ -278,27 +279,8 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
               }
             in
             Block_info.add_branch bi b
-      else
-        (* Call *)
-        match get_basic_instr linearid from_block with
-        | None -> assert false
-        (* we've checked before for presence of dbg info *)
-        | Some instr -> (
-            match instr.desc with
-            | Call _ ->
-                let b =
-                  {
-                    Block_info.target = Some to_loc;
-                    target_label = None;
-                    target_id = None;
-                    intra = false;
-                    fallthrough = false;
-                    taken = count;
-                    mispredicts;
-                  }
-                in
-                Block_info.add_call bi ~callsite:from_loc ~callee:b
-            | _ -> assert false ) )
+      else ( (* Call *)
+             (* CR-someday gyorsh: record calls *) )
 
 let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
     cfg =
