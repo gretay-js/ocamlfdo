@@ -55,10 +55,6 @@ let log msg =
       Printf.fprintf oc "%s%s" msg
         (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
 
-let start () =
-  if !verbose then printf "Creating summary file %s\n" filename;
-  if Sys.file_exists_exn filename then (
-    if !verbose then printf "Removing old %s\n" filename;
-    Sys.remove filename )
+let start () = if !verbose then printf "Creating summary file %s\n" filename
 
 let finish () = if !verbose then printf "Written summary to %s\n" filename
