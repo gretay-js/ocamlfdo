@@ -33,8 +33,7 @@ let quiet () =
   Elf_locations.verbose := false;
   Ocaml_locations.verbose := false;
   Reorder.verbose := false;
-
-  (* Report.verbose := false; *)
+  Report.verbose := false;
   Cfg_builder.verbose := false;
   Crcs.verbose := false;
   ()
@@ -122,11 +121,11 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
     ~write_linker_script =
   let locations = load_locations binary_filename in
-  let dirname = Filename.(realpath (dirname binary_filename)) in
+  (* let dirname = Filename.(realpath (dirname binary_filename)) in *)
   let linearid_profile_filename =
-    match linearid_profile_filename with
-    | None -> dirname ^ "/fdo-profile"
-    | Some f -> f
+    Option.value linearid_profile_filename
+      ~default:(binary_filename ^ ".fdo-profile")
+    (* dirname ^ "/fdo-profile" *)
   in
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
@@ -146,7 +145,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   if write_linker_script then (
     let linker_script_hot_filename =
       Option.value linker_script_hot_filename
-        ~default:(binary_filename ^ ".linker-script")
+        ~default:(binary_filename ^ ".linker-script-hot")
       (* The default name does not depend on the input executable, so that
          the default template link-script can refer to it and won't need to
          be updated or written per executable. *)
@@ -305,7 +304,13 @@ let call_ocamlopt args phase =
     | None -> []
     | Some Compile ->
         if !verbose then printf "stage COMPILE\n";
-        [ "-g"; "-stop-after"; "linearize"; "-save-ir-after"; "linearize" ]
+        [
+          "-g";
+          "-stop-after";
+          "scheduling";
+          "-save-ir-after";
+          "scheduling";
+        ]
     | Some Emit ->
         if !verbose then printf "stage EMIT\n";
         [ "-g"; "-start-from"; "emit" ]
@@ -331,13 +336,14 @@ let call_ocamlopt args phase =
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     ~func_crc ~report ~use_linker_script =
   let open Ocaml_locations in
+  let args = Option.value args ~default:[] in
   let files =
-    (* change command line to args to call ocamlopt *)
+    (* change command line args to call ocamlopt *)
     match args with
-    | None | Some [] ->
+    | [] ->
         if !verbose then printf "Missing compilation command\n";
         []
-    | Some args ->
+    | _ ->
         if !verbose then (
           printf "ocamlopt";
           List.iter ~f:(fun s -> printf " %s" s) args;
@@ -348,11 +354,27 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
             if is_filename Source s then Some (make_filename Linear s)
             else None)
   in
-  let args = Option.value args ~default:[] in
   match files with
   | [] -> call_ocamlopt args None
   | _ ->
-      call_ocamlopt args (Some Compile);
+      (* find -o <target> and remove it for the compilation phase, because
+         it is incompatible with -c that is implied by -stop-after
+         scheduling that we use for split compilation. *)
+      let rec remove_targets args =
+        match args with
+        | [] -> []
+        | [ "-o" ] ->
+            (* No argument after -o is likely to be an error when calling
+               ocamlopt *)
+            args
+        | "-o" :: _ :: rest ->
+            (* Check the rest for another -o argument. Currently, this is
+               not an error and the compiler will use the last occurrence. *)
+            remove_targets rest
+        | arg :: rest -> arg :: remove_targets rest
+      in
+      let args_no_target = remove_targets args in
+      call_ocamlopt args_no_target (Some Compile);
       optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         ~func_crc ~report;
       let args =
