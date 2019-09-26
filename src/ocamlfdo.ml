@@ -334,7 +334,7 @@ let call_ocamlopt args phase =
   | _ -> failwith "Call to ocamlopt failed"
 
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report ~use_linker_script =
+    ~func_crc ~report ~linker_script =
   let open Ocaml_locations in
   let args = Option.value args ~default:[] in
   let files =
@@ -389,7 +389,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         ^ "/../etc/ocamlfdo/linker-script"
       in
       let linker_script =
-        if is_some fdo_profile && use_linker_script then (
+        if use_linker_script then (
           let linkarg =
             [ "-ccopt"; sprintf "-Wl,--script=%s" linker_script_template ]
           in
@@ -705,7 +705,6 @@ let compile_command =
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
-      and no_linker_script_hot = flag_no_linker_script_hot
       and args =
         Command.Param.(
           flag "--" escape
@@ -713,12 +712,11 @@ let compile_command =
       in
       verbose := v;
       if q then quiet ();
-      let use_linker_script = not no_linker_script_hot in
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report ~use_linker_script)
+          ~func_crc ~report)
 
 let linker_script_command =
   Command.basic
@@ -740,8 +738,10 @@ let linker_script_command =
        -no-linker-script-hot,\n\
       \        which causes the marker to be removed and the hot function \
        layout file\n\
-       is ignored. Without it, hot functions file must be present and \
-       correctly\n\
+       is ignored. Without it, and without -linker-script-hot <filename>,\n\
+       the default filename will be used to look for hot function layout,\n\
+       but if the filename is supplied, then hot functions file must be \
+       present and correctly\n\
       \ formatted as a linker script.\n")
     Command.Let_syntax.(
       let%map v = flag_v
@@ -754,6 +754,10 @@ let linker_script_command =
       and no_linker_script_hot = flag_no_linker_script_hot in
       verbose := v;
       if q then quiet ();
+      if no_linker_script_hot && Option.is_some linker_script_hot then
+        failwith
+          "Incompatible options: -no-linker-script-hot and \
+           -linker-script-hot <filename>";
       fun () ->
         save_linker_script ~linker_script_template ~linker_script_hot
           ~output_filename ~no_linker_script_hot)
