@@ -90,18 +90,16 @@ let save_linker_script_hot filename functions =
           fprintf oc "*(.text.caml.%s)\n" name))
 
 let save_linker_script ~linker_script_template ~linker_script_hot
-    ~output_filename ~no_linker_script_hot =
+    ~output_filename =
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
   let template =
     Option.value linker_script_template ~default:"linker-script-template"
   in
-  let hot = Option.value linker_script_hot ~default:"linker-script-hot" in
   if !verbose then (
     printf "Writing linker script to %s\n" output_filename;
-    printf "Template %s\n" template;
-    printf "Hot function layout %s\n" hot );
+    printf "Template %s\n" template );
   Out_channel.with_file output_filename ~f:(fun oc ->
       In_channel.with_file template
         ~f:
@@ -110,11 +108,19 @@ let save_linker_script ~linker_script_template ~linker_script_hot
                  String.equal (String.strip line)
                    "INCLUDE linker-script-hot"
                then (
-                 if not no_linker_script_hot then
-                   In_channel.with_file hot
-                     ~f:
-                       (In_channel.iter_lines ~f:(fun s ->
-                            fprintf oc "\t%s\n" s)) )
+                 match linker_script_hot with
+                 | None ->
+                     if (* just remove the marker *)
+                        !verbose then
+                       printf
+                         "No linker-script-hot provided, removing the \
+                          marker from linker-script-template.\n"
+                 | Some hot ->
+                     if !verbose then printf "Hot function layout %s\n" hot;
+                     In_channel.with_file hot
+                       ~f:
+                         (In_channel.iter_lines ~f:(fun s ->
+                              fprintf oc "\t%s\n" s)) )
                else Out_channel.fprintf oc "%s\n" line)))
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
@@ -334,7 +340,7 @@ let call_ocamlopt args phase =
   | _ -> failwith "Call to ocamlopt failed"
 
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report ~linker_script =
+    ~func_crc ~report =
   let open Ocaml_locations in
   let args = Option.value args ~default:[] in
   let files =
@@ -383,24 +389,6 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
               make_filename Linear s |> make_fdo_filename
             else s)
       in
-      (* add linker script *)
-      let linker_script_template =
-        Filename.dirname Sys.executable_name
-        ^ "/../etc/ocamlfdo/linker-script"
-      in
-      let linker_script =
-        if use_linker_script then (
-          let linkarg =
-            [ "-ccopt"; sprintf "-Wl,--script=%s" linker_script_template ]
-          in
-          if !verbose then
-            Printf.printf
-              "Adding template link script to ocamlopt command line:\n%s\n"
-              (String.concat ~sep:" " linkarg);
-          linkarg )
-        else []
-      in
-      let args = linker_script @ args in
       call_ocamlopt args (Some Emit)
 
 (* CR-soon gyorsh: this is intended as a report at source level and human
@@ -596,7 +584,13 @@ let decode_command =
        reordering, if enabled.\n\
        prog.exe.fdo-profile is a profile.\n\
        The profile can be used to reoptimize the executable. See other \
-       ocamlfdo options.\n")
+       ocamlfdo options.\n\
+       Without -fdo-profile, the default filename is \
+       <binary_filename>.fdo-profile.\n\
+      \       Without -linker-script-hot, the default filename is \
+       <binary_filename>.linker-script-hot, unless -no-linker-script-hot \
+       is given, in which case the tool does not\n\
+      \  generate any linker-script-hot.\n\n\n")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -733,16 +727,17 @@ let linker_script_command =
        This command performs a trivial transformation on the files.\n\
        It is useful when the linker runs from a different directory than \
        the one where the linker-script-hot file resides, such as when \
-       ocamlfdo is used in a build system.\n\n\n\
-      \       To generate a linker-script without function layout, use \
-       -no-linker-script-hot,\n\
-      \        which causes the marker to be removed and the hot function \
-       layout file\n\
-       is ignored. Without it, and without -linker-script-hot <filename>,\n\
-       the default filename will be used to look for hot function layout,\n\
-       but if the filename is supplied, then hot functions file must be \
-       present and correctly\n\
-      \ formatted as a linker script.\n")
+       ocamlfdo is used in a build system.\n\n\
+       Without -linker-script-hot, the marker is simply removed.\n\
+      \       Argument of -linker-script-hot option must be a file that \
+       contains\n\
+       a valid fragment of linker script syntax. It can be empty. If \
+       section names\n\
+      \        listed in the file do not exist during linking, they are \
+       simply ignored\n\
+      \        without a warning. It can happen when recompiling after \
+       source code change,\n\
+      \        the numbers at the end of the function symbols can change.\n")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -751,16 +746,12 @@ let linker_script_command =
         Commonflag.(optional flag_linker_script_template_filename)
       and linker_script_hot =
         Commonflag.(optional flag_linker_script_hot_filename)
-      and no_linker_script_hot = flag_no_linker_script_hot in
+      in
       verbose := v;
       if q then quiet ();
-      if no_linker_script_hot && Option.is_some linker_script_hot then
-        failwith
-          "Incompatible options: -no-linker-script-hot and \
-           -linker-script-hot <filename>";
       fun () ->
         save_linker_script ~linker_script_template ~linker_script_hot
-          ~output_filename ~no_linker_script_hot)
+          ~output_filename)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"

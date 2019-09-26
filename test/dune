@@ -1,0 +1,45 @@
+; build 1
+(rule
+ (target test2.exe)
+ (deps test2.ml)
+ (action
+  (run ocamlfdo compile -q -- %{deps} -S -o %{target})))
+
+; ; perf - requires hardware support for PMU sampling on the test machine
+; (rule
+;  (target test2.exe.perf.data)
+;  (deps test2.exe)
+;  (action
+;       (run perf record -e cycles:u -j any,u -o %{target} ./%{deps})))
+
+; decode - requires perf data
+(rule
+ (targets test2.exe.fdo-profile test2.exe.linker-script-hot)
+ (deps (:binary test2.exe) (:perf test2.exe.perf.data))
+ (action
+   (run ocamlfdo decode -q -binary %{binary} -perf-profile %{perf})))
+
+; linker-script
+(rule
+ (target test2.exe.linker-script)
+ (deps (:hot test2.exe.linker-script-hot)
+       (:template  %{workspace_root}/resources/linker-script))
+ (action
+      (run ocamlfdo linker-script -q
+           -linker-script-hot %{hot}
+           -linker-script-template %{template}
+           -o %{target})))
+
+; build 2
+(rule
+ (target test2.fdo.exe)
+ (deps (:ml test2.ml)
+       (:fdo-profile test2.exe.fdo-profile)
+       test2.exe.linker-script)
+ (action
+  (run ocamlfdo compile -fdo-profile %{fdo-profile} -q -- %{ml} -S -o %{target})))
+
+(alias
+  (name runtest)
+  (deps test2.fdo.exe))
+

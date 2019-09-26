@@ -7,6 +7,7 @@
 *.cmx
 *.cmxs
 *.cmxa
+*.cmir-*
 
 # ocamlbuild working directory
 _build/
@@ -21,3 +22,15 @@ setup.log
 
 # Merlin configuring file for Vim and Emacs
 .merlin
+
+# FDO
+# perf data files can be very large
+perf.data
+perf.data.old
+*.perf.data
+*.perf.data.old
+
+# reports and varios debug outputs such as CFG
+*.fdo.org
+*.dot
+*.dot.pdf
