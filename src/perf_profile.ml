@@ -218,11 +218,12 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
         add_br ();
 
         (* fallthrough traces *)
-        if fallthrough_backwards then
-          printf
-            "Malformed trace 0x%Lx->0x%Lx (from_addr >= to_addr), it was \
-             not duplicated last entry.\n"
-            from_addr to_addr
+        if fallthrough_backwards then (
+          if !verbose then
+            printf
+              "Malformed trace 0x%Lx->0x%Lx (from_addr >= to_addr), it was \
+               not duplicated last entry.\n"
+              from_addr to_addr )
         else
           let key = (from_addr, to_addr) in
           inc aggregated.traces key )

@@ -1,28 +1,41 @@
 ; build 1
 (rule
- (target test2.exe)
+ (targets test2.exe test2.cmir-linear)
  (deps test2.ml)
  (action
-  (run ocamlfdo compile -q -- %{deps} -S -o %{target})))
+  (run ocamlfdo compile -q -extra-debug -md5-unit -- %{deps} -S -o test2.exe)))
 
-; ; perf - requires hardware support for PMU sampling on the test machine
-; (rule
-;  (target test2.exe.perf.data)
-;  (deps test2.exe)
-;  (action
-;       (run perf record -e cycles:u -j any,u -o %{target} ./%{deps})))
+; perf
+; requires hardware support for PMU sampling on the test machine, run manually.
+(rule
+ (target test2.exe.perf.data)
+ (deps test2.exe)
+ (action
+      (run perf record -e cycles:u -j any,u -o %{target} ./%{deps})))
 
-; decode - requires perf data
+(alias
+  (name runtest-perf)
+  (deps test2.exe.perf.data))
+
+; decode
+; requires perf.data from previous step, run manually.
 (rule
  (targets test2.exe.fdo-profile test2.exe.linker-script-hot)
- (deps (:binary test2.exe) (:perf test2.exe.perf.data))
+ (deps (:binary test2.exe) (:perf test2.exe.perf.data.expected))
  (action
    (run ocamlfdo decode -q -binary %{binary} -perf-profile %{perf})))
+
+(alias
+  (name runtest-decode)
+  (deps (:profile test2.exe.fdo-profile) (:hot test2.exe.linker-script-hot))
+  (action (progn
+                (diff %{profile}.expected %{profile})
+                (diff %{hot}.expected %{hot}))))
 
 ; linker-script
 (rule
  (target test2.exe.linker-script)
- (deps (:hot test2.exe.linker-script-hot)
+ (deps (:hot test2.exe.linker-script-hot.expected)
        (:template  %{workspace_root}/resources/linker-script))
  (action
       (run ocamlfdo linker-script -q
@@ -30,16 +43,49 @@
            -linker-script-template %{template}
            -o %{target})))
 
+(alias
+  (name runtest-linker-script)
+  (deps test2.exe.linker-script)
+  (action (diff %{deps}.expected %{deps})))
+
 ; build 2
 (rule
  (target test2.fdo.exe)
  (deps (:ml test2.ml)
-       (:fdo-profile test2.exe.fdo-profile)
+       (:fdo-profile test2.exe.fdo-profile.expected)
+       (:linker-script test2.exe.linker-script.expected)
        test2.exe.linker-script)
  (action
-  (run ocamlfdo compile -fdo-profile %{fdo-profile} -q -- %{ml} -S -o %{target})))
+  (run ocamlfdo compile
+       -fdo-profile %{fdo-profile}
+       -q
+       -md5-unit
+       -reorder-blocks opt
+       -fdo-report
+       -- %{ml} -S -o test2.fdo.exe 
+       -function-sections
+       -ccopt "-Xlinker --script %{linker-script}")))
+
+; just opt
+(rule
+ (target opt.cmir-linear)
+ (deps test2.ml)
+ (action (run ocamlfdo compile -q -- %{deps} -c -o opt.o)))
+
+(rule
+ (target opt.cmir-linear-fdo)
+ (deps opt.cmir-linear)
+ (action (run ocamlfdo opt -q -reorder-blocks random %{deps})))
+
+(alias
+  (name runtest-opt-random)
+  (deps opt.cmir-linear-fdo))
 
 (alias
   (name runtest)
-  (deps test2.fdo.exe))
+  (deps
+        test2.exe
+        test2.fdo.exe
+        (alias runtest-linker-script)
+        runtest-opt-random))
 

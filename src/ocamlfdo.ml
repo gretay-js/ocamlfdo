@@ -280,25 +280,9 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   List.iter files ~f:process;
   if report then Report.finish ()
 
-(* Ideally, we should pass args directop to optmain. Currently, there are
-   some uses of Sys.argv in optmain and makedepend that prevent it. Once
-   that is fixed, we won't need the hack of override_sys_argv at all. *)
-(* From 4.09/4.10 we should be able to use this hack instead of
-   Obj.truncate. See https://github.com/ocaml/ocaml/pull/2279 *)
-
-(* external caml_sys_modify_argv : string array -> unit =
- *   "caml_sys_modify_argv"
- *
- * let override_sys_argv new_argv =
- *   caml_sys_modify_argv new_argv;
- *   Arg.current := 0 *)
-
-let override_sys_argv args =
-  let len = Array.length args in
-  assert (not (Array.length Sys.argv < len));
-  Array.blit ~src:args ~src_pos:0 ~dst:Sys.argv ~dst_pos:0 ~len;
-  Obj.truncate (Obj.repr Sys.argv) len
-
+(* CR-soon gyorsh: Most of this messing with command line arguments wouldn't
+   be needed if we could invoke the compiler directly, as a (reentrant)
+   library, or as a hook installed into the compiler using pass manager. *)
 type phase =
   | Compile
   | Emit
@@ -339,11 +323,55 @@ let call_ocamlopt args phase =
   | Exited 0 -> ()
   | _ -> failwith "Call to ocamlopt failed"
 
+let rec remove_targets args =
+  match args with
+  | [] -> []
+  | [ "-o" ] ->
+      (* No argument after -o is likely to be an error when calling ocamlopt *)
+      args
+  | "-o" :: _ :: rest ->
+      (* Check the rest for another -o argument. Currently, this is not an
+         error and the compiler will use the last occurrence. *)
+      remove_targets rest
+  | arg :: rest -> arg :: remove_targets rest
+
+let rec last_target = function
+  | [] | [ _ ] -> None
+  | "-o" :: target :: rest -> (
+      (* Check the rest for another -o argument. Currently, this is not an
+         error and the compiler will use the last occurrence. *)
+      match last_target rest with
+      | Some t -> Some t
+      | None -> Some target )
+  | _ :: rest -> last_target rest
+
+let rec compilation_only = function
+  | [] -> false
+  | "-c" :: _ -> true
+  | "-i" :: _ -> true
+  | "-stop-after" :: pass :: rest ->
+      Clflags.Compiler_pass.(
+        is_compilation_pass (Option.value_exn (of_string pass)))
+  | hd :: rest -> compilation_only rest
+
+(* CR-someday gyorsh: This is quite ad hoc and won't work with some args
+   accepted by ocaml compiler.
+
+   For example, if "-c -o foo.ml bar.ml" is passed, the call to ocamlopt
+   from "ocamlfdo compile" might fail or do something unexpected, but it
+   should probably be an error to use .ml extension of a output of
+   compilation. Or for example, we might not know that it is
+   compilation-only.
+
+   It does not take into account additional ways to provide command line
+   arguments, such as via environment variables or file. It should not be a
+   problem for common and intended uses. Only input .ml files or -o <target>
+   matter for "ocamlfdo compile". *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     ~func_crc ~report =
   let open Ocaml_locations in
   let args = Option.value args ~default:[] in
-  let files =
+  let src_files =
     (* change command line args to call ocamlopt *)
     match args with
     | [] ->
@@ -357,39 +385,67 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
 
         (* Compute the names of linear ir files from [args] *)
         List.filter_map args ~f:(fun s ->
-            if is_filename Source s then Some (make_filename Linear s)
-            else None)
+            if is_filename Source s then Some s else None)
   in
-  match files with
-  | [] -> call_ocamlopt args None
-  | _ ->
-      (* find -o <target> and remove it for the compilation phase, because
-         it is incompatible with -c that is implied by -stop-after
-         scheduling that we use for split compilation. *)
-      let rec remove_targets args =
-        match args with
-        | [] -> []
-        | [ "-o" ] ->
-            (* No argument after -o is likely to be an error when calling
-               ocamlopt *)
-            args
-        | "-o" :: _ :: rest ->
-            (* Check the rest for another -o argument. Currently, this is
-               not an error and the compiler will use the last occurrence. *)
-            remove_targets rest
-        | arg :: rest -> arg :: remove_targets rest
-      in
-      let args_no_target = remove_targets args in
-      call_ocamlopt args_no_target (Some Compile);
-      optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-        ~func_crc ~report;
-      let args =
-        List.map args ~f:(fun s ->
-            if is_filename Source s then
-              make_filename Linear s |> make_fdo_filename
-            else s)
-      in
-      call_ocamlopt args (Some Emit)
+  if early_stop args then call_ocamlopt args None
+  else
+    match src_files with
+    | [] -> call_ocamlopt args None
+    | [ src ] -> (
+        (* If there is only one source file to compile and -o specifies a
+           target explicitly, then it is used for the names of the
+           intermediate artifacts. *)
+        call_ocamlopt args (Some Compile);
+        let target =
+          if compilation_only args then
+            Option.value (last_target args) ~default:src
+          else src
+        in
+        let linear = make_filename Linear target in
+        let files = [ linear ] in
+        (* stop if what you expected to exist doesn't exist. It's not a
+           failure, because there are many ways in which ocamlopt may be
+           invoked that stop before emit. Some of this is done by the build
+           system normally. *)
+        let missing =
+          List.filter_map files ~f:(fun f -> not (Sys.file_exists_exn f))
+        in
+        match missing with
+        | [] ->
+            optimize files ~fdo_profile ~reorder_blocks ~extra_debug
+              ~unit_crc ~func_crc ~report;
+            let args =
+              List.map args ~f:(fun s ->
+                  if s = src then make_fdo_filename linear else s)
+            in
+            call_ocamlopt args (Some Emit)
+        | _ ->
+            if !verbose then (
+              printf
+                "Missing files after the first phase of compilation: \n"
+                List.iter missing ~f:(printf "%s\n");
+              printf "\n";
+              assert false ) )
+    | _ ->
+        (* find -o <target> and remove it for the compilation phase, because
+           it is incompatible with -c that is implied by -stop-after
+           scheduling that we use for split compilation. *)
+        let args_no_target = remove_targets args in
+        call_ocamlopt args_no_target (Some Compile);
+        let files = List.map ~f:(make_filename Linear) src_files in
+        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+          ~func_crc ~report;
+
+        (* replace all occurances of <src>.ml with <file>.cmir-linear-fdo,
+           where <file> is <src> unless target was named explicitly in args
+           with a single src file. *)
+        let args =
+          List.map args ~f:(fun s ->
+              if is_filename Source s then
+                make_filename Linear s |> make_fdo_filename
+              else s)
+        in
+        call_ocamlopt args (Some Emit)
 
 (* CR-soon gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs.
@@ -439,7 +495,7 @@ module AltFlag (M : Alt) = struct
   let alternatives heading =
     let names = List.map M.all ~f:M.to_string in
     let default = M.(to_string default) in
-    sprintf "%s: %s. Default: %s." heading
+    sprintf "%s: %s (default: %s)" heading
       (String.concat ~sep:"," names)
       default
 
