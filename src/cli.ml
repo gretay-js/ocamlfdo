@@ -115,6 +115,13 @@ let flag_extra_debug =
       ~doc:
         " add extra debug info to generated code to enable profile decoding")
 
+let flag_auto =
+  Command.Param.(
+    flag "-auto" no_arg
+      ~doc:
+        " if -fdo-profile <file> does not exist, then add -extra-debug \
+         automatically.")
+
 let flag_crc =
   Command.Param.(
     flag "-md5" no_arg
@@ -286,6 +293,7 @@ let compile_command =
       let%map v = flag_v
       and q = flag_q
       and extra_debug = flag_extra_debug
+      and auto = flag_auto
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
@@ -301,9 +309,31 @@ let compile_command =
       if q then quiet ();
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
+      let fdo_profile, extra_debug =
+        if auto then
+          match fdo_profile with
+          | None ->
+              failwith "Missing -fdo-profile <file>, required for -auto."
+          | Some file ->
+              if Sys.file_exists_exn file then (
+                if !verbose then
+                  printf
+                    "With -auto, detected that -fdo-profile <%s> file does \
+                     not exist.\n\n\
+                    \ Setting -extra-debug to true."
+                    file;
+                (None, true) )
+              else (
+                if !verbose then
+                  printf "With -auto, the file -fdo-profile <%s> exists.";
+                (fdo_profile, extra_debug) )
+        else
+          (* if the file doesn't exist, optimize will fail with an error. *)
+          (fdo_profile, extra_debug)
+      in
       fun () ->
         compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report)
+          ~func_crc ~report ~strict)
 
 let linker_script_command =
   Command.basic

@@ -9,7 +9,7 @@ EXE=$BUILD_DIR/$TEST.exe
 PERF_DATA=$TEST.perf.data
 
 echo cd $BUILD_DIR
-echo ocamlfdo compile -- $TEST.ml -o $TEST
+echo ocamlfdo compile -- $TEST.ml -o $TEST.exe
 echo "\
 
 # The following requires hardware support for performance monitoring.
