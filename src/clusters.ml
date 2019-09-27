@@ -1,16 +1,3 @@
-(**************************************************************************)
-(*                                                                        *)
-(*                                 OCamlFDO                               *)
-(*                                                                        *)
-(*                     Greta Yorsh, Jane Street Europe                    *)
-(*                                                                        *)
-(*   Copyright 2019 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
-(**************************************************************************)
 (* Adaptation of [1] to basic blocks, influenced by [2]. The use of LBR
    profile information for calculating basic-block level execution counts
    used here is based on algorithms described in [3]. Collection and

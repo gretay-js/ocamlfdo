@@ -1,16 +1,3 @@
-(**************************************************************************)
-(*                                                                        *)
-(*                                 OCamlFDO                               *)
-(*                                                                        *)
-(*                     Greta Yorsh, Jane Street Europe                    *)
-(*                                                                        *)
-(*   Copyright 2019 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
-(**************************************************************************)
 (* This is a little wrapper around Elf_locations to manage the file names
    specific to ocaml source and compiler's IR. *)
 
@@ -32,5 +19,7 @@ val is_filename : t -> string -> bool
 
 (* append the expected extension *)
 val make_filename : t -> string -> string
+
+val make_fdo_filename : string -> string
 
 val verbose : bool ref

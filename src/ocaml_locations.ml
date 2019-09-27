@@ -1,16 +1,3 @@
-(**************************************************************************)
-(*                                                                        *)
-(*                                 OCamlFDO                               *)
-(*                                                                        *)
-(*                     Greta Yorsh, Jane Street Europe                    *)
-(*                                                                        *)
-(*   Copyright 2019 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
-(**************************************************************************)
 (* This is a little wrapper around Elf_locations to manage the file names
    specific to ocaml source and compiler's IR. *)
 open Core
@@ -35,6 +22,8 @@ let suffix = function
 let is_filename t s = String.is_suffix s ~suffix:(extension t)
 
 let make_filename t s = Filename.chop_extension s ^ extension t
+
+let make_fdo_filename file = file ^ "-fdo"
 
 let decode_line locations ~program_counter func t =
   match Elf_locations.resolve_from_cache ~program_counter locations with

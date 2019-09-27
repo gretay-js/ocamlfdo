@@ -1,20 +1,3 @@
-(**************************************************************************)
-(*                                                                        *)
-(*                                 OCamlFDO                               *)
-(*                                                                        *)
-(*                     Greta Yorsh, Jane Street Europe                    *)
-(*                                                                        *)
-(*   Copyright 2019 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*                     based on spacetime_lib                             *)
-(*   Copyright (c) 2016 Leo White, Mark Shinwell                          *)
-(*   https://github.com/lpw25/spacetime_lib                               *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
-(**************************************************************************)
 open Core
 
 type 'a interval = {

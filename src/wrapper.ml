@@ -1,16 +1,3 @@
-(**************************************************************************)
-(*                                                                        *)
-(*                                 OCamlFDO                               *)
-(*                                                                        *)
-(*                     Greta Yorsh, Jane Street Europe                    *)
-(*                                                                        *)
-(*   Copyright 2019 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
-(**************************************************************************)
 (* CR-soon gyorsh: Most of this messing with command line arguments wouldn't
    be needed if we could invoke the compiler directly, as a (reentrant)
    library, or as a hook installed into the compiler using pass manager. *)
@@ -18,11 +5,34 @@ open Core
 
 let verbose = ref true
 
+(* artifact names for split compilation *)
+type artifacts = {
+  src_files : string list;
+  target : string option;
+  use_target_name_for_artifacts : bool;
+}
+
+type t = {
+  args : string list;
+  arts : artifacts option;
+}
+
+let get_files arts kind ~fdo =
+  let f s =
+    let open Ocaml_locations in
+    let res = make_filename kind s in
+    if fdo then make_fdo_filename res else res
+  in
+  if arts.use_target_name_for_artifacts then (
+    assert (List.length src_files = 1);
+    f arts.target )
+  else List.map src_files ~f
+
 type phase =
   | Compile
   | Emit
 
-let call_ocamlopt args phase =
+let call_ocamlopt w phase =
   let phase_flags =
     (* Set debug "-g" to emit dwarf locations. *)
     match phase with
@@ -58,6 +68,9 @@ let call_ocamlopt args phase =
   | Exited 0 -> ()
   | _ -> failwith "Call to ocamlopt failed"
 
+(* CR-soon gyorsh: it's very inefficent to scan the args list over and over
+   again for each argument. It can be done in one pass and starting to look
+   more like command line parsing. *)
 let rec remove_targets args =
   match args with
   | [] -> []
@@ -114,3 +127,82 @@ let check_artifacts files =
       List.iter missing ~f:(printf "%s\n");
       printf "\n" );
     assert false )
+
+(* CR-someday gyorsh: This is quite ad hoc and won't work with some args
+   accepted by ocaml compiler.
+
+   For example, if "-c -o foo.ml bar.ml" is passed, the call to ocamlopt
+   from "ocamlfdo compile" might fail or do something unexpected, but it
+   should probably be an error to use .ml extension of a output of
+   compilation. Or for example, we might not know that it is
+   compilation-only.
+
+   It does not take into account additional ways to provide command line
+   arguments, such as via environment variables or file. It should not be a
+   problem for common and intended uses. Only input .ml files or -o <target>
+   matter for "ocamlfdo compile". *)
+let wrap args =
+  let open Ocaml_locations in
+  let args = Option.value args ~default:[] in
+  let src_files =
+    (* change command line args to call ocamlopt *)
+    match args with
+    | [] ->
+        if !verbose then printf "Missing compilation command\n";
+        []
+    | _ ->
+        if !verbose then (
+          printf "ocamlopt";
+          List.iter ~f:(fun s -> printf " %s" s) args;
+          printf "\n" );
+
+        (* Compute the names of linear ir files from [args] *)
+        List.filter_map args ~f:(fun s ->
+            if is_filename Source s then Some s else None)
+  in
+  if stop_before_linear args then call_ocamlopt args None
+  else
+    match src_files with
+    | [] -> call_ocamlopt args None
+    | [ src ] ->
+        (* If there is only one source file to compile and -o specifies the
+           target explicitly, and "-c" or similar specifies compilation only
+           mode (i.e., no linking), then the target name is used for the
+           names of the intermediate artifacts. *)
+        call_ocamlopt args (Some Compile);
+        let target =
+          if compilation_only args then
+            Option.value (last_target args) ~default:src
+          else src
+        in
+        let linear = make_filename Linear target in
+        let files = [ linear ] in
+        check_artifacts files;
+        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+          ~func_crc ~report;
+        let args =
+          List.map args ~f:(fun s ->
+              if s = src then make_fdo_filename linear else s)
+        in
+        call_ocamlopt args (Some Emit)
+    | _ ->
+        (* find -o <target> and remove it for the compilation phase, because
+           it is incompatible with -c that is implied by -stop-after
+           scheduling that we use for split compilation. *)
+        let args_no_target = remove_targets args in
+        call_ocamlopt args_no_target (Some Compile);
+        let files = List.map ~f:(make_filename Linear) src_files in
+        check_artifacts files;
+        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+          ~func_crc ~report;
+
+        (* replace all occurances of <src>.ml with <file>.cmir-linear-fdo,
+           where <file> is <src> unless target was named explicitly in args
+           with a single src file. *)
+        let args =
+          List.map args ~f:(fun s ->
+              if is_filename Source s then
+                make_filename Linear s |> make_fdo_filename
+              else s)
+        in
+        call_ocamlopt args (Some Emit)
