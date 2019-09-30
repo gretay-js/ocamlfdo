@@ -62,7 +62,7 @@
        -md5-unit
        -reorder-blocks opt
        -fdo-report
-       -- %{ml} -S -o test2.fdo.exe 
+       -- %{ml} -S -o test2.fdo.exe
        -function-sections
        -ccopt "-Xlinker --script %{linker-script}")))
 
@@ -87,5 +87,5 @@
         test2.exe
         test2.fdo.exe
         (alias runtest-linker-script)
-        runtest-opt-random))
+        (alias runtest-opt-random)))
 

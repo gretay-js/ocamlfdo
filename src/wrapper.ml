@@ -6,51 +6,95 @@ open Core
 let verbose = ref true
 
 (* artifact names for split compilation *)
-type artifacts = {
-  src_files : string list;
-  target : string option;
-  use_target_name_for_artifacts : bool;
-}
+type artifacts =
+  | Stop_before_linear
+  | Standard of string list
+  | Single_src_rename of {
+      src : string;
+      target : string;
+    }
 
 type t = {
   args : string list;
-  arts : artifacts option;
+  arts : artifacts;
 }
 
-let get_files arts kind ~fdo =
-  let f s =
-    let open Ocaml_locations in
-    let res = make_filename kind s in
-    if fdo then make_fdo_filename res else res
-  in
-  if arts.use_target_name_for_artifacts then (
-    assert (List.length src_files = 1);
-    f arts.target )
-  else List.map src_files ~f
+let can_split_compile t =
+  match t.arts with
+  | Stop_before_linear -> false
+  | Standard [] -> false
+  | Standard _ -> true
+  | Single_src_rename _ -> true
+
+let rec remove_targets = function
+  | ([] | [ _ ]) as args -> args
+  | "-o" :: _ :: rest -> remove_targets rest
+  | arg :: rest -> arg :: remove_targets rest
+
+(* stop if what you expected to exist doesn't exist. It's not a failure,
+   because there are many ways in which ocamlopt may be invoked that stop
+   before emit, but we don't want to confuse the user of ocamlfdo, and this
+   way we will discover dynamically any situations that we need to handle.
+   Some of this is done by the build system normally, so this shouldn't be
+   needed when ocamlfdo is called from jenga/dune. *)
+let check_artifact file =
+  if not (Sys.file_exists_exn file) then (
+    if !verbose then
+      printf "Missing file after the first phase of compilation: %s\n" file;
+    assert false );
+  file
+
+let artifacts t kind =
+  let rename f = Ocaml_locations.(make_filename kind f) |> check_artifact in
+  match t.arts with
+  | Stop_before_linear -> assert false
+  | Single_src_rename { src = _; target } ->
+      (* replace <src>.ml with <target.cmir-linear *)
+      [ rename target ]
+  | Standard src_files ->
+      (* replace <src>.ml with <src.cmir-linear *)
+      List.map src_files ~f:rename
 
 type phase =
+  | All
   | Compile
   | Emit
 
+(* Set debug "-g" to emit dwarf locations. *)
+let phase_flags = function
+  | All -> []
+  | Compile ->
+      if !verbose then printf "stage COMPILE\n";
+      [ "-g"; "-stop-after"; "scheduling"; "-save-ir-after"; "scheduling" ]
+  | Emit ->
+      if !verbose then printf "stage EMIT\n";
+      [ "-g"; "-start-from"; "emit" ]
+
+(* correct arguments provided to ocamlopt, depending on the phase. *)
+let phase_args t phase =
+  let open Ocaml_locations in
+  let rename file kind = make_filename kind file |> make_fdo_filename in
+  match (t.arts, phase) with
+  | Stop_before_linear, _ -> t.args
+  | _, All -> t.args
+  | Single_src_rename _, Compile -> t.args
+  | Standard [], _ -> t.args
+  | Standard _, Compile ->
+      (* find -o <target> and remove it for the compilation phase, because
+         it is incompatible with -c that is implied by -stop-after
+         scheduling that we use for split compilation. *)
+      remove_targets t.args
+  | Single_src_rename { src; target }, Emit ->
+      (* replace <src>.ml with <target.cmir-linear-fdo> *)
+      List.map t.args ~f:(fun s ->
+          if s = src then rename target Linear else s)
+  | Standard _, Emit ->
+      (* replace <src>.ml with <src.cmir-linear-fdo> *)
+      List.map t.args ~f:(fun s ->
+          if is_filename Source s then rename s Linear else s)
+
 let call_ocamlopt w phase =
-  let phase_flags =
-    (* Set debug "-g" to emit dwarf locations. *)
-    match phase with
-    | None -> []
-    | Some Compile ->
-        if !verbose then printf "stage COMPILE\n";
-        [
-          "-g";
-          "-stop-after";
-          "scheduling";
-          "-save-ir-after";
-          "scheduling";
-        ]
-    | Some Emit ->
-        if !verbose then printf "stage EMIT\n";
-        [ "-g"; "-start-from"; "emit" ]
-  in
-  let args = args @ phase_flags in
+  let args = phase_flags phase @ phase_args w phase in
   (* CR-soon gyorsh: how to get the correct path to ocamlopt, there may be
      multiple? *)
   let ocamlopt = "ocamlopt" in
@@ -67,21 +111,6 @@ let call_ocamlopt w phase =
   match ec with
   | Exited 0 -> ()
   | _ -> failwith "Call to ocamlopt failed"
-
-(* CR-soon gyorsh: it's very inefficent to scan the args list over and over
-   again for each argument. It can be done in one pass and starting to look
-   more like command line parsing. *)
-let rec remove_targets args =
-  match args with
-  | [] -> []
-  | [ "-o" ] ->
-      (* No argument after -o is likely to be an error when calling ocamlopt *)
-      args
-  | "-o" :: _ :: rest ->
-      (* Check the rest for another -o argument. Currently, this is not an
-         error and the compiler will use the last occurrence. *)
-      remove_targets rest
-  | arg :: rest -> arg :: remove_targets rest
 
 let rec last_target = function
   | [] | [ _ ] -> None
@@ -111,23 +140,6 @@ let rec stop_before_linear = function
   | "-v" :: _ | "-version" :: _ -> true
   | _ :: rest -> stop_before_linear rest
 
-(* stop if what you expected to exist doesn't exist. It's not a failure,
-   because there are many ways in which ocamlopt may be invoked that stop
-   before emit, but we don't want to confuse the user of ocamlfdo, and this
-   way we will discover dynamically any situations that we need to handle.
-   Some of this is done by the build system normally, so this shouldn't be
-   needed when ocamlfdo is called from jenga/dune. *)
-let check_artifacts files =
-  let missing =
-    List.filter files ~f:(fun f -> not (Sys.file_exists_exn f))
-  in
-  if not (List.is_empty missing) then (
-    if !verbose then (
-      printf "Missing files after the first phase of compilation: \n";
-      List.iter missing ~f:(printf "%s\n");
-      printf "\n" );
-    assert false )
-
 (* CR-someday gyorsh: This is quite ad hoc and won't work with some args
    accepted by ocaml compiler.
 
@@ -142,8 +154,8 @@ let check_artifacts files =
    problem for common and intended uses. Only input .ml files or -o <target>
    matter for "ocamlfdo compile". *)
 let wrap args =
-  let open Ocaml_locations in
   let args = Option.value args ~default:[] in
+  (* collect all args that end in .ml *)
   let src_files =
     (* change command line args to call ocamlopt *)
     match args with
@@ -158,51 +170,21 @@ let wrap args =
 
         (* Compute the names of linear ir files from [args] *)
         List.filter_map args ~f:(fun s ->
-            if is_filename Source s then Some s else None)
+            if Ocaml_locations.(is_filename Source s) then Some s else None)
   in
-  if stop_before_linear args then call_ocamlopt args None
-  else
-    match src_files with
-    | [] -> call_ocamlopt args None
-    | [ src ] ->
-        (* If there is only one source file to compile and -o specifies the
-           target explicitly, and "-c" or similar specifies compilation only
-           mode (i.e., no linking), then the target name is used for the
-           names of the intermediate artifacts. *)
-        call_ocamlopt args (Some Compile);
-        let target =
-          if compilation_only args then
-            Option.value (last_target args) ~default:src
-          else src
-        in
-        let linear = make_filename Linear target in
-        let files = [ linear ] in
-        check_artifacts files;
-        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report;
-        let args =
-          List.map args ~f:(fun s ->
-              if s = src then make_fdo_filename linear else s)
-        in
-        call_ocamlopt args (Some Emit)
-    | _ ->
-        (* find -o <target> and remove it for the compilation phase, because
-           it is incompatible with -c that is implied by -stop-after
-           scheduling that we use for split compilation. *)
-        let args_no_target = remove_targets args in
-        call_ocamlopt args_no_target (Some Compile);
-        let files = List.map ~f:(make_filename Linear) src_files in
-        check_artifacts files;
-        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report;
-
-        (* replace all occurances of <src>.ml with <file>.cmir-linear-fdo,
-           where <file> is <src> unless target was named explicitly in args
-           with a single src file. *)
-        let args =
-          List.map args ~f:(fun s ->
-              if is_filename Source s then
-                make_filename Linear s |> make_fdo_filename
-              else s)
-        in
-        call_ocamlopt args (Some Emit)
+  let arts =
+    if stop_before_linear args then Stop_before_linear
+    else
+      match src_files with
+      | [ src ] -> (
+          (* If there is only one source file to compile and -o specifies
+             the target explicitly, and "-c" or similar specifies
+             compilation only mode (i.e., no linking), then the target name
+             is used for the names of the intermediate artifacts. *)
+          match last_target args with
+          | Some target when compilation_only args ->
+              Single_src_rename { src; target }
+          | _ -> Standard src_files )
+      | _ -> Standard src_files
+  in
+  { args; arts }

@@ -4,13 +4,16 @@
 type t
 
 type phase =
+  | All
   | Compile
   | Emit
 
 val wrap : string list option -> t
 
-val call_ocamlopt : string list -> phase option -> unit
+val can_split_compile : t -> bool
 
-val check_artifacts : string list -> unit
+val call_ocamlopt : t -> phase -> unit
+
+val artifacts : t -> Ocaml_locations.t -> string list
 
 val verbose : bool ref
