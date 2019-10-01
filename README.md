@@ -42,7 +42,7 @@ $ opam install ocamlfdo
 
 * Build 1
   ```
-  $ ocamlfdo compile -extra-debug -- test2.ml -o test2.exe
+  ocamlfdo compile -extra-debug -- test2.ml -o test2.exe
   ```
 
     Build the executable you intend to profile and optimize. Here
@@ -103,7 +103,7 @@ $ opam install ocamlfdo
 
    ```
     $ ocamlfdo compile -fdo-profile test2.exe.fdo-profile -reorder-blocks opt -- \
-      examples/simple/test2.ml -o examples/simple/test2.exe \
+      test2.ml -o test2.fdo.exe \
       -function-sections -ccopt -Wl,--script=linker-script
   ```
   This produces optimized executable.

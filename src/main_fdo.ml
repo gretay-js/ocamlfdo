@@ -83,9 +83,10 @@ let linker_script ~linker_script_template ~linker_script_hot
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
-  let template =
-    Option.value linker_script_template ~default:"linker-script-template"
+  let default =
+    Filename.dirname Sys.executable_name ^ "/../etc/ocamlfdo/linker-script"
   in
+  let template = Option.value linker_script_template ~default in
   if !verbose then (
     printf "Writing linker script to %s\n" output_filename;
     printf "Template %s\n" template );
