@@ -38,8 +38,8 @@ let create ~elf_executable =
   let strtab = Owee_elf.find_string_table map sections in
   let symtab = Owee_elf.find_symbol_table map sections in
   match (symtab, strtab) with
-  | None, _ -> failwith "Can't find symbol table in elf binary"
-  | _, None -> failwith "Can't find string table in elf binary"
+  | None, _ -> Report.user_error "Can't find symbol table in elf binary"
+  | _, None -> Report.user_error "Can't find string table in elf binary"
   | Some symtab, Some strtab ->
       {
         map;

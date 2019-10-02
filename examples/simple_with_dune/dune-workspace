@@ -1,0 +1,44 @@
+(lang dune 1.12)
+
+
+; this is a test for various ways of specifying an fdo context
+; and inferring the names of these contexts from the name
+; of the target executable, unless explicitly specified.
+
+(context (default))
+
+(context (opam (switch ocamlfdo408)))
+
+;; ; explicitly named contexts with fdo
+;; (context (default
+;;            (fdo src/test2.exe)
+;;            (name default-fdo-src-test2)
+;;            ))
+
+;; (context (opam (switch ocamlfdo408)
+;;                (fdo src/test2.exe)
+;;                (name ocamlfdo408-fdo-src-test2)
+;;                ))
+
+(context (default
+           (fdo src/test2.exe)
+               ; expected name:
+               ;; (name default-fdo-test2)
+           ))
+
+(context (opam (switch ocamlfdo408)
+               (fdo src/test2.exe)
+               ; expected name:
+               ;; (name ocamlfdo408-fdo-test2)
+               ))
+
+
+;; ; the following two contexts are expected to cause an error
+;; ; because they have the same name as the inferred names of fdo contexts
+;; (context (default
+;;            (name default-fdo-test2)
+;;            ))
+;;
+;; (context (opam (switch ocamlfdo408)
+;;                (name ocamlfdo408-fdo-test2)
+;;                ))

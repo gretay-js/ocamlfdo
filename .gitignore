@@ -28,8 +28,10 @@ setup.log
 # perf data files can be very large
 perf.data
 perf.data.old
+perf.data.expected
 *.perf.data
 *.perf.data.old
+*.perf.data.expected
 
 # reports and varios debug outputs such as CFG
 *.fdo.org

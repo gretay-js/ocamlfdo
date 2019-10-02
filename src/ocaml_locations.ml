@@ -57,7 +57,7 @@ let decode_line locations ~program_counter func t =
               | Some func_name_dwarf ->
                   if String.equal func_name_dwarf func then Some (file, line)
                   else
-                    failwithf "func_name_dwarf = %s func = %s\n"
+                    Report.user_error "func_name_dwarf = %s func = %s\n"
                       func_name_dwarf func () ) ) )
 
 let to_address locations name line t =

@@ -1,6 +1,6 @@
 (lang dune 1.11)
 (using fmt 1.1)
-
+(name ocamlfdo)
 (package
  (name ocamlfdo)
  (synopsis "Feedback-Direct Optimizer for OCaml")

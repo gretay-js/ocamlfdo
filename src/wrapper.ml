@@ -110,7 +110,7 @@ let call_ocamlopt w phase =
     Printf.printf !"ocamlopt exit code = %{sexp:Exit_status.t}\n" ec;
   match ec with
   | Exited 0 -> ()
-  | _ -> failwith "Call to ocamlopt failed"
+  | _ -> Report.user_error "Call to ocamlopt failed"
 
 let rec last_target = function
   | [] | [ _ ] -> None

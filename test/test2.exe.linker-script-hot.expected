@@ -1,1 +1,2 @@
+*(.text.caml.camlStd_exit__entry)
 *(.text.caml.camlTest2__foo_10)

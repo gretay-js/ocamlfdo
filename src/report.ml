@@ -49,12 +49,25 @@ let with_ppf ~name ~title ~sub formatter x =
 
 let filename = sprintf "summary.%s" extension
 
+let enabled = ref false
+
 let log msg =
   if !verbose then printf "%s" msg;
-  Out_channel.with_file ~append:true ~binary:false filename ~f:(fun oc ->
-      Printf.fprintf oc "%s%s" msg
-        (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
+  if !enabled then
+    Out_channel.with_file ~append:true ~binary:false filename ~f:(fun oc ->
+        Printf.fprintf oc "%s%s" msg
+          (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
 
-let start () = if !verbose then printf "Creating summary file %s\n" filename
+let start () =
+  if !verbose then printf "Creating summary file %s\n" filename;
+  enabled := true
 
-let finish () = if !verbose then printf "Written summary to %s\n" filename
+let finish () =
+  if !verbose then printf "Written summary to %s\n" filename;
+  enabled := false
+
+let user_error fmt =
+  Format.kfprintf
+    (fun _ -> exit 321)
+    Format.err_formatter
+    ("@?Error: " ^^ fmt ^^ "@.")

@@ -61,6 +61,7 @@ SECTIONS
     *(.text.hot .text.hot.*)
     . = ALIGN(0x2000000);
     *(.text.caml_hot__code_begin)
+	*(.text.caml.camlStd_exit__entry)
 	*(.text.caml.camlTest2__foo_10)
     *(.text.caml_hot__code_end)
     *(.text .stub .text.* .gnu.linkonce.t.*)

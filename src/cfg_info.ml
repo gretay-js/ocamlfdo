@@ -122,13 +122,13 @@ let get_block (loc : Loc.t) cfg =
   | Some dbg -> (
       match Cfg_builder.id_to_label cfg dbg.line with
       | None ->
-          failwithf "No cfg label for linearid %d in %s" dbg.line dbg.file
-            ()
+          Report.user_error "No cfg label for linearid %d in %s" dbg.line
+            dbg.file ()
       | Some label -> (
           match Cfg.get_block cfg.cfg label with
           | Some block -> Some block
           | None ->
-              failwithf
+              Report.user_error
                 "Can't find cfg basic block labeled %d for linearid %d in %s\n"
                 label dbg.line dbg.file () ) )
 

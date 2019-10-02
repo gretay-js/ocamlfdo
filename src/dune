@@ -9,7 +9,8 @@
         compiler-libs.optcomp
         parsexp_io
         shexp.process
-        ocamlcfg)
+        ocamlcfg
+        re2)
  (preprocess (pps ppx_jane ppx_csv_conv ppx_variants_conv)))
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))

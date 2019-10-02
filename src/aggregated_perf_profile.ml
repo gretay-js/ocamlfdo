@@ -35,7 +35,7 @@ let read filename =
     | Ok t_sexp -> t_of_sexp t_sexp
     | Error error ->
         Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        failwith "Cannot parse aggregated profile file"
+        Report.user_error "Cannot parse aggregated profile file %s" filename
   in
   if !verbose then Printf.printf !"Aggregated perf profile:\n%{sexp:t}\n" t;
   t

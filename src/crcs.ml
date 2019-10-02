@@ -24,13 +24,12 @@ let check_and_add t ~name crc ~file =
       Hashtbl.find_and_call tbl name
         ~if_found:(fun old_crc ->
           if not (Md5.equal old_crc crc) then
-            failwith
-              (sprintf
-                 "Linear IR for %s from file %s does not match the version \
-                  of this IR used for creating the profiled binary.\n\
-                 \               old crc: %s\n\
-                 \               new crc: %s"
-                 name file (Md5.to_hex old_crc) (Md5.to_hex crc)))
+            Report.user_error
+              "Linear IR for %s from file %s does not match the version of \
+               this IR used for creating the profiled binary.\n\
+               old crc: %s\n\
+               new crc: %s\n"
+              name file (Md5.to_hex old_crc) (Md5.to_hex crc))
         ~if_not_found:(fun name ->
           if !verbose then
             Printf.printf
@@ -44,13 +43,13 @@ let check_and_add t ~name crc ~file =
     | None -> crc
     | Some old_crc ->
         if Md5.equal old_crc crc then
-          failwithf
+          Report.user_error
             "Duplicate! Linear IR for %s from file %s has already been \
              processed.\n\
             \                crc: %s"
             name file (Md5.to_hex crc) ()
         else
-          failwithf
+          Report.user_error
             "Linear IR for %s from file %s processed earlier does not match.\n\
             \             old crc: %s\n\
             \             new crc: %s"

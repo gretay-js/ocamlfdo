@@ -69,17 +69,41 @@ let load_crcs locations tbl =
               (* The symbol can appear multiple times if it enters more than
                  one symbol tables, e.g., both static and dynamic. *)
               if not (Md5.equal old_crc crc) then
-                failwithf "Duplicate crc for %s\nold:%s\nnew:%s\n" name
-                  (Md5.to_hex old_crc) (Md5.to_hex crc) () ))
+                Report.user_error "Duplicate crc for %s\nold:%s\nnew:%s\n"
+                  name (Md5.to_hex old_crc) (Md5.to_hex crc) () ))
 
-let save_linker_script_hot filename functions =
-  if !verbose then printf "Writing linker script hot to %s\n" filename;
-  Out_channel.with_file filename ~f:(fun oc ->
-      List.iter functions ~f:(fun name ->
-          fprintf oc "*(.text.caml.%s)\n" name))
+let hot_functions ~linearid_profile ~reorder_functions =
+  (* Create linker script fragment with hot functions *)
+  let open Config_reorder.Reorder_functions in
+  match reorder_functions with
+  | No -> []
+  | Execounts -> Aggregated_decoded_profile.top_functions linearid_profile
+  | Hot_clusters ->
+      (* Do we ever need the cfg to decide on function order? *)
+      failwith "Not implemented"
 
-let linker_script ~linker_script_template ~linker_script_hot
-    ~output_filename =
+let print_linker_script_hot oc ~functions =
+  (* Function section names for ocaml functions are prefixed with
+     .text.caml. but function section names for C functions have just .text.
+     prefix, including C and assembly functions from ocaml runtime. We guess
+     from the function symbol whether it is an ocaml or a C function, based
+     on the naming conventions used by ocaml compiler code generation. This
+     is an implicit dependency that might silently break if the naming
+     convention changes. *)
+  let ocaml_pattern =
+    Re2.create_exn
+      "caml[A-Z][A-Za-z0-9_]*__(entry|([a-z_][A-Za-z0-9$_]*_[0-9]*))"
+  in
+  let section_name n = fprintf oc "*(.text.%s)\n" n in
+  let ocaml_section_name n = fprintf oc "*(.text.caml.%s)\n" n in
+  let print name =
+    if Re2.matches ocaml_pattern name then ocaml_section_name name
+    else section_name name
+  in
+  List.iter functions ~f:print
+
+let linker_script ~output_filename ~linker_script_template
+    ~linker_script_hot ~linearid_profile_filename ~reorder_functions =
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
@@ -90,6 +114,28 @@ let linker_script ~linker_script_template ~linker_script_hot
   if !verbose then (
     printf "Writing linker script to %s\n" output_filename;
     printf "Template %s\n" template );
+
+  let print_hot oc =
+    match (linker_script_hot, linearid_profile_filename) with
+    | None, None ->
+        if (* just remove the marker *)
+           !verbose then
+          printf
+            "No linker-script-hot provided, removing the marker from \
+             linker-script-template.\n"
+    | Some hot, None ->
+        if !verbose then printf "Hot function layout %s\n" hot;
+        In_channel.with_file hot
+          ~f:(In_channel.iter_lines ~f:(fun s -> fprintf oc "\t%s\n" s))
+    | None, Some filename ->
+        if !verbose then printf "Hot function layout from %s\n" filename;
+        let linearid_profile = Aggregated_decoded_profile.read filename in
+        let functions =
+          hot_functions ~linearid_profile ~reorder_functions
+        in
+        print_linker_script_hot oc ~functions
+    | Some _, Some _ -> assert false
+  in
   Out_channel.with_file output_filename ~f:(fun oc ->
       In_channel.with_file template
         ~f:
@@ -97,25 +143,12 @@ let linker_script ~linker_script_template ~linker_script_hot
                if
                  String.equal (String.strip line)
                    "INCLUDE linker-script-hot"
-               then (
-                 match linker_script_hot with
-                 | None ->
-                     if (* just remove the marker *)
-                        !verbose then
-                       printf
-                         "No linker-script-hot provided, removing the \
-                          marker from linker-script-template.\n"
-                 | Some hot ->
-                     if !verbose then printf "Hot function layout %s\n" hot;
-                     In_channel.with_file hot
-                       ~f:
-                         (In_channel.iter_lines ~f:(fun s ->
-                              fprintf oc "\t%s\n" s)) )
+               then print_hot oc
                else Out_channel.fprintf oc "%s\n" line)))
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script =
+    ~write_linker_script_hot =
   let locations = load_locations binary_filename in
   (* let dirname = Filename.(realpath (dirname binary_filename)) in *)
   let linearid_profile_filename =
@@ -137,9 +170,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   Aggregated_decoded_profile.write linearid_profile
     linearid_profile_filename;
 
-  (* Create linker script *)
-  if write_linker_script then (
-    let linker_script_hot_filename =
+  if write_linker_script_hot then (
+    let filename =
       Option.value linker_script_hot_filename
         ~default:(binary_filename ^ ".linker-script-hot")
       (* The default name does not depend on the input executable, so that
@@ -148,17 +180,9 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       (* binary_filename ^ ".linker-script-hot" *)
       (* dirname ^ "/linker-script-hot" *)
     in
-    if !verbose then
-      printf "Writing linker script hot to %s\n" linker_script_hot_filename;
-    let open Config_reorder.Reorder_functions in
-    match reorder_functions with
-    | No -> ()
-    | Execounts ->
-        Aggregated_decoded_profile.top_functions linearid_profile
-        |> save_linker_script_hot linker_script_hot_filename
-    | Hot_clusters ->
-        (* Do we ever need the cfg to decide on function order? *)
-        failwith "Not implemented" );
+    if !verbose then printf "Writing linker script hot to %s\n" filename;
+    let functions = hot_functions ~linearid_profile ~reorder_functions in
+    Out_channel.with_file filename ~f:(print_linker_script_hot ~functions) );
   ()
 
 exception Not_equal_reg_array
@@ -198,7 +222,7 @@ let check_equal f new_body =
     report_linear ~name "Before" f;
     report_linear ~name "After" { f with fun_body = new_body };
     if !strict then
-      failwithf
+      Report.user_error
         "Conversion from linear to cfg and back to linear is not an \
          identity function %s.\n"
         name () )
@@ -239,7 +263,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     | Opt -> (
         match profile with
         | None ->
-            failwith
+            Report.user_error
               "-reorder-blocks opt is not allowed without -fdo-profile"
         | Some profile -> Reorder.Profile profile )
   in
@@ -309,3 +333,8 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     if !verbose && (Option.is_some fdo_profile || extra_debug) then
       printf "Calling ocamlopt directly, without FDO.\n";
     call_ocamlopt w All )
+
+let ocamlopt args =
+  let open Wrapper in
+  let w = wrap args in
+  call_ocamlopt w All

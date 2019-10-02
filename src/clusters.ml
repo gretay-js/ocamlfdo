@@ -231,7 +231,7 @@ let optimize_layout original_layout execounts =
   let len_clusters = List.length t.clusters in
   let len_layout = List.length t.original_layout in
   if not (len_layout = len_clusters) then
-    failwith "layout length doesn't match cluster length."
+    Report.user_error "layout length doesn't match cluster length."
   else if len_layout = 0 then (
     if !verbose then printf "Optimize layout called with empty layout.\n";
     [] )

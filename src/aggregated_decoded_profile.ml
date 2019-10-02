@@ -124,7 +124,10 @@ let decode_loc t locations addr =
       let finish = interval.r in
       let offset =
         match Int64.(to_int (addr - start)) with
-        | None -> failwithf "Offset too big: 0x%Lx" Int64.(addr - start) ()
+        | None ->
+            Report.user_error "Offset too big: 0x%Lx"
+              Int64.(addr - start)
+              ()
         | Some offset ->
             assert (offset >= 0);
             offset
@@ -200,7 +203,7 @@ let read filename =
     | Ok t_sexp -> t_of_sexp t_sexp
     | Error error ->
         Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        failwith "Cannot parse aggregated decoded profile file"
+        Report.user_error "Cannot parse aggregated decoded profile file"
   in
   if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
   t

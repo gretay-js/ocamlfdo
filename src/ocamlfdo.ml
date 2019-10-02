@@ -81,8 +81,8 @@ module Commonflag = struct
   let flag_linearid_profile_filename =
     {
       name = "-fdo-profile";
-      aliases = [ "-linearid-profile" ];
       doc = "filename decoded profile";
+      aliases = [];
     }
 
   let flag_output_filename =
@@ -123,10 +123,10 @@ let flag_v =
 
 let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
-let flag_no_linker_script_hot =
+let flag_write_linker_script_hot =
   Command.Param.(
-    flag "-no-linker-script-hot" no_arg
-      ~doc:" do not generate hot functions layout for linker script")
+    flag "-write-linker-script-hot" no_arg
+      ~doc:" write hot functions layout for linker script to a file")
 
 let flag_extra_debug =
   Command.Param.(
@@ -138,8 +138,11 @@ let flag_auto =
   Command.Param.(
     flag "-auto" no_arg
       ~doc:
-        " if -fdo-profile <file> does not exist, then add -extra-debug \
-         automatically")
+        " Automatically figure out how to build.\n\
+        \         Given -fdo-profile <file>, if <file> does not exist, \
+         then add -extra-debug. Without -fdo-profile, invoke ocamlopt \
+         without splitting it into phases (ignore phase-specific ocamlfdo \
+         arguments).")
 
 let flag_crc =
   Command.Param.(
@@ -179,23 +182,15 @@ let decode_command =
        Workflow:\n\
        Build your executable with ocamlfdo to enable extra debug info\n\
        for low-level optimizations (currently, only linearize pass).See \
-       other options for details.\n\
+       other subcommands for details.\n\
        Use Linux Perf to sample hardware execution counters using LBR:\n\
        $ perf record -e cycles:u -j any,u -o perf.data <prog.exe> <args..>\n\n\
        Decode the samples:\n\
        $ ocamlfdo decode -perf-profile <perf.data> -binary <prog.exe> \n\n\
-       It will generate two files:\n\
-       prog.exe.linker-script-hot is a linker script with hot function \
-       reordering, if enabled.\n\
-       prog.exe.fdo-profile is a profile.\n\
-       The profile can be used to reoptimize the executable. See other \
-       ocamlfdo options.\n\
-       Without -fdo-profile, the default filename is \
-       <binary_filename>.fdo-profile.\n\
-      \       Without -linker-script-hot, the default filename is \
-       <binary_filename>.linker-script-hot, unless -no-linker-script-hot \
-       is given, in which case the tool does not\n\
-      \  generate any linker-script-hot.\n\n\n")
+       It will generate a profile in prog.exe.fdo-profile.\n\
+       The profile can be used to reoptimize the executable.\n\
+       With -write-linker-script-hot, ocamlfdo decode will also produce \
+       hot function layout in prog.exe.linker-script-hot file.\n")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -207,14 +202,17 @@ let decode_command =
         Commonflag.(optional flag_linearid_profile_filename)
       and linker_script_hot_filename =
         Commonflag.(optional flag_linker_script_hot_filename)
-      and no_linker_script_hot = flag_no_linker_script_hot in
+      and write_linker_script_hot = flag_write_linker_script_hot in
       verbose := v;
       if q then quiet ();
-      let write_linker_script = not no_linker_script_hot in
+      if !verbose && not write_linker_script_hot then
+        printf
+          "Ignoring -reorder-functions when -write-linker-script-hot is \
+           not provided.\n";
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script)
+          ~write_linker_script_hot)
 
 let opt_command =
   Command.basic
@@ -328,11 +326,18 @@ let compile_command =
       if q then quiet ();
       let unit_crc = unit_crc || crc in
       let func_crc = func_crc || crc in
-      let fdo_profile, extra_debug =
+      let fdo =
         if auto then
           match fdo_profile with
           | None ->
-              failwith "Missing -fdo-profile <file>, required for -auto."
+              if !verbose then
+                printf
+                  "Missing -fdo-profile <file>, required for compilation\n\
+                   when -auto is used. Calling ocamlopt directly, without\n\
+                  \ splitting compilation into phases, and not \
+                   intermediate IR is saved. All phase-specific arguments \
+                   are ignored.\n";
+              None
           | Some file ->
               if Sys.file_exists_exn file then (
                 if !verbose then
@@ -341,26 +346,29 @@ let compile_command =
                      not exist.\n\n\
                     \ Setting -extra-debug to true."
                     file;
-                (None, true) )
+                Some (None, true) )
               else (
                 if !verbose then
                   printf "With -auto, the file -fdo-profile <%s> exists."
                     file;
-                (fdo_profile, extra_debug) )
+                Some (fdo_profile, extra_debug) )
         else
           (* if the file doesn't exist, optimize will fail with an error. *)
-          (fdo_profile, extra_debug)
+          Some (fdo_profile, extra_debug)
       in
       fun () ->
-        compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report)
+        match fdo with
+        | None -> ocamlopt args
+        | Some (fdo_profile, extra_debug) ->
+            compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
+              ~func_crc ~report)
 
 let linker_script_command =
   Command.basic
     ~summary:
       "Create linker script from a template and a layout of hot functions."
     ~readme:(fun () ->
-      "Insert the hot functions from linker-script-hot into the template \
+      "Inserts the hot functions from linker-script-hot into the template \
        linker script, replacing the marker\n\
        INCLUDE linker-script-hot\n\n\
        A linker script can be obtained by running the command \"ld \
@@ -371,7 +379,16 @@ let linker_script_command =
        It is useful when the linker runs from a different directory than \
        the one where the linker-script-hot file resides, such as when \
        ocamlfdo is used in a build system.\n\n\
-       Without -linker-script-hot, the marker is simply removed.\n\
+       At most one of -fdo-profile and -linker-script can be provided.\n\
+       If -fdo-profile is provided, hot functions layout is computed from \
+       the profile\n\
+       using a strategy specified by -reorder-functions, with default \
+       strategy being\n\
+       in the order of function execution counts. \n\
+       If -linker-script-hot is provided, function layout is read from \
+       that file.\n\
+      \             Without -linker-script-hot and -fdo-profile arguments, \
+       the marker is simply removed.\n\
       \       Argument of -linker-script-hot option must be a file that \
        contains\n\
        a valid fragment of linker script syntax. It can be empty. If \
@@ -389,12 +406,25 @@ let linker_script_command =
         Commonflag.(optional flag_linker_script_template_filename)
       and linker_script_hot =
         Commonflag.(optional flag_linker_script_hot_filename)
-      in
+      and linearid_profile_filename =
+        Commonflag.(optional flag_linearid_profile_filename)
+      and reorder_functions = flag_reorder_functions in
       verbose := v;
       if q then quiet ();
+      if
+        Option.is_some linearid_profile_filename
+        && Option.is_some linker_script_hot
+      then
+        raise
+          (Failure
+             "Please provide at most one of -fdo-profile and \
+              -linker-script-hot");
+      if !verbose && Option.is_some linker_script_hot then
+        printf
+          "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
-        linker_script ~linker_script_template ~linker_script_hot
-          ~output_filename)
+        linker_script ~output_filename ~linker_script_template
+          ~linker_script_hot ~linearid_profile_filename ~reorder_functions)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"

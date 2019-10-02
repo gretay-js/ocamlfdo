@@ -42,15 +42,20 @@ let parse_br index s =
         | "M" -> M
         | "P" -> P
         | "-" -> NOT_SUPPORTED
-        | _ -> failwithf "Cannot parse mispredict flag %s in %s" m s ()
+        | _ ->
+            Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
       in
       (* Parse and ignore t and a flags. *)
       ( match t with
       | "X" | "-" -> ()
-      | _ -> failwithf "Cannot parse mispredict flag %s in %s" m s () );
+      | _ ->
+          Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
+      );
       ( match a with
       | "A" | "-" -> ()
-      | _ -> failwithf "Cannot parse mispredict flag %s in %s" a s () );
+      | _ ->
+          Report.user_error "Cannot parse mispredict flag %s in %s" a s ()
+      );
 
       (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
       let _cycles = Int.of_string c in
@@ -60,7 +65,7 @@ let parse_br index s =
         index;
         mispredict;
       }
-  | _ -> failwithf "Cannot parse %s\n" s ()
+  | _ -> Report.user_error "Cannot parse %s\n" s ()
 
 (* The most recent branch is printed first by perf script. The number of
    branch entries vary based on the underlying hardware. This function
@@ -98,7 +103,7 @@ let row_to_sample ~keep_pid row =
           printf "\n" );
         Some sample )
       else None
-  | _ -> failwithf "Cannot parse %s\n" row ()
+  | _ -> Report.user_error "Cannot parse %s\n" row ()
 
 let pids = ref Int.Set.empty
 
