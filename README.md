@@ -130,8 +130,10 @@ from perf.data.
 ### Experimental
 
 Alternatively, `dune build @fdo-decode` can generate a new profile
-from `src/foo.exe.perf.data` and `src/foo.exe` executable found in the
-build directory. The user can do `dune promote` to copy the profile to
+from `src/foo.exe.perf.data` found in the source directory.
+It will use `src/foo.exe` executable found in the
+build directory, or build one from source (using previous profile, if available).
+The user can do `dune promote` to copy the new profile to
 the source directory. Caution!! You must rename or remove
 `src/foo.exe.perf.data` immediate after `dune promote` to avoid corrupting
 the profile in the next invocation of `dune`.
@@ -243,18 +245,18 @@ There are at least two hacky ways of achieving it, and no decent ones yet.
 
 ##  Advanced use of linker scripts and linking on non-GNU systems
 
-    Invoking `ocamlfdo decode` with the option `-write-linker-script-hot`
-    will also save a layout of hot functions to a separate file,
-    in a format suitable for inclusion in a linker script used by `GNU
-    ld` linker. Users can inspect and modify this layout for experimenting, but be aware
-    that function symbol names may change even when source code of the
-    function has not changed.
-    To produce a complete linker script with this layout, run
-    ```
-    ocamlfdo linker-script -linker-script-hot test2.exe.linker-script-hot -o linker-script
-    ```
-    If the linker runs from the directory where linker-script-hot is
-    located, there is no need for `ocamlfdo linker-script` command.
-    Pass `linker-script-template` instead of `linker-script` to the
-    compiler in the next step, and the linker will find
-    `linker-script-hot` automatically.
+Invoking `ocamlfdo decode` with the option `-write-linker-script-hot`
+will also save a layout of hot functions to a separate file,
+in a format suitable for inclusion in a linker script used by `GNU
+ld` linker. Users can inspect and modify this layout for experimenting, but be aware
+that function symbol names may change even when source code of the
+function has not changed.
+To produce a complete linker script with this layout, run
+```
+ocamlfdo linker-script -linker-script-hot test2.exe.linker-script-hot -o linker-script
+```
+If the linker runs from the directory where linker-script-hot is
+located, there is no need for `ocamlfdo linker-script` command.
+Pass `linker-script-template` instead of `linker-script` to the
+compiler in the next step, and the linker will find
+`linker-script-hot` automatically.
