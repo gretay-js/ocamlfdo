@@ -105,6 +105,24 @@ opam install ocamlfdo
   This produces optimized executable.
 
 
+##  Advanced use of linker scripts and linking on non-GNU systems
+
+Invoking `ocamlfdo decode` with the option `-write-linker-script-hot`
+will also save a layout of hot functions to a separate file,
+in a format suitable for inclusion in a linker script used by `GNU
+ld` linker. Users can inspect and modify this layout for experimenting, but be aware
+that function symbol names may change even when source code of the
+function has not changed.
+To produce a complete linker script with this layout, run
+```
+ocamlfdo linker-script -linker-script-hot test2.exe.linker-script-hot -o linker-script
+```
+If the linker runs from the directory where linker-script-hot is
+located, there is no need for `ocamlfdo linker-script` command.
+Pass `linker-script-template` instead of `linker-script` to the
+compiler in build 2, and the linker will find
+`linker-script-hot` automatically.
+
 ## Integration with dune
 
 A new version of dune, with [support for
@@ -121,36 +139,65 @@ and speficy the target executable to optimize.
            ))
 ```
 
-Dune will look for a profile file named `src/foo.exe.fdo-profile` in the
-source directory. If the profile file does not exists, dune will
+Dune will look for a profile file named `src/foo.exe.fdo-profile` in
+the source directory. If the profile file does not exists, dune will
 perform build 1, otherwise it will use the profile to perform build 2.
-The user can invoke `ocamlfdo decode` manually to generate the profile
-from perf.data.
-
-### Experimental
-
-Alternatively, `dune build @fdo-decode` can generate a new profile
-from `src/foo.exe.perf.data` found in the source directory.
-It will use `src/foo.exe` executable found in the
-build directory, or build one from source (using previous profile, if available).
-The user can do `dune promote` to copy the new profile to
-the source directory. Caution!! You must rename or remove
-`src/foo.exe.perf.data` immediate after `dune promote` to avoid corrupting
-the profile in the next invocation of `dune`.
-
-The next inocation of `build
-@fdo-decode` will use the new profile to build a new executable and
-then will try to use the new executable to decode the old `perf.data`.
-It will silently produce a new and bogous profile, that should not be promoted.
-
-
-### Split compilation
+Users should invoke `ocamlfdo decode` to generate the profile from
+`perf.data`.
 
 The advantage of integrating `ocamlfdo` with `dune` is that it avoids
 most of recompilation when the profile changes, making build 2 much
 faster than build 1. Essentially, only the last step of emitting
 assembly needs to be done in build 2. It is achieved using split
 compilation.
+
+### Experimental
+
+Instead of manually invoking `ocamlfdo decode`, users can invoke `dune
+build @fdo-decode` to generate a new profile from
+`src/foo.exe.perf.data` found in the source directory.  It will use
+`src/foo.exe` executable found in the build directory, or build one
+afresh from source (using the previous profile, if available).  User
+can do `dune promote` to copy the new profile to the source
+directory. Caution!! You must rename or remove `src/foo.exe.perf.data`
+immediate after `dune promote` to avoid corrupting the profile in the
+next invocation of `dune`.
+
+The next inocation of `build @fdo-decode` will use the new profile to
+build a new executable, and then will try to use the new executable to
+decode the old `perf.data`.  It will silently produce a new and bogous
+profile, that should not be promoted. Note that `ocamlfdo` will discover
+that the profile is bogous only after the profile is promoted and
+another build tries to use it.
+
+
+## Optimizing external dependencies with FDO
+
+When the project relies on packages installed via opam in the current switch,
+these libraries may need to be rebuilt (both build 1 and 2) to take
+full advantage of profile information for the project.
+
+There are at least two hackish ways of achieving it.
+- force opam to reinstall all the packages in each build, with
+  ocamlfdo now mascarading as ocamlopt.
+  ```
+  dune external-lib-deps @@default | sed 's/^- //' | xargs
+  ```
+  prints the list of libraries my project depends on, which almost
+  gives the list of packages to reinstall.
+  ```
+  opam reinstall <list of packages my project depends on> --forget-pending
+  ```
+  Then, re-link of the final executable.
+
+- use [duniverse](https://github.com/avsm/duniverse)
+  ```
+  opam pin https://github.com/avsm/duniverse.git
+  duniverse init ??
+  duniverse pull ??
+  ```
+
+## Split compilation
 
 Under the hood, `ocamlfdo compile` splits the standard
 compilation into two phases: `compile` and `emit`.  The
@@ -174,7 +221,8 @@ reads `.cmir-linear` and writes `.cmir-linear-fdo`.
 - `emit` phase: `ocamlopt -start-from emit ..` reads `.cmir-linear-fdo`
 and produces the rest of the compilation targets and artifacts.
 
-## How to use ocamlfdo in a project that it not build with dune?
+
+## How to use ocamlfdo in a project that is not built with dune?
 
 In a project that has multiple files and libraries, the easiest way at
 the moment is (sadly) to trick the build system into thinking that
@@ -210,53 +258,13 @@ $ ocamlfdo decode -binary test2.exe -perf-profile perf.data -write-linker-script
 $ ocamlopt test2.ml -o test2.exe
 ```
 
-The nice thing is that now a build system invokes ocamlopt via
-ocamlfdo wrapper, it will use the profile whenever it can.
+The nice thing is that now a build system that invokes ocamlopt via
+ocamlfdo wrapper will use the profile whenever it can.
 
 The script `ocamlfdo.sh` invokes `ocamlfdo compile` with `-auto` argument.
-If the profile file referred to in -fdo-profile exists,
+If the profile file referred to in `-fdo-profile` option exists,
 it will be used; otherwise `-extra-debug` is added instead.
 If there is no -fdo-profile option, then `ocamlfdo compile` does not
 split compilation.
 
-When the project relies on packages installed via opam in the current switch,
-these libraries may need to be rebuilt (both build 1 and 2) to take
-full advantage of profile information for the project.
-There are at least two hacky ways of achieving it, and no decent ones yet.
-- force opam to reinstall all the packages in each build, with
-  ocamlfdo now mascarading as ocamlopt.
-  ```
-  dune external-lib-deps @@default | sed 's/^- //' | xargs
-  ```
-  prints the list of libraries my project depends on, which almost
-  gives the list of packages to reinstall.
-  ```
-  opam reinstall <list of packages my project depends on> --forget-pending
-  ```
-  Then, re-link of the final executable.
 
-- use [duniverse](https://github.com/avsm/duniverse)
-  ```
-  opam pin https://github.com/avsm/duniverse.git
-  duniverse init ??
-  duniverse pull ??
-  ```
-
-
-##  Advanced use of linker scripts and linking on non-GNU systems
-
-Invoking `ocamlfdo decode` with the option `-write-linker-script-hot`
-will also save a layout of hot functions to a separate file,
-in a format suitable for inclusion in a linker script used by `GNU
-ld` linker. Users can inspect and modify this layout for experimenting, but be aware
-that function symbol names may change even when source code of the
-function has not changed.
-To produce a complete linker script with this layout, run
-```
-ocamlfdo linker-script -linker-script-hot test2.exe.linker-script-hot -o linker-script
-```
-If the linker runs from the directory where linker-script-hot is
-located, there is no need for `ocamlfdo linker-script` command.
-Pass `linker-script-template` instead of `linker-script` to the
-compiler in the next step, and the linker will find
-`linker-script-hot` automatically.
