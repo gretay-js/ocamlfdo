@@ -82,7 +82,7 @@ let hot_functions ~linearid_profile ~reorder_functions =
       (* Do we ever need the cfg to decide on function order? *)
       failwith "Not implemented"
 
-let print_linker_script_hot oc ~functions =
+let print_linker_script_hot oc ~functions ~check =
   (* Function section names for ocaml functions are prefixed with
      .text.caml. but function section names for C functions have just .text.
      prefix, including C and assembly functions from ocaml runtime. We guess
@@ -100,10 +100,21 @@ let print_linker_script_hot oc ~functions =
     if Re2.matches ocaml_pattern name then ocaml_section_name name
     else section_name name
   in
-  List.iter functions ~f:print
+  List.iter functions ~f:print;
+  let cond name =
+    fprintf oc
+      "ASSERT ((caml_hot__code_begin <= %s) && (%s <= caml_hot__code_end), \
+       \"Hot function %s was not placed in the hot section by the linker \
+       script.\n\
+       Missing function section name.\n\
+       \");\n"
+      name name name
+  in
+  if check then List.iter functions ~f:cond
 
 let linker_script ~output_filename ~linker_script_template
-    ~linker_script_hot ~linearid_profile_filename ~reorder_functions =
+    ~linker_script_hot ~linearid_profile_filename ~reorder_functions ~check
+    =
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
@@ -133,7 +144,7 @@ let linker_script ~output_filename ~linker_script_template
         let functions =
           hot_functions ~linearid_profile ~reorder_functions
         in
-        print_linker_script_hot oc ~functions
+        print_linker_script_hot oc ~functions ~check
     | Some _, Some _ -> assert false
   in
   Out_channel.with_file output_filename ~f:(fun oc ->
@@ -148,7 +159,11 @@ let linker_script ~output_filename ~linker_script_template
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script_hot =
+    ~write_linker_script_hot ~buildid ~check =
+  (* check that buildid of the binary matches buildid of the profile *)
+  let _pids =
+    Perf_profile.check_buildid binary_filename perf_profile_filename buildid
+  in
   let locations = load_locations binary_filename in
   (* let dirname = Filename.(realpath (dirname binary_filename)) in *)
   let linearid_profile_filename =
@@ -182,7 +197,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     in
     if !verbose then printf "Writing linker script hot to %s\n" filename;
     let functions = hot_functions ~linearid_profile ~reorder_functions in
-    Out_channel.with_file filename ~f:(print_linker_script_hot ~functions) );
+    Out_channel.with_file filename
+      ~f:(print_linker_script_hot ~functions ~check) );
   ()
 
 exception Not_equal_reg_array

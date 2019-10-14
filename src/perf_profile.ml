@@ -260,3 +260,75 @@ let read_and_aggregate ?(expected_pid = None) filename =
     Printf.printf "Found pids:\n";
     Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid) );
   aggregated
+
+let check_buildid binary perf_data ignore_buildid =
+  let perf = Shexp_process.(eval (find_executable_exn "perf")) in
+  let args filename = [ "build-list"; "-f"; "-i"; filename ] in
+  let eval args ~f =
+    let open Shexp_process in
+    let open Infix in
+    let f x y = return (f x y) in
+    eval (run perf args |- fold_lines ~init:[] ~f)
+  in
+  let binary_buildid =
+    args binary |> eval ~f:(fun acc s -> s :: acc) |> List.hd_exn
+  in
+  let parse row =
+    match String.split ~on:' ' row with
+    | [ buildid; dso ] ->
+        if String.equal binary_buildid buildid then Some dso else None
+    | _ ->
+        Report.user_error "Unexpected output format of `perf %s`:\n%s"
+          (String.concat ~sep:" " (args perf_data))
+          row
+  in
+  let data =
+    args perf_data
+    |> eval ~f:(fun acc s ->
+           match parse s with
+           | None -> acc
+           | Some d -> d :: acc)
+  in
+  ( match data with
+  | [ dso ] ->
+      if !verbose then
+        printf "Found comm for buildid %s: %s\n" binary_buildid dso
+  | [] ->
+      let msg () =
+        sprintf
+          "buildid mismatch: buildid %s of binary %s is not found in perf \
+           profile %s."
+          binary_buildid binary perf_data
+      in
+      if ignore_buildid then (
+        if !verbose then printf "%s\nbuildid mismatch ignored\n" (msg ()) )
+      else
+        Report.user_error
+          "%s\n\
+           To check, compare %s to output of `perf %s`\n\
+           To ignore, add -ignore-buildid option when calling `ocamlfdo \
+           decode`."
+          (msg ()) binary_buildid
+          (String.concat ~sep:"" (args perf_data))
+  | _ -> () );
+  if !verbose then (
+    printf "Found %d comms for buildid %s in %s." (List.length data)
+      binary_buildid perf_data;
+    if !verbose then List.iter data ~f:(printf "%s\n") );
+
+  (* find pids *)
+  eval [ "report"; "-F"; "dso,pid"; "--stdio"; "-v" ] ~f:(fun acc s ->
+      if String.is_prefix s ~prefix:"build id event received for " then acc
+      else if String.is_prefix s ~prefix:"# " then acc
+      else
+        let s = String.strip s in
+        let dso = String.prefix s (String.index_exn s ' ') in
+        match List.find data ~f:(String.equal dso) with
+        | None -> acc
+        | Some _ -> (
+            let pid_comm = String.suffix s (String.rindex_exn s ' ') in
+            match String.split ~on:':' pid_comm with
+            | [ pid; _ ] -> pid :: acc
+            | _ ->
+                Report.user_error
+                  "Cannot find pid. Unexpect output of perf report:%s\n" s ))

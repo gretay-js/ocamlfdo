@@ -123,6 +123,15 @@ let flag_v =
 
 let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
+let flag_buildid =
+  Command.Param.(
+    flag "-ignore-buildid" no_arg
+      ~doc:" ignore mismatch in buildid between binary and perf.data")
+
+let flag_force =
+  Command.Param.(
+    flag "-f" no_arg ~doc:" no assertions in linker-script-hot")
+
 let flag_write_linker_script_hot =
   Command.Param.(
     flag "-write-linker-script-hot" no_arg
@@ -202,7 +211,9 @@ let decode_command =
         Commonflag.(optional flag_linearid_profile_filename)
       and linker_script_hot_filename =
         Commonflag.(optional flag_linker_script_hot_filename)
-      and write_linker_script_hot = flag_write_linker_script_hot in
+      and write_linker_script_hot = flag_write_linker_script_hot
+      and buildid = flag_buildid
+      and force = flag_force in
       verbose := v;
       if q then quiet ();
       if !verbose && not write_linker_script_hot then
@@ -212,7 +223,7 @@ let decode_command =
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script_hot)
+          ~write_linker_script_hot ~buildid ~check:(not force))
 
 let opt_command =
   Command.basic
@@ -408,7 +419,8 @@ let linker_script_command =
         Commonflag.(optional flag_linker_script_hot_filename)
       and linearid_profile_filename =
         Commonflag.(optional flag_linearid_profile_filename)
-      and reorder_functions = flag_reorder_functions in
+      and reorder_functions = flag_reorder_functions
+      and force = flag_force in
       verbose := v;
       if q then quiet ();
       if
@@ -424,7 +436,8 @@ let linker_script_command =
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
         linker_script ~output_filename ~linker_script_template
-          ~linker_script_hot ~linearid_profile_filename ~reorder_functions)
+          ~linker_script_hot ~linearid_profile_filename ~reorder_functions
+          ~check:(not force))
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
