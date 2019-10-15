@@ -123,6 +123,16 @@ let flag_v =
 
 let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
+let flag_expected_pids =
+  Command.Param.(
+    flag "-pids"
+      (optional_with_default []
+         (Arg_type.comma_separated ~allow_empty:false ~strip_whitespace:true
+            ~unique_values:true int))
+      ~doc:
+        "pids include samples only from these pids, specified as a \
+         comma-separated list of integers")
+
 let flag_buildid =
   Command.Param.(
     flag "-ignore-buildid" no_arg
@@ -213,6 +223,7 @@ let decode_command =
         Commonflag.(optional flag_linker_script_hot_filename)
       and write_linker_script_hot = flag_write_linker_script_hot
       and buildid = flag_buildid
+      and expected_pids = flag_expected_pids
       and force = flag_force in
       verbose := v;
       if q then quiet ();
@@ -223,7 +234,8 @@ let decode_command =
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script_hot ~buildid ~check:(not force))
+          ~write_linker_script_hot ~buildid ~expected_pids
+          ~check:(not force))
 
 let opt_command =
   Command.basic

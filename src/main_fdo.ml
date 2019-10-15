@@ -159,29 +159,25 @@ let linker_script ~output_filename ~linker_script_template
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script_hot ~buildid ~check =
-  (* check that buildid of the binary matches buildid of the profile *)
-  let _pids =
-    Perf_profile.check_buildid binary_filename perf_profile_filename buildid
-  in
-  let locations = load_locations binary_filename in
-  (* let dirname = Filename.(realpath (dirname binary_filename)) in *)
-  let linearid_profile_filename =
-    Option.value linearid_profile_filename
-      ~default:(binary_filename ^ ".fdo-profile")
-    (* dirname ^ "/fdo-profile" *)
-  in
+    ~write_linker_script_hot ~buildid ~expected_pids ~check =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
-    Perf_profile.read_and_aggregate perf_profile_filename
+    Perf_profile.read_and_aggregate perf_profile_filename binary_filename
+      buildid expected_pids
   in
+  let locations = load_locations binary_filename in
   let linearid_profile =
     Aggregated_decoded_profile.create locations aggr_perf_profile
   in
   load_crcs locations linearid_profile.crcs;
 
   (* Save the profile to file. This does not include counts for inferred
-     fallthroughs. *)
+     fallthroughs, which require CFG. *)
+  let linearid_profile_filename =
+    Option.value linearid_profile_filename
+      ~default:(binary_filename ^ ".fdo-profile")
+    (* dirname ^ "/fdo-profile" *)
+  in
   Aggregated_decoded_profile.write linearid_profile
     linearid_profile_filename;
 
