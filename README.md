@@ -32,11 +32,11 @@ the upstream version of its dependencies:
 
 For now, the process is:
 ```
-opam create fdo408 --empty
-opam pin ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
+opam switch create fdo408 --empty
+opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
 opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
-opam pin ocamlcfg https://github.com/gretay-js/ocamlcfg.git
-opam pin owee https://github.com/gretay-js/owee.git#wip3
+opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
+opam pin add owee https://github.com/gretay-js/owee.git#wip3
 opam install ppx_csv_conv ppx_variants_conv parsexp_io shexp re2
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
 ```
@@ -128,7 +128,7 @@ compiler in build 2, and the linker will find
 A new version of dune, with [support for
 FDO](https://github/gretay-js/dune) is under review.
 ```
-opam pin add ocamlfdo https://github.com/gretay-js/dune.git#fdo-decode
+opam pin add dune https://github.com/gretay-js/dune.git#fdo-decode
 ```
 
 To enable an FDO build, create a new context in your `dune-workspace`
