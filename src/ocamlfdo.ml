@@ -164,6 +164,13 @@ let flag_auto =
          without splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
+let flag_no_crc =
+  Command.Param.(
+    flag "-no-md5" no_arg
+      ~doc:
+        " turn off -md5-unit and -md5-fun, regardless of the order they\n\
+        \ are specified in.")
+
 let flag_crc =
   Command.Param.(
     flag "-md5" no_arg
@@ -264,11 +271,12 @@ let opt_command =
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
+      and no_crc = flag_no_crc
       and files = anon_files in
       verbose := v;
       if q then quiet ();
-      let unit_crc = unit_crc || crc in
-      let func_crc = func_crc || crc in
+      let unit_crc = (unit_crc || crc) && not no_crc in
+      let func_crc = (func_crc || crc) && not no_crc in
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
@@ -341,6 +349,7 @@ let compile_command =
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
       and crc = flag_crc
+      and no_crc = flag_no_crc
       and args =
         Command.Param.(
           flag "--" escape
@@ -348,8 +357,8 @@ let compile_command =
       in
       verbose := v;
       if q then quiet ();
-      let unit_crc = unit_crc || crc in
-      let func_crc = func_crc || crc in
+      let unit_crc = (unit_crc || crc) && not no_crc in
+      let func_crc = (func_crc || crc) && not no_crc in
       let fdo =
         if auto then
           match fdo_profile with

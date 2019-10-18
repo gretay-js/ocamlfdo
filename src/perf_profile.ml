@@ -259,17 +259,18 @@ let extract_pids data perf_data =
         try
           let s = String.strip s in
           let dso = String.prefix s (String.index_exn s ' ') in
-          Printf.printf "[find pids] dso=%s\n" dso;
+          if !verbose then Printf.printf "[find pids] dso=%s\n" dso;
           match List.find data ~f:(String.equal dso) with
           | None -> acc
           | Some _ -> (
               let pid_comm =
                 String.drop_prefix s (String.rindex_exn s ' ' + 1)
               in
-              Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
+              if !verbose then
+                Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
               match String.split ~on:':' pid_comm with
               | [ pid; _ ] ->
-                  Printf.printf "[find pids] pid=%s\n" pid;
+                  if !verbose then Printf.printf "[find pids] pid=%s\n" pid;
                   Int.Set.add acc (Int.of_string pid)
               | _ ->
                   Report.user_error
