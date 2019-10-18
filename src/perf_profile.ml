@@ -130,7 +130,7 @@ let perf_fold filename args ~init ~f =
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
-  let t = eval (call args |- fold_lines ~init ~f) in
+  let t = eval (err_to_out (call args) |- fold_lines ~init ~f) in
   t
 
 let read filename =
@@ -235,6 +235,50 @@ let aggregate sample (aggregated : Aggregated_perf_profile.t) =
   inc aggregated.instructions sample.ip;
   aggregate_brstack None sample.brstack aggregated
 
+let extract_pids data perf_data =
+  (* find pids *)
+  (* there seems to be no better way of mapping dso to pids, or restricting
+     the output of `perf script` to a particular dso. With `perf script`,
+     dso appearing attached to every address in brstacks, which makes the
+     output much bigger and longer to process. *)
+  (* CR-soon replace this hack with parsing the output of perf report, or a
+     better way to extract pids. *)
+  (* We could also extract buildid and dso association from this output,
+     without calling buildid-list before it, but while the call to
+     buildid-list seems reasonable to keep long term, this function should
+     be replaced. *)
+  perf_fold perf_data [ "report"; "-F"; "dso,pid"; "--stdio"; "-v" ]
+    ~init:Int.Set.empty ~f:(fun acc s ->
+      Printf.printf "[find pids] %s\n" s;
+      if
+        String.equal s ""
+        || String.is_prefix s ~prefix:"build id event received for "
+        || String.is_prefix s ~prefix:"#"
+      then acc
+      else
+        try
+          let s = String.strip s in
+          let dso = String.prefix s (String.index_exn s ' ') in
+          Printf.printf "[find pids] dso=%s\n" dso;
+          match List.find data ~f:(String.equal dso) with
+          | None -> acc
+          | Some _ -> (
+              let pid_comm =
+                String.drop_prefix s (String.rindex_exn s ' ' + 1)
+              in
+              Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
+              match String.split ~on:':' pid_comm with
+              | [ pid; _ ] ->
+                  Printf.printf "[find pids] pid=%s\n" pid;
+                  Int.Set.add acc (Int.of_string pid)
+              | _ ->
+                  Report.user_error
+                    "Cannot find pid. Unexpect output of perf report:%s\n" s
+              )
+        with _ ->
+          Report.user_error
+            "Cannot find pid. Unexpect output of perf report:%s\n" s)
+
 let check_buildid binary perf_data ignore_buildid =
   let binary_buildid =
     perf_fold binary buildid ~init:[] ~f:(fun acc s -> s :: acc)
@@ -282,28 +326,7 @@ let check_buildid binary perf_data ignore_buildid =
     printf "Found %d comms for buildid %s in %s." (List.length data)
       binary_buildid perf_data;
     if !verbose then List.iter data ~f:(printf "%s\n") );
-
-  (* find pids *)
-  (* there seems to be no better way of mapping dso to pids, or restricting
-     the output of `perf script` to a particular dso or pid. With `perf
-     script`, dso appearing attached to every address in brstacks, which
-     makes the output much bigger and longer to process. *)
-  perf_fold perf_data [ "report"; "-F"; "dso,pid"; "--stdio"; "-v" ]
-    ~init:Int.Set.empty ~f:(fun acc s ->
-      if String.is_prefix s ~prefix:"build id event received for " then acc
-      else if String.is_prefix s ~prefix:"# " then acc
-      else
-        let s = String.strip s in
-        let dso = String.prefix s (String.index_exn s ' ') in
-        match List.find data ~f:(String.equal dso) with
-        | None -> acc
-        | Some _ -> (
-            let pid_comm = String.suffix s (String.rindex_exn s ' ') in
-            match String.split ~on:':' pid_comm with
-            | [ pid; _ ] -> Int.Set.add acc (Int.of_string pid)
-            | _ ->
-                Report.user_error
-                  "Cannot find pid. Unexpect output of perf report:%s\n" s ))
+  extract_pids data perf_data
 
 let pids_to_keep ~found_pids ~expected_pids =
   match expected_pids with
@@ -329,7 +352,11 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
   (* check that buildid of the binary matches buildid of some dso sampled in
      the profile, and return the pids with which that dso appears in the
      profile. *)
-  let found_pids = check_buildid binary filename ignore_buildid in
+  let found_pids =
+    if (not ignore_buildid) || !verbose then
+      check_buildid binary filename ignore_buildid
+    else Int.Set.empty
+  in
   let keep_pid =
     check_keep_pid ~ignore_buildid (pids_to_keep ~found_pids ~expected_pids)
   in
