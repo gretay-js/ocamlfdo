@@ -10,3 +10,8 @@ val apply : algo:reorder_algo -> Cfg_builder.t -> Cfg_builder.t
 val verbose : bool ref
 
 val validate : bool ref
+
+val hot_functions :
+  linearid_profile:Aggregated_decoded_profile.t ->
+  reorder_functions:Config_reorder.Reorder_functions.t ->
+  string list

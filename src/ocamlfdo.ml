@@ -17,6 +17,7 @@ let quiet () =
   Ocamlcfg.Cfg_builder.verbose := false;
   Crcs.verbose := false;
   Wrapper.verbose := false;
+  Linker_script.verbose := false;
   ()
 
 (* Utility for handling variant type command line options. *)
@@ -447,7 +448,7 @@ let linker_script_command =
         printf
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
-        linker_script ~output_filename ~linker_script_template
+        Linker_script.write ~output_filename ~linker_script_template
           ~linker_script_hot ~linearid_profile_filename ~reorder_functions
           ~check:(not force))
 
