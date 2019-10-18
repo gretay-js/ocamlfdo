@@ -16,21 +16,53 @@ let print_hot oc ~functions ~check =
   in
   let section_name n = fprintf oc "*(.text.%s)\n" n in
   let ocaml_section_name n = fprintf oc "*(.text.caml.%s)\n" n in
-  let print name =
-    if Re2.matches ocaml_pattern name then ocaml_section_name name
-    else section_name name
+  (* Function symbols from ocaml are always global (so far), but function
+     symbols from C can be local, for example if defined as static. Linker
+     script cannot refer to local symbols, so we cannot print an assert in
+     linker script for them for correct repositioning in the linker script,
+     and silently fail to reorder them. At least the check works for global
+     function symbols from C.
+
+     To get a complete check, users can check using `nm -n` for example that
+     these were reordered, or we can add another command that does it, e.g.
+     takes as input executable and checks all symbols and their positions
+     using owee. *)
+  let msg =
+    sprintf
+      "\"Hot function %s was not placed in the hot section by the linker \
+       script. Missing function section name.\n\
+       \""
   in
-  List.iter functions ~f:print;
-  let cond name =
+  let cond n =
     fprintf oc
-      "ASSERT ((caml_hot__code_begin <= %s) && (%s <= caml_hot__code_end), \
-       \"Hot function %s was not placed in the hot section by the linker \
-       script.\n\
-       Missing function section name.\n\
-       \");\n"
-      name name name
+      "ASSERT (DEFINED(%s)?(caml_hot__code_begin <= %s) && (%s <= \
+       caml_hot__code_end):1, \n\
+       %s);"
+      n n n (msg n)
   in
-  if check then List.iter functions ~f:cond
+  let ocaml_cond n =
+    fprintf oc
+      "ASSERT ((caml_hot__code_begin <= %s) && (%s <= caml_hot__code_end), \n\
+       %s);"
+      n n (msg n)
+  in
+  let print_check n = function
+    | true -> ocaml_cond n
+    | false -> cond n
+  in
+  let print_section n = function
+    | true -> ocaml_section_name n
+    | false -> section_name n
+  in
+  let print name =
+    let is_ocaml = Re2.matches ocaml_pattern name in
+    print_section name is_ocaml;
+    if check then print_check name is_ocaml
+  in
+  (* CR-soon gyorsh: It may be convenient to generate all asserts at the end
+     of the hot section, instead of interleaved with layout, if users ever
+     look at the layout. *)
+  List.iter functions ~f:print
 
 let write_hot filename ~linearid_profile ~reorder_functions ~check =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
