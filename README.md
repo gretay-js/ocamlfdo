@@ -68,10 +68,6 @@ opam install ocamlfdo
     the last branch record (LBR) support.
     You should run this command on a benchmarking machine.
 
-    The ocamlfdo tool will generate two files alongside the executable: a
-    linker script `test2.exe.linker-script-hot` and a profile
-    `test2.exe.fdo-profile`.
-
 * Decode
   ```
   ocamlfdo decode -binary test2.exe -perf-profile test2.perf.data
@@ -132,7 +128,7 @@ opam pin add dune https://github.com/gretay-js/dune.git#fdo-decode
 ```
 
 To enable an FDO build, create a new context in your `dune-workspace`
-and speficy the target executable to optimize.
+and specify the target executable to optimize.
 ```
 (context (default
            (fdo src/foo.exe)
