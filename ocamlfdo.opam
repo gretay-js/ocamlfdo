@@ -9,9 +9,7 @@ dev-repo: "git+https://gretay-js/ocamlfdo.git"
 build: [
   ["dune" "subst"] {pinned}
   ["dune" "build" "-p" name "-j" jobs]
-  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
-install: ["dune" "install" "-p" name]
 depends: [
   "ocaml" {>= "4.08"}
   "dune" {build & >= "1.8"}
