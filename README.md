@@ -12,7 +12,7 @@ are reordering of functions and basic blocks within a function.
 
 
 Currently, [ocamlfdo](https://github.com/gretay-js/ocamlfdo) is not
-yet available from opam repositry.  It requires a few small changes to
+yet available from opam repository.  It requires a few small changes to
 the upstream version of its dependencies:
 - [ocamlopt](https://github.com/ocaml/ocaml) compiler.  The changes
   are [available here](https://github.com/gretay-js/ocaml/tree/fdo408)
