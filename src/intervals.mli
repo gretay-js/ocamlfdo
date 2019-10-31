@@ -5,8 +5,8 @@
    The interval's start is closed and interval's end is open: [i.l,i.r) *)
 
 type 'a interval = {
-  l : Elf_addr.t;
-  r : Elf_addr.t;
+  l : Addr.t;
+  r : Addr.t;
   v : 'a;
 }
 
@@ -16,4 +16,4 @@ val empty : 'a t
 
 val insert : 'a t -> 'a interval -> 'a t
 
-val enclosing : 'a t -> Elf_addr.t -> 'a interval option
+val enclosing : 'a t -> Addr.t -> 'a interval option

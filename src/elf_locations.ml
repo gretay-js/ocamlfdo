@@ -21,17 +21,17 @@ let verbose = ref true
 
 let create ~elf_executable =
   let fd = Unix.openfile elf_executable ~mode:[ Unix.O_RDONLY ] ~perm:0 in
-  let len = Unix.lseek fd 0L ~mode:Unix.SEEK_END in
+  let len = Unix.lseek fd 0L ~mode:Unix.SEEK_END |> Int64.to_int_exn in
   let map =
     Bigarray.array1_of_genarray
-      (Unix.map_file fd Bigarray.int8_unsigned Bigarray.c_layout false
-         [| len |])
+      (Unix.map_file fd Bigarray.int8_unsigned Bigarray.c_layout
+         ~shared:false [| len |])
   in
   Unix.close fd;
   let _header, sections = Owee_elf.read_elf map in
-  let resolved = Hashtbl.create 42 (module Elf_addr) in
-  let resolved_fun = Hashtbl.create 42 (module Elf_addr) in
-  let inverse = Hashtbl.create 42 (module String) in
+  let resolved = Hashtbl.create (module Elf_addr) in
+  let resolved_fun = Hashtbl.create (module Elf_addr) in
+  let inverse = Hashtbl.create (module String) in
   let resolved_fun_intervals = Intervals.empty in
   let strtab = Owee_elf.find_string_table map sections in
   let symtab = Owee_elf.find_symbol_table map sections in
@@ -168,7 +168,7 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
                 if !verbose then
                   Printf.printf "creating a new func table for %s %d\n"
                     filename line;
-                let tbl = Hashtbl.create 42 (module Int) in
+                let tbl = Hashtbl.create (module Int) in
                 Hashtbl.add t.inverse filename tbl;
                 tbl
             | Some tbl ->
