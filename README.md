@@ -21,7 +21,7 @@ the upstream version of its dependencies:
 - [owee](https://github.com/let-def/owee) library.
   The change is to use int64 instead of int for addresses,
   and there are a few minor improvements.
-- [ocamlcfg](https://github/gretay-js/ocamlcfg) library is not yet
+- [ocamlcfg](https://github.com/gretay-js/ocamlcfg) library is not yet
   available from opam repository.
 - [ocaml-migrate-parsetree](https://github.com/ocaml-ppx/ocaml-migrate-parsetree)
   library.
