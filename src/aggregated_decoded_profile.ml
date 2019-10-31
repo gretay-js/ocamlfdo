@@ -125,9 +125,7 @@ let decode_loc t locations addr =
       let offset =
         match Int64.(to_int (addr - start)) with
         | None ->
-            Report.user_error "Offset too big: 0x%Lx"
-              Int64.(addr - start)
-              ()
+            Report.user_error "Offset too big: 0x%Lx" Addr.(addr - start) ()
         | Some offset ->
             assert (offset >= 0);
             offset

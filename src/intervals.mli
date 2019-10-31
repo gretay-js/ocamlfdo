@@ -3,9 +3,10 @@
    need an interval tree, because all intervals are disjoint.
 
    The interval's start is closed and interval's end is open: [i.l,i.r) *)
+
 type 'a interval = {
-  l : Int64.t;
-  r : Int64.t;
+  l : Elf_addr.t;
+  r : Elf_addr.t;
   v : 'a;
 }
 
@@ -15,4 +16,4 @@ val empty : 'a t
 
 val insert : 'a t -> 'a interval -> 'a t
 
-val enclosing : 'a t -> Int64.t -> 'a interval option
+val enclosing : 'a t -> Elf_addr.t -> 'a interval option
