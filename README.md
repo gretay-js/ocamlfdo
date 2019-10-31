@@ -36,7 +36,7 @@ opam switch create fdo408 --empty
 opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
 opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
 opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
-opam pin add owee https://github.com/gretay-js/owee.git#wip3
+opam pin add owee https://github.com/gretay-js/owee.git#wip4
 opam install ppx_csv_conv ppx_variants_conv parsexp_io shexp re2
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
 ```
