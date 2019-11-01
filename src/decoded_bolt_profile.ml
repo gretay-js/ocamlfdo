@@ -86,15 +86,15 @@ let create locations ~filename =
   (* parse bolt profile file *)
   let bolt_profile = Bolt_profile.read ~filename in
   (* Resolving dwarf functions and address is slow, so we batch it. *)
-  (* collect all function names *)
+  (* Collect all function names *)
   let len = List.length bolt_profile in
-  let functions = Caml.Hashtbl.create len in
+  let functions = Hashtbl.create len in
   let add_name bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
     | Some (name, _) ->
-        if not (Caml.Hashtbl.mem functions name) then
-          Caml.Hashtbl.add functions name None
+        if not (Hashtbl.mem functions name) then
+          Hashtbl.add functions name None
   in
   let gather_function_names (bolt_branch : Bolt_profile.Bolt_branch.t) =
     add_name bolt_branch.src;
@@ -104,16 +104,16 @@ let create locations ~filename =
   Elf_locations.find_functions locations functions;
 
   (* Collect all addresses *)
-  let addresses = Caml.Hashtbl.create len in
+  let addresses = Hashtbl.create len in
   let add bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
     | Some (name, offset) -> (
-        match Caml.Hashtbl.find functions name with
+        match Hashtbl.find functions name with
         | None -> ()
         | Some start ->
             let addr = Int64.(start + of_int offset) in
-            Caml.Hashtbl.add addresses addr () )
+            Hashtbl.add addresses addr None )
   in
   let gather_addresses (bolt_branch : Bolt_profile.Bolt_branch.t) =
     add bolt_branch.src;
@@ -127,7 +127,7 @@ let create locations ~filename =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> None
     | Some (name, offset) -> (
-        match Caml.Hashtbl.find functions name with
+        match Hashtbl.find functions name with
         | None ->
             if String.is_suffix ~suffix:"@PLT" name then
               (* OCamlFDO doesn't know PLT names, so we ignore the LBR
@@ -137,19 +137,27 @@ let create locations ~filename =
             else Some { name; id = None; offset; addr = None }
         | Some start -> (
             let program_counter = Int64.(start + of_int offset) in
-            let open Ocaml_locations in
-            match decode_line locations ~program_counter name Linear with
+            let dbg = Hashtbl.find addresses program_counter in
+            match dbg with
             | None ->
                 Some
                   { name; id = None; offset; addr = Some program_counter }
-            | Some (_, line) ->
-                Some
-                  {
-                    name;
-                    id = Some line;
-                    offset;
-                    addr = Some program_counter;
-                  } ) )
+            | Some dbg ->
+                if
+                  Filenames.match_filename Linear ~expected:name
+                    ~actual:dbg.file
+                then
+                  Some
+                    {
+                      name;
+                      id = Some dbg.line;
+                      offset;
+                      addr = Some program_counter;
+                    }
+                else
+                  Some
+                    { name; id = None; offset; addr = Some program_counter }
+            ) )
   in
   List.fold bolt_profile ~init:[] ~f:(fun acc b ->
       match (decode_loc b.src, decode_loc b.dst) with

@@ -163,13 +163,13 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
         let res = Some (filename, line) in
         ( if with_inverse then
           let tbl =
-            match Hashtbl.find_opt t.inverse filename with
+            match Hashtbl.find t.inverse filename with
             | None ->
                 if !verbose then
                   Printf.printf "creating a new func table for %s %d\n"
                     filename line;
                 let tbl = Hashtbl.create (module Int) in
-                Hashtbl.add t.inverse filename tbl;
+                Hashtbl.add t.inverse ~key:filename ~data:tbl;
                 tbl
             | Some tbl ->
                 if !verbose then
@@ -178,13 +178,13 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
                     (Hashtbl.length tbl) filename line;
                 tbl
           in
-          match Hashtbl.find_opt tbl line with
+          match Hashtbl.find tbl line with
           | None ->
               if !verbose then
                 Printf.printf
                   "adding new entry to line table for %s %d: 0x%x\n"
                   filename line prev.state.address;
-              Hashtbl.add tbl line prev.state.address
+              Hashtbl.add tbl ~key:line ~data:prev.state.address
           | Some addr ->
               if !verbose then
                 Printf.printf "found entry in line table for %s %d: 0x%x\n"
@@ -287,8 +287,8 @@ let find_all ~t ~addresses cur prev =
               ()
           | Some _ ->
               if !verbose then Printf.printf "find_all: resolved 0x%x\n" pc;
-              Hashtbl.add t.resolved pc (Some (filename, prev.state.line))
-          );
+              Hashtbl.set addresses pc
+                (Some { file = (filename, line = prev.state.line) }) );
           loop (Elf_addr.add pc 1) )
       in
       loop prev.state.address
@@ -298,20 +298,12 @@ let resolve_all t addresses =
   if len > 0 then (
     if !verbose then
       Printf.printf "resolve_all: input size=%d unique addresses\n" len;
-    Hashtbl.filter_map_inplace
-      (fun k d -> if Hashtbl.mem t.resolved k then None else Some d)
-      addresses;
-    let l = Hashtbl.length addresses in
-    if !verbose && l < len then
-      Printf.printf "resolve_all: input size=%d unresolved addresses\n" l;
-    let start = Hashtbl.length t.resolved in
     resolve_from_dwarf t ~f:(find_all ~t ~addresses);
-    let stop = Hashtbl.length t.resolved in
-    let n = stop - start in
+    let resolved = Hashtbl.count addresses ~f:Option.is_some in
     assert (n <= len);
-    if !verbose then (
-      Printf.printf "resolve_all: resolved %d addresses\n" n;
-      Printf.printf "resolve_all: not resolved %d addresses\n" (len - n) ) )
+    if !verbose then
+      Printf.printf "resolve_all: resolved %d out of %d addresses\n"
+        resolved len )
 
 let resolve_pc t ~program_counter =
   try
@@ -510,8 +502,8 @@ let resolve_range t ~start ~finish ~with_inverse =
     Printf.printf "inverse entries before=%d after=%d\n" oldlen
       (Hashtbl.length t.inverse)
 
-let to_address t file line =
-  if !verbose then Printf.printf "to_address of %s:%d" file line;
+let to_address t dbg =
+  if !verbose then Printf.printf "to_address of %s:%d" dbg.file dbg.line;
   match Hashtbl.find_opt t.inverse file with
   | None ->
       if !verbose then Printf.printf " function not found\n";

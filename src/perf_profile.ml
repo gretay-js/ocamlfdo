@@ -95,40 +95,42 @@ type row =
   | Sample of sample
   | Mmap of mmap
 
-(* CR-soon gyorsh: this is just parsing a regexp like a monkey,
-   and it is getting ugly and probably slow. use regexp parser? *)
+(* CR-soon gyorsh: this is just parsing a regexp like a monkey, and it is
+   getting ugly and probably slow. use regexp parser? *)
 let row_to_sample ~keep_pid row =
   match split_on_whitespace row with
-  | pid :: "PERF_RECORD_MMAP2" :: id :: pos :: _perm :: name ->
+  | pid :: "PERF_RECORD_MMAP2" :: id :: pos :: rest ->
+      (* 34900 PERF_RECORD_MMAP2 34900/34900: [0x400000(0x40000) @ 0 fd:05
+         125179032 1817437489]: r-xp /path/to/test2.exe *)
+      if !verbose then (
+        printf "parsing PERF_RECORD_MMAP2 for pid=%s:\n%s\n" pid row;
+        let pid = Int.of_string pid in
+        if keep_pid pid then (
+          match rest with
+          | [] -> Report.user_error "Unexpected format"
+          | rest ->
+              let name = List.last_exn rest in
+              if String.is_prefix ~prefix:"/" name then (
+                (* This is just a sanity check for the format *)
+                let id =
+                  String.chop_suffix id ~suffix:":" |> Option.value_exn
+                in
+                ( match String.split id ~sep:'/' with
+                | [ n; _tid ] ->
+                    (* Do we need to do anything with tid? what does it
+                       mean? *)
+                    assert (Int.of_string n = pid)
+                | _ -> Report.user_error "Unexpected format" );
 
-    (* 34900 PERF_RECORD_MMAP2 34900/34900: [0x400000(0x40000) @ 0 fd:05
-     125179032 1817437489]: r-xp /path/to/test2.exe *)
-
-    let pid = Int.of_string pid in
-    if keep_pid pid then (
-      if !verbose then printf "parsing PERF_RECORD_MMAP2 for ip %s:\n%s\n" ip row;
-      if String.start_with "/" name then
-        (* This is just a sanity check for the format *)
-        let id = String.chop_suffix id ~suffix:":" |> Option.value_exn  in
-        (match String.split id ~sep:'/' with
-         | [n; _tid] ->
-           (* Do we need to do anything with tid? what does it mean? *)
-           assert (Int.of_string n = pid)
-         | _ -> fatal_error "Unexpected format");
-
-        (* parse the important info *)
-        let pos = String.chop_prefix pos ~prefix:"[" |> Option.value_exn in
-        match String.split_on_chars pos ~['(';')'] with
-        | base::size::_rest ->
-          let base = Int.of_string base in
-          let size = Int.of_string size in
-          Mmap { pid; name; base; size  }
-        | _ -> fata_error "Unexpected format";
-      else
-        Uknown
-    )
-    else
-      Uknown
+                (* parse the important info *)
+                match String.split_on_chars pos ~on:[ '['; '('; ')' ] with
+                | base :: size ->
+                    let base = Int.of_string base in
+                    let size = Int.of_string size in
+                    Mmap { pid; name; base; size }
+                | _ -> Report.user_error "Unexpected format" ) )
+        else Uknown )
+      else Uknown
   | pid :: ip :: rest ->
       let pid = Int.of_string pid in
       if keep_pid pid then (
@@ -188,7 +190,8 @@ let read filename =
     match row_to_sample ~keep_pid (String.strip row) with
     | Unknown -> acc
     | Sample sample -> sample :: acc
-    | Mmap _ -> fatal_error "Unexpected mmap event in perf script output"
+    | Mmap _ ->
+        Report.user_error "Unexpected mmap event in perf script output"
   in
   let t = perf_fold filename script ~init:[] ~f in
   if !verbose then (

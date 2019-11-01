@@ -45,7 +45,7 @@ let check_artifact file =
   file
 
 let artifacts t kind =
-  let rename f = Ocaml_locations.(make_filename kind f) |> check_artifact in
+  let rename f = Filenames.(make kind f) |> check_artifact in
   match t.arts with
   | Stop_before_linear -> assert false
   | Single_src_rename { src = _; target } ->
@@ -72,8 +72,7 @@ let phase_flags = function
 
 (* correct arguments provided to ocamlopt, depending on the phase. *)
 let phase_args t phase =
-  let open Ocaml_locations in
-  let rename file kind = make_filename kind file |> make_fdo_filename in
+  let rename file kind = Filenames.(make kind file |> make_fdo) in
   match (t.arts, phase) with
   | Stop_before_linear, _ -> t.args
   | _, All -> t.args
@@ -87,11 +86,13 @@ let phase_args t phase =
   | Single_src_rename { src; target }, Emit ->
       (* replace <src>.ml with <target.cmir-linear-fdo> *)
       List.map t.args ~f:(fun s ->
-          if s = src then rename target Linear else s)
+          if s = src then rename target Filenames.Linear else s)
   | Standard _, Emit ->
       (* replace <src>.ml with <src.cmir-linear-fdo> *)
       List.map t.args ~f:(fun s ->
-          if is_filename Source s then rename s Linear else s)
+          if Filenames.is_legal Filenames.Source s then
+            rename s Filenames.Linear
+          else s)
 
 let call_ocamlopt w phase =
   let args = phase_flags phase @ phase_args w phase in
@@ -170,7 +171,7 @@ let wrap args =
 
         (* Compute the names of linear ir files from [args] *)
         List.filter_map args ~f:(fun s ->
-            if Ocaml_locations.(is_filename Source s) then Some s else None)
+            if Filenames.(is_legal Source s) then Some s else None)
   in
   let arts =
     if stop_before_linear args then Stop_before_linear

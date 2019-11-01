@@ -4,9 +4,6 @@ type t
 
 val create : elf_executable:string -> t
 
-val resolve_from_cache :
-  t -> program_counter:Addr.t -> (string * int) option
-
 val resolve_range :
   t -> start:Addr.t -> finish:Addr.t -> with_inverse:bool -> unit
 
@@ -15,12 +12,13 @@ val resolve_function_containing :
 
 val find_functions : t -> (string, Addr.t option) Hashtbl.t -> unit
 
-(* Resolves debug info in one pass and caches the results for addresses. *)
-val resolve_all : t -> (Addr.t, unit) Hashtbl.t -> unit
+(* Resolves debug info in one pass and caches the results for addresses.
+   Modifies the input hashtable inplace. *)
+val resolve_all : t -> (Addr.t, Dbg.t option) Hashtbl.t -> unit
 
 val print_dwarf : t -> unit
 
-val to_address : t -> string -> int -> Addr.t option
+val to_address : t -> Dbg.t -> Addr.t option
 
 (* reset caches that store addresses, but not the function symbols cache *)
 val reset_cache : t -> unit

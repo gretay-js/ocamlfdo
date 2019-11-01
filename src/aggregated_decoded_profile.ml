@@ -1,4 +1,5 @@
 open Core
+open Dbg
 open Loc
 open Func
 
@@ -108,17 +109,15 @@ let get_func_id t ~name ~start ~finish =
       assert (Addr.equal func.finish finish);
       func.id
 
-let decode_loc t locations addr =
+let decode_addr t addr interval dbg =
   let open Loc in
-  match
-    Elf_locations.resolve_function_containing locations
-      ~program_counter:addr
-  with
+  match interval with
   | None ->
       if !verbose then
         printf "Cannot find function symbol containing 0x%Lx\n" addr;
       { addr; rel = None; dbg = None }
   | Some interval ->
+      let open Intervals in
       let name = interval.v in
       let start = interval.l in
       let finish = interval.r in
@@ -133,18 +132,25 @@ let decode_loc t locations addr =
       let id = get_func_id t ~name ~start ~finish in
       let rel = Some { id; offset; label = None } in
       let dbg =
-        match
-          Ocaml_locations.(
-            decode_line locations ~program_counter:addr name Linear)
-        with
-        | None -> None
-        | Some (file, line) ->
-            (* Set has_linearids of this function *)
-            let func = Hashtbl.find_exn t.functions id in
-            func.has_linearids <- true;
-            Some { Loc.file; line }
+        match dbg with
+        | None ->
+            if !verbose then
+              Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
+            None
+        | Some dbg ->
+            if !verbose then Printf.printf "%s:%d\n" dbg.file dbg.line;
+
+            (* Check that the filename has supported suffix and return it. *)
+            if Filenames.(compare Linear ~expected:name ~actual:file) then (
+              (* Set has_linearids of this function *)
+              let func = Hashtbl.find_exn t.functions id in
+              func.has_linearids <- true;
+              Some { Loc.file; line } )
+            else None
       in
-      { addr; rel; dbg }
+      if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
+      let loc = { addr; rel; dbg } in
+      Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
@@ -152,15 +158,14 @@ let create locations (agg : Aggregated_perf_profile.t) =
   (* Collect all addresses that need decoding. Mispredicts and traces use
      the same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
-  let len =
+  let size =
     Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
   in
-  (* Elf_locations does not use Core, so we need to create Caml.Hashtbl *)
-  let addresses = Caml.Hashtbl.create len in
+  let addresses = Hashtbl.create ~size (module Addr) in
   let add key =
-    if not (Caml.Hashtbl.mem addresses key) then (
+    if not (Hashtbl.mem addresses key) then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
-      Caml.Hashtbl.add addresses key () )
+      Hashtbl.add addresses key None )
     else if !verbose then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =
@@ -172,25 +177,22 @@ let create locations (agg : Aggregated_perf_profile.t) =
 
   (* A key may be used multiple times in keys of t.instruction and
      t.branches *)
-  let size = Caml.Hashtbl.length addresses in
+  let len = Hashtbl.length addresses in
   if !verbose then printf "size=%d,len=%d\n" size len;
-  assert (size <= len);
-  let t = mk size in
-  (* Resolve and cache all addresses we need in one pass over the binary. *)
+  assert (len <= size);
+  let t = mk len in
+  (* Resolve all addresses seen in samples in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses;
 
-  (* Decode all locations: map addresses to locations *)
-  Caml.Hashtbl.iter
-    (fun addr _ ->
-      let loc = decode_loc t locations addr in
-      if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
-      Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc)
-    addresses;
+  (* Decode all locations: map addresses to locations. *)
+  Hashtbl.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
+      (* this is cached using interval tree *)
+      let interval =
+        Elf_locations.resolve_function_containing locations
+          ~program_counter:addr
+      in
+      decode_addr t addr interval dbg);
   create_func_execounts t agg;
-
-  (* To free space, reset the cache we used for decoding dwarf info. We may
-     use locations later for printing to bolt format for testing/debugging.*)
-  Elf_locations.reset_cache locations;
   t
 
 let read filename =

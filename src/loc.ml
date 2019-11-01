@@ -7,15 +7,6 @@ module Cfg_label = struct
   type t = int [@@deriving compare, sexp, hash, equal]
 end
 
-(* Dwarf info associated with a location *)
-type dbg = {
-  (* filename *)
-  file : string;
-  (* line number *)
-  line : int;
-}
-[@@deriving compare, sexp, hash, equal]
-
 type rel = {
   (* Unique id of the containing function symbol *)
   id : int;
@@ -31,6 +22,6 @@ type t = {
   (* Raw address in the original binary *)
   rel : rel option;
   (* Containing function info and relative offset *)
-  dbg : dbg option;
+  dbg : Dbg.t option;
 }
 [@@deriving sexp, compare, equal]

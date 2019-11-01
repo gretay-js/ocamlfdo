@@ -14,6 +14,6 @@ val can_split_compile : t -> bool
 
 val call_ocamlopt : t -> phase -> unit
 
-val artifacts : t -> Ocaml_locations.t -> string list
+val artifacts : t -> Filenames.t -> string list
 
 val verbose : bool ref

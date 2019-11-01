@@ -195,7 +195,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   let process file =
     (* CR-soon gyorsh: identify format based on the file extension and magic
        number. Only matters when fdo handles with more than one IR. *)
-    let out_filename = Ocaml_locations.make_fdo_filename file in
+    let out_filename = Filenames.make_fdo file in
     let open Linear_format in
     let ui, crc = restore file in
     let crc = Md5.of_hex_exn (Caml.Digest.to_hex crc) in
@@ -245,7 +245,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   let w = wrap args in
   if can_split_compile w then (
     call_ocamlopt w Compile;
-    let files = artifacts w Ocaml_locations.Linear in
+    let files = artifacts w Filenames.Linear in
     optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
       ~func_crc ~report;
     call_ocamlopt w Emit )

@@ -125,7 +125,8 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
      create Loc.t with it. Create Bolt_loc.t with it directly because it is
      only used for debugging to generating bolt fdata. *)
   let inverse name line =
-    Ocaml_locations.(to_address locations name line Linear)
+    let file = Filenames.(make Linear name) in
+    Elf_locations.to_address locations file line
   in
   let make_bolt_loc (func : Func.t) linearid =
     match inverse func.name linearid with
