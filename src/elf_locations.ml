@@ -127,10 +127,6 @@ let print cur _ =
 
 let print_dwarf t = resolve_from_dwarf t ~f:print
 
-exception FoundLoc of string * int
-
-exception FinishedFunc
-
 let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
   match prev with
   | None -> ()
@@ -200,56 +196,6 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
           done
         else Hashtbl.add_exn t.resolved ~key:prev.state.address ~data:res )
 
-let _find_offsets t ~start ~finish ~addresses cur prev =
-  match prev with
-  | None -> ()
-  | Some prev ->
-      if finish <= prev.state.address then raise FinishedFunc;
-      if start <= prev.state.address then (
-        let filename =
-          match prev.filename with
-          | None ->
-              if !verbose then Printf.printf "find_offsets filename=None\n";
-              prev.state.filename
-          | Some filename ->
-              if !verbose then
-                Printf.printf "find_offsets filename=%s\n" filename;
-              filename
-        in
-        if !verbose then
-          Printf.printf "Caching loc 0x%x %s %d\n" prev.state.address
-            filename prev.state.line;
-        let res = Some (filename, prev.state.line) in
-        let n =
-          if cur.state.address < finish then cur.state.address else finish
-        in
-        List.iter
-          ~f:(fun address ->
-            if address <= prev.state.address && address < n then
-              Hashtbl.add_exn t.resolved ~key:address ~data:res)
-          addresses )
-
-let find ~program_counter cur prev =
-  match prev with
-  | None -> ()
-  | Some prev ->
-      if
-        program_counter >= prev.state.address
-        && program_counter < cur.state.address
-      then (
-        if !verbose then (
-          Printf.printf "find prev.state.filename=%s .addr=0x%x\n"
-            prev.state.filename prev.state.address;
-          Printf.printf "find cur.state.filename=%s .addr=0x%x\n"
-            cur.state.filename cur.state.address );
-        match prev.filename with
-        | None ->
-            if !verbose then Printf.printf "find filename=None\n";
-            raise (FoundLoc (prev.state.filename, prev.state.line))
-        | Some filename ->
-            if !verbose then Printf.printf "find filename=%s\n" filename;
-            raise (FoundLoc (filename, prev.state.line)) )
-
 let find_all ~t:_ ~addresses cur prev =
   match prev with
   | None -> ()
@@ -305,51 +251,6 @@ let resolve_all t addresses =
     if !verbose then
       Printf.printf "resolve_all: resolved %d out of %d addresses\n"
         resolved len )
-
-let resolve_pc t ~program_counter =
-  try
-    resolve_from_dwarf t ~f:(find ~program_counter);
-    Hashtbl.add_exn t.resolved ~key:program_counter ~data:None;
-    None
-  with FoundLoc (filename, line) ->
-    let result = Some (filename, line) in
-    if !verbose then
-      Printf.printf "Caching loc 0x%x %s %d\n" program_counter filename line;
-    Hashtbl.add_exn t.resolved ~key:program_counter ~data:result;
-    result
-
-let _resolve_from_cache t ~program_counter =
-  match Hashtbl.find t.resolved program_counter with
-  | Some resolved ->
-      t.hits <- t.hits + 1;
-      if !verbose then
-        Printf.printf "Found loc in cache 0x%x\n" program_counter;
-      Some resolved
-  | None ->
-      t.misses <- t.misses + 1;
-      if !verbose then
-        Printf.printf "Cannot resolve from cache 0x%x\n" program_counter;
-      None
-
-let _resolve t ~program_counter =
-  match Hashtbl.find t.resolved program_counter with
-  | Some resolved ->
-      t.hits <- t.hits + 1;
-      if !verbose then
-        Printf.printf "Found loc in cache 0x%x\n" program_counter;
-      resolved
-  | None ->
-      t.misses <- t.misses + 1;
-      if !verbose then Printf.printf "Caching loc 0x%x\n" program_counter;
-      resolve_pc t ~program_counter
-
-let _function_at_pc t ~program_counter:address =
-  match
-    Owee_elf.Symbol_table.functions_enclosing_address t.symtab ~address
-  with
-  | [] -> None
-  (* Just take the first one for the moment. There will usually be only one. *)
-  | sym :: _ -> Owee_elf.Symbol_table.Symbol.name sym t.strtab
 
 let report msg name program_counter =
   if !verbose then
@@ -448,48 +349,6 @@ let resolve_function_containing t ~program_counter =
                 else find_func tail
           in
           find_func syms )
-
-(* if the function is found and [reset] is true, then resets caches *)
-let _resolve_function_starting_at t ~program_counter ~reset =
-  report "Resolve_function_starting_at_pc:" None program_counter;
-  let addr = Elf_addr.mk program_counter in
-  match Hashtbl.find t.resolved_fun addr with
-  | Some name ->
-      t.fun_hits <- t.fun_hits + 1;
-      report "Found fun in cache" name program_counter;
-      name
-  | None ->
-      t.fun_misses <- t.fun_misses + 1;
-      let syms =
-        Owee_elf.Symbol_table.functions_enclosing_address t.symtab
-          ~address:program_counter
-      in
-      let rec find_func syms =
-        match syms with
-        | [] -> None
-        | sym :: tail ->
-            let start = Owee_elf.Symbol_table.Symbol.value sym in
-            if !verbose then
-              Printf.printf "Find func sym: start=0x%Lx pc=0x%Lx\n" start
-                program_counter;
-
-            (* Look for symbol whose start address is program counter. This
-               is needed because functions_enclosing_address is based on
-               start+size of symbols, and sometimes previous symbol's end of
-               interval covers the start of the next symbol. This may be a
-               bug in Owee, or maybe intentional, but we can work around it
-               here. *)
-            if start = program_counter then (
-              (* Once we have completed processing a function, we never go
-                 back to its addresses again. *)
-              if reset then reset_cache t;
-              Owee_elf.Symbol_table.Symbol.name sym t.strtab )
-            else find_func tail
-      in
-      let name = find_func syms in
-      report "Caching fun " name program_counter;
-      Hashtbl.add_exn t.resolved_fun ~key:addr ~data:name;
-      name
 
 let resolve_range t ~start ~finish ~with_inverse =
   (* find function addresses *)
