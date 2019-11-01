@@ -83,8 +83,52 @@ let split_on_whitespace row =
 
 let hex s = if String.is_prefix ~prefix:"0x" s then s else "0x" ^ s
 
+type mmap = {
+  pid : int;
+  name : t;
+  base : Addr.t;
+  size : Addr.t;
+}
+
+type row =
+  | Unknown
+  | Sample of sample
+  | Mmap of mmap
+
+(* CR-soon gyorsh: this is just parsing a regexp like a monkey,
+   and it is getting ugly and probably slow. use regexp parser? *)
 let row_to_sample ~keep_pid row =
   match split_on_whitespace row with
+  | pid :: "PERF_RECORD_MMAP2" :: id :: pos :: _perm :: name ->
+
+    (* 34900 PERF_RECORD_MMAP2 34900/34900: [0x400000(0x40000) @ 0 fd:05
+     125179032 1817437489]: r-xp /path/to/test2.exe *)
+
+    let pid = Int.of_string pid in
+    if keep_pid pid then (
+      if !verbose then printf "parsing PERF_RECORD_MMAP2 for ip %s:\n%s\n" ip row;
+      if String.start_with "/" name then
+        (* This is just a sanity check for the format *)
+        let id = String.chop_suffix id ~suffix:":" |> Option.value_exn  in
+        (match String.split id ~sep:'/' with
+         | [n; _tid] ->
+           (* Do we need to do anything with tid? what does it mean? *)
+           assert (Int.of_string n = pid)
+         | _ -> fatal_error "Unexpected format");
+
+        (* parse the important info *)
+        let pos = String.chop_prefix pos ~prefix:"[" |> Option.value_exn in
+        match String.split_on_chars pos ~['(';')'] with
+        | base::size::_rest ->
+          let base = Int.of_string base in
+          let size = Int.of_string size in
+          Mmap { pid; name; base; size  }
+        | _ -> fata_error "Unexpected format";
+      else
+        Uknown
+    )
+    else
+      Uknown
   | pid :: ip :: rest ->
       let pid = Int.of_string pid in
       if keep_pid pid then (
@@ -101,8 +145,8 @@ let row_to_sample ~keep_pid row =
           List.iter sample.brstack ~f:(fun br ->
               printf "0x%Lx/0x%Lx " br.from_addr br.to_addr);
           printf "\n" );
-        Some sample )
-      else None
+        Sample sample )
+      else Unknown
   | _ -> Report.user_error "Cannot parse %s\n" row ()
 
 let pids = ref Int.Set.empty
@@ -142,8 +186,9 @@ let read filename =
   let keep_pid = check_keep_pid Int.Set.empty ~ignore_buildid:true in
   let f acc row =
     match row_to_sample ~keep_pid (String.strip row) with
-    | None -> acc
-    | Some sample -> sample :: acc
+    | Unknown -> acc
+    | Sample sample -> sample :: acc
+    | Mmap _ -> fatal_error "Unexpected mmap event in perf script output"
   in
   let t = perf_fold filename script ~init:[] ~f in
   if !verbose then (
@@ -365,15 +410,38 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
   let empty_stats = { ignored = 0; total = 0; lbr = 0 } in
   let f stats row =
     match row_to_sample ~keep_pid row with
-    | None ->
+    | Unknown ->
         { stats with ignored = stats.ignored + 1; total = stats.total + 1 }
-    | Some sample ->
+    | Sample sample ->
         aggregate sample aggregated;
         {
           stats with
           total = stats.total + 1;
           lbr = stats.lbr + List.length sample.brstack;
         }
+    | Mmap mmap -> ()
+    (* CR-soon gyorsh: use memory map to translate ip addresses of samples
+       (ip=instruction pointer is a virtual memory address) to offsets into
+       the binary. If mmap is not available, warn the user and continue,
+       assuming direct mapping.
+
+       Without it, the dwarf info might be wrong or not found when the
+       profile is later decoded, if ASLR is enabled, relocations happened or
+       dynamically linked code was sampled.
+
+       Why wouldn't mmap be available in perf data? It may be disabled when
+       calling 'perf record' to make the processing faster. What if perf
+       attached to a process that is already running - will there still be a
+       mmap event recorded? If not, the user should be able to save the mmap
+       information and supply it in some format to ocamlfdo decode.
+
+       If mmapping might change in the middle of execution (does ASLR do it?
+       other machinery?), will there be an event recorded for each change?
+       If so, do the samples need to be interpreted w.r.t. the appropriate
+       event preceeding mmap event, so we need to either keep track of the
+       order they are listed (is the output of perf script guaranteed to be
+       ordered by the time of samples) or parse the time of the samples and
+       map ip addresses accroding to their order relative to map events. *)
   in
   let stats = perf_fold filename script ~init:empty_stats ~f in
   if !verbose then (
