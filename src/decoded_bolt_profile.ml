@@ -88,13 +88,13 @@ let create locations ~filename =
   (* Resolving dwarf functions and address is slow, so we batch it. *)
   (* Collect all function names *)
   let len = List.length bolt_profile in
-  let functions = Hashtbl.create len in
+  let functions = Hashtbl.create ~size:len (module String) in
   let add_name bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
     | Some (name, _) ->
         if not (Hashtbl.mem functions name) then
-          Hashtbl.add functions name None
+          Hashtbl.set functions ~key:name ~data:None
   in
   let gather_function_names (bolt_branch : Bolt_profile.Bolt_branch.t) =
     add_name bolt_branch.src;
@@ -104,16 +104,16 @@ let create locations ~filename =
   Elf_locations.find_functions locations functions;
 
   (* Collect all addresses *)
-  let addresses = Hashtbl.create len in
+  let addresses = Hashtbl.create ~size:len (module Addr) in
   let add bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
     | Some (name, offset) -> (
-        match Hashtbl.find functions name with
+        match Hashtbl.find_exn functions name with
         | None -> ()
         | Some start ->
             let addr = Int64.(start + of_int offset) in
-            Hashtbl.add addresses addr None )
+            Hashtbl.add_exn addresses ~key:addr ~data:None )
   in
   let gather_addresses (bolt_branch : Bolt_profile.Bolt_branch.t) =
     add bolt_branch.src;
@@ -127,7 +127,7 @@ let create locations ~filename =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> None
     | Some (name, offset) -> (
-        match Hashtbl.find functions name with
+        match Hashtbl.find_exn functions name with
         | None ->
             if String.is_suffix ~suffix:"@PLT" name then
               (* OCamlFDO doesn't know PLT names, so we ignore the LBR
@@ -137,15 +137,13 @@ let create locations ~filename =
             else Some { name; id = None; offset; addr = None }
         | Some start -> (
             let program_counter = Int64.(start + of_int offset) in
-            let dbg = Hashtbl.find addresses program_counter in
+            let dbg = Hashtbl.find_exn addresses program_counter in
             match dbg with
             | None ->
                 Some
                   { name; id = None; offset; addr = Some program_counter }
             | Some dbg ->
-                if
-                  Filenames.match_filename Linear ~expected:name
-                    ~actual:dbg.file
+                if Filenames.compare Linear ~expected:name ~actual:dbg.file
                 then
                   Some
                     {

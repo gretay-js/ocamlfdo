@@ -85,7 +85,7 @@ let hex s = if String.is_prefix ~prefix:"0x" s then s else "0x" ^ s
 
 type mmap = {
   pid : int;
-  name : t;
+  name : string;
   base : Addr.t;
   size : Addr.t;
 }
@@ -100,37 +100,33 @@ type row =
 let row_to_sample ~keep_pid row =
   match split_on_whitespace row with
   | pid :: "PERF_RECORD_MMAP2" :: id :: pos :: rest ->
-      (* 34900 PERF_RECORD_MMAP2 34900/34900: [0x400000(0x40000) @ 0 fd:05
-         125179032 1817437489]: r-xp /path/to/test2.exe *)
-      if !verbose then (
+      if !verbose then
         printf "parsing PERF_RECORD_MMAP2 for pid=%s:\n%s\n" pid row;
-        let pid = Int.of_string pid in
-        if keep_pid pid then (
-          match rest with
-          | [] -> Report.user_error "Unexpected format"
-          | rest ->
-              let name = List.last_exn rest in
-              if String.is_prefix ~prefix:"/" name then (
-                (* This is just a sanity check for the format *)
-                let id =
-                  String.chop_suffix id ~suffix:":" |> Option.value_exn
-                in
-                ( match String.split id ~sep:'/' with
-                | [ n; _tid ] ->
-                    (* Do we need to do anything with tid? what does it
-                       mean? *)
-                    assert (Int.of_string n = pid)
-                | _ -> Report.user_error "Unexpected format" );
+      let pid = Int.of_string pid in
+      if keep_pid pid then
+        match List.last rest with
+        | None -> Report.user_error "Unexpected format"
+        | Some name ->
+            if String.is_prefix ~prefix:"/" name then (
+              (* This is just a sanity check for the format *)
+              let id =
+                String.chop_suffix id ~suffix:":" |> Option.value_exn
+              in
+              ( match String.split id ~on:'/' with
+              | [ n; _tid ] ->
+                  (* Do we need to do anything with tid? what does it mean? *)
+                  assert (Int.of_string n = pid)
+              | _ -> Report.user_error "Unexpected format" );
 
-                (* parse the important info *)
-                match String.split_on_chars pos ~on:[ '['; '('; ')' ] with
-                | base :: size ->
-                    let base = Int.of_string base in
-                    let size = Int.of_string size in
-                    Mmap { pid; name; base; size }
-                | _ -> Report.user_error "Unexpected format" ) )
-        else Uknown )
-      else Uknown
+              (* parse the important info *)
+              match String.split_on_chars pos ~on:[ '['; '('; ')' ] with
+              | [ base; size ] ->
+                  let base = Addr.of_string base in
+                  let size = Addr.of_string size in
+                  Mmap { pid; name; base; size }
+              | _ -> Report.user_error "Unexpected format" )
+            else Unknown
+      else Unknown
   | pid :: ip :: rest ->
       let pid = Int.of_string pid in
       if keep_pid pid then (
@@ -422,7 +418,7 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
           total = stats.total + 1;
           lbr = stats.lbr + List.length sample.brstack;
         }
-    | Mmap mmap -> ()
+    | Mmap _mmap -> stats
     (* CR-soon gyorsh: use memory map to translate ip addresses of samples
        (ip=instruction pointer is a virtual memory address) to offsets into
        the binary. If mmap is not available, warn the user and continue,

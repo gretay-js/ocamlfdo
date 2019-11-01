@@ -111,46 +111,51 @@ let get_func_id t ~name ~start ~finish =
 
 let decode_addr t addr interval dbg =
   let open Loc in
-  match interval with
-  | None ->
-      if !verbose then
-        printf "Cannot find function symbol containing 0x%Lx\n" addr;
-      { addr; rel = None; dbg = None }
-  | Some interval ->
-      let open Intervals in
-      let name = interval.v in
-      let start = interval.l in
-      let finish = interval.r in
-      let offset =
-        match Int64.(to_int (addr - start)) with
-        | None ->
-            Report.user_error "Offset too big: 0x%Lx" Addr.(addr - start) ()
-        | Some offset ->
-            assert (offset >= 0);
-            offset
-      in
-      let id = get_func_id t ~name ~start ~finish in
-      let rel = Some { id; offset; label = None } in
-      let dbg =
-        match dbg with
-        | None ->
-            if !verbose then
-              Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
-            None
-        | Some dbg ->
-            if !verbose then Printf.printf "%s:%d\n" dbg.file dbg.line;
+  let loc =
+    match interval with
+    | None ->
+        if !verbose then
+          printf "Cannot find function symbol containing 0x%Lx\n" addr;
+        { addr; rel = None; dbg = None }
+    | Some interval ->
+        let open Intervals in
+        let name = interval.v in
+        let start = interval.l in
+        let finish = interval.r in
+        let offset =
+          match Int64.(to_int (addr - start)) with
+          | None ->
+              Report.user_error "Offset too big: 0x%Lx"
+                Addr.(addr - start)
+                ()
+          | Some offset ->
+              assert (offset >= 0);
+              offset
+        in
+        let id = get_func_id t ~name ~start ~finish in
+        let rel = Some { id; offset; label = None } in
+        let dbg =
+          match dbg with
+          | None ->
+              if !verbose then
+                Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
+              None
+          | Some dbg ->
+              if !verbose then Printf.printf "%s:%d\n" dbg.file dbg.line;
 
-            (* Check that the filename has supported suffix and return it. *)
-            if Filenames.(compare Linear ~expected:name ~actual:file) then (
-              (* Set has_linearids of this function *)
-              let func = Hashtbl.find_exn t.functions id in
-              func.has_linearids <- true;
-              Some { Loc.file; line } )
-            else None
-      in
-      if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
-      let loc = { addr; rel; dbg } in
-      Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
+              (* Check that the filename has supported suffix and return it. *)
+              if Filenames.(compare Linear ~expected:name ~actual:dbg.file)
+              then (
+                (* Set has_linearids of this function *)
+                let func = Hashtbl.find_exn t.functions id in
+                func.has_linearids <- true;
+                Some dbg )
+              else None
+        in
+        if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
+        { addr; rel; dbg }
+  in
+  Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
@@ -165,7 +170,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   let add key =
     if not (Hashtbl.mem addresses key) then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
-      Hashtbl.add addresses key None )
+      Hashtbl.set addresses ~key ~data:None )
     else if !verbose then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =

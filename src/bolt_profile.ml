@@ -126,7 +126,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
      only used for debugging to generating bolt fdata. *)
   let inverse name line =
     let file = Filenames.(make Linear name) in
-    Elf_locations.to_address locations file line
+    Elf_locations.to_address locations { file; line }
   in
   let make_bolt_loc (func : Func.t) linearid =
     match inverse func.name linearid with
