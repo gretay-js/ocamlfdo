@@ -5,12 +5,11 @@
  (libraries
         owee
         core
-        csvfields
         compiler-libs.optcomp
         parsexp_io
         shexp.process
         ocamlcfg
         re2)
- (preprocess (pps ppx_jane ppx_csv_conv ppx_variants_conv)))
+ (preprocess (pps ppx_jane)))
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))
