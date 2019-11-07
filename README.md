@@ -19,8 +19,7 @@ the upstream version of its dependencies:
   on a branch off of a 4.08 version of the compiler. Corresponding PRs
   are being reviewed upstream.
 - [owee](https://github.com/let-def/owee) library.
-  The change is to use int64 instead of int for addresses,
-  and there are a few minor improvements.
+  Changes are not yet released in opam.
 - [ocamlcfg](https://github.com/gretay-js/ocamlcfg) library is not yet
   available from opam repository.
 - [ocaml-migrate-parsetree](https://github.com/ocaml-ppx/ocaml-migrate-parsetree)
@@ -36,7 +35,7 @@ opam switch create fdo408 --empty
 opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
 opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
 opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
-opam pin add owee https://github.com/gretay-js/owee.git#wip4
+opam pin add owee https://github.com/let-def/owee.git
 opam install ppx_csv_conv ppx_variants_conv parsexp_io shexp re2
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
 ```
