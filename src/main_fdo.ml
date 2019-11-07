@@ -30,11 +30,11 @@ let report_cfg ~name title cfg =
   Report.with_outchannel ~name ~title ~sub:"lin" (Print.debug_print "") cfg
 
 (* CR-soon gyorsh: this is intended as a report at source level and human
-   readable form, like inlining report. Currently, just prints the IRs.
-   Could share infrastructure with inlining report to map back to source
-   when reordering involves inlined functions. CR-soon gyorsh: add separate
-   "dump" flags for all passes in ocamlfdo, printing to stdout similarly to
-   -dcmm -dlinear in the compiler, etc. *)
+   readable form, like inlining report. Currently, just prints the IRs. Could
+   share infrastructure with inlining report to map back to source when
+   reordering involves inlined functions. CR-soon gyorsh: add separate "dump"
+   flags for all passes in ocamlfdo, printing to stdout similarly to -dcmm
+   -dlinear in the compiler, etc. *)
 let write_reorder_report f c newf newc =
   if not (phys_equal c newc) then (
     (* Separate files for before and after make it easier to diff *)
@@ -45,9 +45,7 @@ let write_reorder_report f c newf newc =
     report_cfg ~name "After-Reorder" newc )
 
 let load_locations binary_filename =
-  let elf_locations =
-    Elf_locations.create ~elf_executable:binary_filename
-  in
+  let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
@@ -93,8 +91,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       ~default:(binary_filename ^ ".fdo-profile")
     (* dirname ^ "/fdo-profile" *)
   in
-  Aggregated_decoded_profile.write linearid_profile
-    linearid_profile_filename;
+  Aggregated_decoded_profile.write linearid_profile linearid_profile_filename;
 
   ( if write_linker_script_hot then
     let filename =
@@ -150,19 +147,18 @@ let check_equal f new_body =
 (* CR-soon gyorsh: If we eliminate dead blocks before a transformation then
    some algorithms might not apply because they rely on perf data based on
    original instructions. On the other hand, for iterative fdo, if we don't
-   have counters for an instruction, we don't know if it's because it is
-   cold or because it wasn't there in the binary at all as it was eliminated
-   by dce. It probably doesn't matter for the final layout, if the
-   heuristics are reasonable w.r.t. cold code, then dead is just very cold,
-   but having less code to deal with when computing layout will be more
-   efficient. *)
+   have counters for an instruction, we don't know if it's because it is cold
+   or because it wasn't there in the binary at all as it was eliminated by
+   dce. It probably doesn't matter for the final layout, if the heuristics
+   are reasonable w.r.t. cold code, then dead is just very cold, but having
+   less code to deal with when computing layout will be more efficient. *)
 let transform f ~algo ~extra_debug ~preserve_orig_labels =
   print_linear "Before" f;
-  let cfg = Linear_to_cfg.run f ~preserve_orig_labels in
+  let cfg = Ocamlcfg.Linear_to_cfg.run f ~preserve_orig_labels in
   (* eliminate fallthrough implies dead block elimination *)
   if not preserve_orig_labels then Eliminate.fallthrough_blocks cfg;
   let new_cfg = Reorder.apply ~algo cfg in
-  let new_body = Cfg_to_linear.run new_cfg ~extra_debug in
+  let new_body = Ocamlcfg.Cfg_to_linear.run new_cfg ~extra_debug in
   let fnew = { f with fun_body = new_body } in
   print_linear "After" fnew;
   fnew
@@ -204,13 +200,12 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
       List.map ui.items ~f:(function
         | Func f ->
             if func_crc then Crcs.add_fun crcs f ~file;
-            Func
-              (transform f ~algo ~extra_debug ~preserve_orig_labels:false)
+            Func (transform f ~algo ~extra_debug ~preserve_orig_labels:false)
         | Data dl -> Data dl);
     ( if extra_debug && (unit_crc || func_crc) then
       match Crcs.emit_symbols crcs with
       | [] -> ()
-      | dl -> ui.items <- ui.items @ [ Data dl ] );
+      | dl -> ui.items <- ui.items @ [Data dl] );
     save out_filename ui
   in
   List.iter files ~f:process;

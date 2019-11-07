@@ -1,16 +1,18 @@
 (* Create cfg_info *)
+
 open Core
 open Loc
 open Block_info
-open Ocamlcfg
+module Cfg = Ocamlcfg.Cfg
+module BB = Cfg.Basic_block
+module Cfg_with_layout = Ocamlcfg.Cfg_with_layout
 
 let verbose = ref true
 
 (* Map basic blocks of this function to breakdown of execution counts *)
 type t = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
 
-let terminator_to_string t =
-  let open Cfg in
+let terminator_to_string (t : Cfg.terminator) =
   match t with
   | Return -> "Return"
   | Raise _ -> "Raise"
@@ -22,9 +24,9 @@ let mal (func : Func.t) count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
   func.malformed_traces <- Int64.(func.malformed_traces + count)
 
-let first_id (block : Cfg.block) =
-  match block.body with
-  | [] -> block.terminator.id
+let first_id (block : BB.t) =
+  match BB.body block with
+  | [] -> (BB.terminator block).id
   | hd :: _ -> hd.id
 
 (* Some Linear instructions don't generate any code on some platforms. There
@@ -47,11 +49,11 @@ let first_id (block : Cfg.block) =
    line programs, but usually only the last one is recorded in the profile
    (and likely will be, as it is the closed one associated with the address,
    although both .loc will be associated with the same address). *)
-let can_be_first_emitted_id id (block : Cfg.block) =
+let can_be_first_emitted_id id (block : BB.t) =
   let open Cfg in
   let rec check_first body =
     match body with
-    | [] -> block.terminator.id = id
+    | [] -> (BB.terminator block).id = id
     | hd :: tl -> (
         if hd.id = id then true
         else
@@ -59,28 +61,30 @@ let can_be_first_emitted_id id (block : Cfg.block) =
           | Reloadretaddr | Prologue | Poptrap -> check_first tl
           | _ -> false )
   in
-  check_first block.body
+  check_first (BB.body block)
 
-let get_block_info t (block : Cfg.block) =
-  Hashtbl.find_or_add t block.start ~default:(fun () ->
+let get_block_info t (block : BB.t) =
+  Hashtbl.find_or_add t (BB.start block) ~default:(fun () ->
+      let terminator = BB.terminator block in
       let terminator_id =
-        match block.terminator.id with
+        match terminator.id with
         | 0 ->
             (* use the id of the last instruction in the body *)
-            ( match block.terminator.desc with
-            | Branch [ (Always, _) ] -> assert true
+            ( match terminator.desc with
+            | Branch [(Always, _)] -> assert true
             | _ -> assert false );
-            let last = List.last_exn block.body in
+            let last = List.last_exn (BB.body block) in
             last.id
         | n -> n
       in
       let first_id = first_id block in
+      let block_start = BB.start block in
       if !verbose then
         printf
           "make new block info for block.start=%d first_id=%d \
            terminator_id=%d\n"
-          block.start first_id terminator_id;
-      Block_info.mk ~label:block.start ~first_id ~terminator_id)
+          block_start first_id terminator_id;
+      Block_info.mk ~label:block_start ~first_id ~terminator_id)
 
 let record t block ~count =
   let b = get_block_info t block in
@@ -91,19 +95,18 @@ let get_linearid (loc : Loc.t) =
   dbg.line
 
 (* Find basic instruction whose id=[linearid] in [block] *)
-let get_basic_instr linearid (block : Cfg.block) =
-  List.find block.body ~f:(fun instr -> instr.id = linearid)
+let get_basic_instr linearid (block : BB.t) =
+  List.find (BB.body block) ~f:(fun instr -> instr.id = linearid)
 
-(* Find basic instruction right before the one with [linearid] in [block].
-   If not found linearid or linearid is the first instruction, then return
-   None. *)
+(* Find basic instruction right before the one with [linearid] in [block]. If
+   not found linearid or linearid is the first instruction, then return None. *)
 exception Found_prev of Cfg.basic Cfg.instruction option
 
 let prev_instr linearid block =
   let open Cfg in
   try
     ignore
-      ( List.fold block.body ~init:None ~f:(fun prev instr ->
+      ( List.fold (BB.body block) ~init:None ~f:(fun prev instr ->
             if instr.id = linearid then raise (Found_prev prev)
             else Some instr)
         : Cfg.basic Cfg.instruction option );
@@ -120,12 +123,12 @@ let get_block (loc : Loc.t) cfg =
           rel.id rel.offset );
       None
   | Some dbg -> (
-      match Cfg_builder.id_to_label cfg dbg.line with
+      match Cfg.id_to_label cfg dbg.line with
       | None ->
           Report.user_error "No cfg label for linearid %d in %s" dbg.line
             dbg.file ()
       | Some label -> (
-          match Cfg.get_block cfg.cfg label with
+          match Cfg.get_block cfg label with
           | Some block -> Some block
           | None ->
               Report.user_error
@@ -163,37 +166,39 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       let from_linearid = get_linearid from_loc in
       let to_linearid = get_linearid to_loc in
       let to_block_first_id = first_id to_block in
+      let to_block_start = BB.start to_block in
+      let from_block_start = BB.start from_block in
       if !verbose then
         printf
           "Intra branch count %Ld from 0x%Lx (id=%d,lbl=%d) to 0x%Lx \
            (id=%d,lbl=%d,first_id=%d)\n"
-          count from_loc.addr from_linearid from_block.start to_loc.addr
-          to_linearid to_block.start to_block_first_id;
+          count from_loc.addr from_linearid from_block_start to_loc.addr
+          to_linearid to_block_start to_block_first_id;
       let bi = get_block_info t from_block in
       let b =
-        {
-          Block_info.target = Some to_loc;
-          target_label = Some to_block.start;
+        { Block_info.target = Some to_loc;
+          target_label = Some to_block_start;
           target_id = Some to_block_first_id;
           intra = true;
           fallthrough = false;
           taken = count;
-          mispredicts;
+          mispredicts
         }
       in
-      if from_block.terminator.id = from_linearid then (
+      let from_block_terminator = BB.terminator from_block in
+      if from_block_terminator.id = from_linearid then (
         (* Find the corresponding successor *)
-        match from_block.terminator.desc with
+        match from_block_terminator.desc with
         | Return ->
             (* return from a recursive call *)
             (* target must be right after a call *)
             if !verbose then
-              printf "Return from (label=%d) to (label=%d)" from_block.start
-                to_block.start
-        (* CR-soon gyorsh: We could count the reverse of this edge as a
-           call. It's a bit tricky as we need to find the instruction right
-           before the to_loc and that is the callsite, and we need to
-           construct callee from the entry location of the current function
+              printf "Return from (label=%d) to (label=%d)" from_block_start
+                to_block_start
+        (* CR-soon gyorsh: We could count the reverse of this edge as a call.
+           It's a bit tricky as we need to find the instruction right before
+           the to_loc and that is the callsite, and we need to construct
+           callee from the entry location of the current function
            (cfg.entry_label). This will count the same call twice if both
            call and return are sampled. We should try to discard matching
            counts. *)
@@ -207,25 +212,25 @@ let record_intra t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
          * add_call cbi ~callsite ~callee *)
         | Tailcall _ ->
             if !verbose then
-              printf "Tailcall from linid=%d from_label=%d %Ld"
-                from_linearid from_block.start count;
+              printf "Tailcall from linid=%d from_label=%d %Ld" from_linearid
+                from_block_start count;
             add_call bi ~callsite:from_loc ~callee:b
         | Raise _ ->
             (* target must be a handler block *)
-            assert (Cfg_builder.is_trap_handler cfg to_block.start)
+            (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
+            ()
         | Branch _ | Switch _ ->
             assert (
               to_block_first_id = to_linearid
               || can_be_first_emitted_id to_linearid to_block );
-            let successors = Cfg.successor_labels cfg.cfg from_block in
-            assert (List.mem successors to_block.start ~equal:Int.equal);
+            let successors = Cfg.successor_labels cfg from_block in
+            assert (List.mem successors to_block_start ~equal:Int.equal);
             Block_info.add_branch bi b )
       else
         ( (* CR-someday gyorsh: record calls *)
           (* recursive call, find the call instruction *) )
 
-let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
-    =
+let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg =
   (* Branch going outside of this function. *)
   match get_block from_loc cfg with
   | None ->
@@ -239,7 +244,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
       (* Find the corresponding instruction and update its counters. The
          instruction is either a terminator or a call.*)
       let linearid = get_linearid from_loc in
-      let terminator = from_block.terminator in
+      let terminator = BB.terminator from_block in
       let bi = get_block_info t from_block in
       if terminator.id = linearid then
         (* terminator *)
@@ -250,27 +255,26 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts cfg
               printf
                 "record_exit count=%Ld 0x%Lx->0x%Lx from_block.start=%d \
                  terminator_id=%d.\n"
-                count from_loc.addr to_loc.addr from_block.start
+                count from_loc.addr to_loc.addr (BB.start from_block)
                 terminator.id;
             assert false
         | Tailcall (Func _) | Return | Raise _ ->
             let b =
-              {
-                Block_info.target = Some to_loc;
+              { Block_info.target = Some to_loc;
                 target_label = None;
                 target_id = None;
                 intra = false;
                 fallthrough = false;
                 taken = count;
-                mispredicts;
+                mispredicts
               }
             in
             Block_info.add_branch bi b
       else ( (* Call *)
              (* CR-someday gyorsh: record calls *) )
 
-let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
-    cfg =
+let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts cfg
+    =
   (* Branch into this function from another function, which may be unknown.
      One of the following situations:
 
@@ -287,8 +291,8 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts
          context switch? *)
       !verbose
     then
-      printf "record_entry at 0x%Lx -> 0x%Lx (from_addr < 0)\n"
-        from_loc.addr to_loc.addr )
+      printf "record_entry at 0x%Lx -> 0x%Lx (from_addr < 0)\n" from_loc.addr
+        to_loc.addr )
   else
     match get_block to_loc cfg with
     | None ->
@@ -319,15 +323,15 @@ let record_branch t from_loc to_loc count mispredicts (func : Func.t) cfg =
 
 exception Malformed_fallthrough_trace
 
-let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
-    cfg =
+let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t) cl
+    =
+  let layout = Cfg_with_layout.layout cl in
+  let cfg = Cfg_with_layout.cfg cl in
   (* Get the part of the layout starting from from_block up to but not
      including to_block *)
   try
     let fallthrough =
-      List.drop_while
-        ~f:(fun lbl -> not (lbl = from_lbl))
-        Cfg_builder.(cfg.layout)
+      List.drop_while ~f:(fun lbl -> not (lbl = from_lbl)) layout
     in
     let fallthrough =
       match List.findi fallthrough ~f:(fun _ lbl -> lbl = to_lbl) with
@@ -339,13 +343,14 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
         from_lbl to_lbl;
       List.iter fallthrough ~f:(fun lbl -> printf " %d" lbl);
       printf "\nlayout=";
-      List.iter Cfg_builder.(cfg.layout) ~f:(fun lbl -> printf " %d" lbl);
+      List.iter layout ~f:(fun lbl -> printf " %d" lbl);
       printf "\n" );
 
     (* Check that all terminators fall through *)
     let check_fallthrough src_lbl dst_lbl =
-      let block = Option.value_exn (Cfg.get_block cfg.cfg src_lbl) in
-      match block.terminator.desc with
+      let block = Option.value_exn (Cfg.get_block cfg src_lbl) in
+      let desc = (BB.terminator block).desc in
+      match desc with
       | Branch _ | Switch _ ->
           if !verbose then (
             printf
@@ -353,18 +358,18 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
                src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
               func.name from_lbl to_lbl src_lbl dst_lbl;
-            List.iter (Cfg.successor_labels cfg.cfg block) ~f:(fun lbl ->
+            List.iter (Cfg.successor_labels cfg block) ~f:(fun lbl ->
                 printf "%d\n" lbl) );
           if
             List.mem
-              (Cfg.successor_labels cfg.cfg block)
+              (Cfg.successor_labels cfg block)
               dst_lbl ~equal:Int.equal
           then src_lbl
           else (
             if !verbose then
               printf
-                "Malformed fallthrough in %s trace \
-                 (from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
+                "Malformed fallthrough in %s trace (from_lbl=%d,to_lbl=%d): \
+                 src_lbl=%d dst_lbl=%d\n\
                  src_block.successor_labels:\n"
                 func.name from_lbl to_lbl src_lbl dst_lbl;
             raise Malformed_fallthrough_trace )
@@ -374,7 +379,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
               "Unexpected terminator %s in fallthrough trace \
                %s(from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
-              (terminator_to_string block.terminator.desc)
+              (terminator_to_string desc)
               func.name from_lbl to_lbl src_lbl dst_lbl;
           raise Malformed_fallthrough_trace
     in
@@ -382,26 +387,24 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
       from_lbl
       = List.fold_right fallthrough ~init:to_lbl ~f:check_fallthrough );
 
-    (* Account only for the intermediate blocks in the trace. Endpoint
-       blocks of the trace are accounted for when we handled their LBR
-       branches. *)
+    (* Account only for the intermediate blocks in the trace. Endpoint blocks
+       of the trace are accounted for when we handled their LBR branches. *)
     let record_fallthrough src_lbl dst_lbl =
       if !verbose then
         printf "record_fallthrough %d->%d count=%Ld\n" src_lbl dst_lbl count;
-      let dst_block = Option.value_exn (Cfg.get_block cfg.cfg dst_lbl) in
+      let dst_block = Option.value_exn (Cfg.get_block cfg dst_lbl) in
       record t dst_block ~count;
       let target_bi = get_block_info t dst_block in
-      let src_block = Option.value_exn (Cfg.get_block cfg.cfg src_lbl) in
+      let src_block = Option.value_exn (Cfg.get_block cfg src_lbl) in
       let bi = get_block_info t src_block in
       let b =
-        {
-          Block_info.target = None;
+        { Block_info.target = None;
           target_label = Some dst_lbl;
           target_id = Some target_bi.first_id;
           intra = true;
           fallthrough = true;
           taken = count;
-          mispredicts = 0L;
+          mispredicts = 0L
         }
       in
       if !verbose then
@@ -427,7 +430,8 @@ let compute_fallthrough_execounts t from_lbl to_lbl count (func : Func.t)
     (* If the trace is malformed, don't add counts *)
     mal func count
 
-let record_trace t from_loc to_loc count (func : Func.t) cfg =
+let record_trace t from_loc to_loc count (func : Func.t) cl =
+  let cfg = Ocamlcfg.Cfg_with_layout.cfg cl in
   (* both locations must be in this function *)
   let open Loc in
   match (from_loc.rel, to_loc.rel) with
@@ -435,13 +439,12 @@ let record_trace t from_loc to_loc count (func : Func.t) cfg =
     when from_rel.id = func.id && to_rel.id = func.id -> (
       match (get_block from_loc cfg, get_block to_loc cfg) with
       | Some from_block, Some to_block
-        when from_block.start = to_block.start ->
+        when BB.start from_block = BB.start to_block ->
           if !verbose then
-            if from_block.start = to_block.start then
-              printf
-                "No fallthroughs in trace with count %Ld from 0x%Lx to \
-                 0x%Lx:from_block = to_block\n"
-                count from_loc.addr to_loc.addr;
+            printf
+              "No fallthroughs in trace with count %Ld from 0x%Lx to \
+               0x%Lx:from_block = to_block\n"
+              count from_loc.addr to_loc.addr;
           record t from_block ~count
       | Some from_block, Some to_block ->
           if !verbose then
@@ -453,14 +456,14 @@ let record_trace t from_loc to_loc count (func : Func.t) cfg =
                from_dbg.line)
               (let to_dbg = Option.value_exn to_loc.dbg in
                to_dbg.line)
-              from_block.start to_block.start;
-          compute_fallthrough_execounts t from_block.start to_block.start
-            count func cfg
+              (BB.start from_block) (BB.start to_block);
+          compute_fallthrough_execounts t (BB.start from_block)
+            (BB.start to_block) count func cl
       | _ ->
           if !verbose then
             printf
-              "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot \
-               map to_loc or from_loc to cfg blocks.\n"
+              "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot map \
+               to_loc or from_loc to cfg blocks.\n"
               count from_loc.addr to_loc.addr;
           mal func count )
   | _ ->
