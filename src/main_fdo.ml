@@ -16,6 +16,15 @@ let time f x =
   printf "Execution time: %s\n" (Span.to_string (abs_diff stop start));
   fx
 
+(* CR-soon gyorsh: This is the only machine dependent part. owee parser
+   doesn't know how to handle /% that may appear in a function name, for
+   example an Int operator. *)
+let to_symbol name =
+  let symbol_prefix =
+    if X86_proc.system = X86_proc.S_macosx then "_" else ""
+  in
+  X86_proc.string_of_symbol symbol_prefix name
+
 let print_linear msg f =
   if verbosity_level > 10 then
     if !verbose then (
@@ -37,10 +46,10 @@ let report_cfg ~name title cfg =
    reordering involves inlined functions. CR-soon gyorsh: add separate "dump"
    flags for all passes in ocamlfdo, printing to stdout similarly to -dcmm
    -dlinear in the compiler, etc. *)
-let write_reorder_report f c newf newc =
+let write_reorder_report (f : Linear.fundecl) c newf newc =
   if not (phys_equal c newc) then (
     (* Separate files for before and after make it easier to diff *)
-    let name = X86_proc.string_of_symbol "" f.Linear.fun_name in
+    let name = to_symbol f.fun_name in
     report_linear ~name "Before-Reorder" f;
     report_linear ~name "After-Reorder" newf;
     report_cfg ~name "Before-Reorder" c;
@@ -136,7 +145,7 @@ let check_equal f new_body =
       false )
   in
   if not (equal f.fun_body new_body) then (
-    let name = X86_proc.string_of_symbol "" f.fun_name in
+    let name = to_symbol f.fun_name in
     (* Separate files for before and after to make it easier to diff *)
     report_linear ~name "Before" f;
     report_linear ~name "After" { f with fun_body = new_body };
@@ -159,8 +168,11 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels =
   let cfg = CL.of_linear f ~preserve_orig_labels in
   (* eliminate fallthrough implies dead block elimination *)
   if not preserve_orig_labels then CL.eliminate_fallthrough_blocks cfg;
+  ( if extra_debug then
+    let file = to_symbol f.fun_name |> Filenames.(make Linear) in
+    CL.add_extra_debug cfg ~file );
   let new_cfg = Reorder.apply ~algo cfg in
-  let new_body = CL.to_linear new_cfg ~extra_debug in
+  let new_body = CL.to_linear new_cfg in
   let fnew = { f with fun_body = new_body } in
   print_linear "After" fnew;
   fnew
