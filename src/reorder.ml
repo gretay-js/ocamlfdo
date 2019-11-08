@@ -1,7 +1,7 @@
 open Core
 open Core.Poly
-open Ocamlcfg
-open Cfg_builder
+module C = Ocamlcfg.Cfg
+module CL = Ocamlcfg.Cfg_with_layout
 
 let verbose = ref false
 
@@ -19,10 +19,11 @@ let print_list msg l = Report.log (sprintf !"%s: %{sexp:int list}\n" msg l)
    dead blocks remain. We can easily identify and eliminate them using CFG
    representation. However, it makes otherwise identical linear IRs to fail
    comparisons when we use the algorithm. *)
-let check cfg new_cfg_layout =
-  let orig_cfg_layout = cfg.layout in
+let check cl new_cfg_layout =
+  let orig_cfg_layout = CL.layout cl in
+  let cfg = CL.cfg cl in
   if not (new_cfg_layout = orig_cfg_layout) then (
-    Report.log (sprintf "Reordered %s\n" cfg.cfg.fun_name);
+    Report.log (sprintf "Reordered %s\n" (C.fun_name cfg));
     print_list "orig" orig_cfg_layout;
     print_list "new " new_cfg_layout;
     if !validate then
@@ -30,7 +31,7 @@ let check cfg new_cfg_layout =
          we need to handle block duplication here? *)
       let compare = Int.compare in
       let orig_len = List.length orig_cfg_layout in
-      if cfg.preserve_orig_labels then (
+      if CL.preserve_orig_labels cl then (
         assert (List.length new_cfg_layout = orig_len);
         assert (List.hd new_cfg_layout = List.hd orig_cfg_layout);
         assert (
@@ -40,46 +41,46 @@ let check cfg new_cfg_layout =
         assert (List.length new_cfg_layout <= orig_len);
         assert (List.hd new_cfg_layout = List.hd orig_cfg_layout) ) )
 
-let reorder_random cfg ~random_state =
+let reorder_random cl ~random_state =
   (* Ensure entry exit invariants *)
-  let original_layout = cfg.layout in
+  let original_layout = CL.layout cl in
   let new_layout =
     List.hd_exn original_layout
     :: List.permute ~random_state (List.tl_exn original_layout)
   in
-  check cfg new_layout;
-  cfg.layout <- new_layout;
-  cfg
+  check cl new_layout;
+  CL.set_layout cl new_layout;
+  cl
 
 (* Basic block layout using clustering algorihtm. *)
-let reorder_opt cfg_info cfg =
-  let orig_cfg_layout = cfg.layout in
+let reorder_opt cfg_info cl =
+  let orig_cfg_layout = CL.layout cl in
   let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout cfg_info in
-  check cfg new_cfg_layout;
-  cfg.layout <- new_cfg_layout;
-  cfg
+  check cl new_cfg_layout;
+  CL.set_layout cl new_cfg_layout;
+  cl
 
-(* Compute cfg execounts even if reordering is not enabled. They can be
-   saved to a file for later use. *)
+(* Compute cfg execounts even if reordering is not enabled. They can be saved
+   to a file for later use. *)
 (* Check if function-specific profile has already been computed. it doesn't
-   make sense in the current setup, because all parallel jenga processes
-   will be accessing the same file for write, but it sould work when we
-   change the way profiles are stored to allow faster parallel access. *)
+   make sense in the current setup, because all parallel jenga processes will
+   be accessing the same file for write, but it sould work when we change the
+   way profiles are stored to allow faster parallel access. *)
 (* Could write to file intermediate per-function profiles. It would save
    recomping the counters but that's not long and there would be many files. *)
-let reorder_profile cfg linearid_profile =
-  let name = cfg.cfg.fun_name in
-  let cfg_info = Aggregated_decoded_profile.add linearid_profile name cfg in
+let reorder_profile cl linearid_profile =
+  let name = C.fun_name (CL.cfg cl) in
+  let cfg_info = Aggregated_decoded_profile.add linearid_profile name cl in
   match cfg_info with
-  | None -> cfg
-  | Some cfg_info -> reorder_opt cfg_info cfg
+  | None -> cl
+  | Some cfg_info -> reorder_opt cfg_info cl
 
 let apply ~algo cfg =
   match algo with
   | Identity ->
       if !verbose then (
         printf "Don't reorder.\n";
-        print_list "layout" cfg.layout );
+        print_list "layout" (CL.layout cfg) );
       cfg
   | Random random_state -> reorder_random cfg ~random_state
   | Profile linearid_profile -> reorder_profile cfg linearid_profile

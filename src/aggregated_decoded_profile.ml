@@ -2,37 +2,38 @@ open Core
 open Dbg
 open Loc
 open Func
+module Cfg_with_layout = Ocamlcfg.Cfg_with_layout
+module Cfg = Ocamlcfg.Cfg
 
 let verbose = ref true
 
-type t = {
-  (* map raw addresses to locations *)
-  addr2loc : Loc.t Hashtbl.M(Addr).t;
-  (* map func name to func id *)
-  name2id : int Hashtbl.M(String).t;
-  (* map func id to func info *)
-  functions : Func.t Hashtbl.M(Int).t;
-  (* map func id to cfg_info of that function. *)
-  (* sparse, only holds functions that have cfg *and* execounts. *)
-  (* logically it should be defined inside Func.t but it creates a cyclic
-     dependency between . The advantage of the current design is smaller
-     space that a Func takes if it doesn't have a cfg_info *)
-  execounts : Cfg_info.t Hashtbl.M(Int).t;
-  (* map name of compilation unit or function to its md5 digest. Currently
-     contains only crcs of linear IR. Not using Caml.Digest.t because it
-     does not have sexp. Not using Core's Digest because digests generated
-     by the compiler using Caml.Digest might disagree. *)
-  crcs : Md5.t Hashtbl.M(String).t;
-}
+type t =
+  { (* map raw addresses to locations *)
+    addr2loc : Loc.t Hashtbl.M(Addr).t;
+    (* map func name to func id *)
+    name2id : int Hashtbl.M(String).t;
+    (* map func id to func info *)
+    functions : Func.t Hashtbl.M(Int).t;
+    (* map func id to cfg_info of that function. *)
+    (* sparse, only holds functions that have cfg *and* execounts. *)
+    (* logically it should be defined inside Func.t but it creates a cyclic
+       dependency between . The advantage of the current design is smaller
+       space that a Func takes if it doesn't have a cfg_info *)
+    execounts : Cfg_info.t Hashtbl.M(Int).t;
+    (* map name of compilation unit or function to its md5 digest. Currently
+       contains only crcs of linear IR. Not using Caml.Digest.t because it
+       does not have sexp. Not using Core's Digest because digests generated
+       by the compiler using Caml.Digest might disagree. *)
+    crcs : Md5.t Hashtbl.M(String).t
+  }
 [@@deriving sexp]
 
 let mk size =
-  {
-    addr2loc = Hashtbl.create ~size (module Addr);
+  { addr2loc = Hashtbl.create ~size (module Addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
     execounts = Hashtbl.create (module Int);
-    crcs = Hashtbl.create (module String);
+    crcs = Hashtbl.create (module String)
   }
 
 let get_func t addr =
@@ -49,13 +50,12 @@ let get_func t addr =
           Some func )
 
 (* Partition aggregated_perf to functions and calculate total execution
-   counts of each function. Total execution count of a function is
-   determined from the execution counts of samples contained in this
-   function. It uses LBR info: if a branch source or target is contained in
-   the function, it contributes to execution count of the function. It does
-   not use the CFG. In particular, it does not count instructions that can
-   be traced using LBR. The advantage is that we can compute it for
-   non-OCaml functions. *)
+   counts of each function. Total execution count of a function is determined
+   from the execution counts of samples contained in this function. It uses
+   LBR info: if a branch source or target is contained in the function, it
+   contributes to execution count of the function. It does not use the CFG.
+   In particular, it does not count instructions that can be traced using
+   LBR. The advantage is that we can compute it for non-OCaml functions. *)
 let create_func_execounts t (agg : Aggregated_perf_profile.t) =
   Hashtbl.iteri agg.instructions ~f:(fun ~key ~data ->
       match get_func t key with
@@ -160,8 +160,8 @@ let decode_addr t addr interval dbg =
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
 
-  (* Collect all addresses that need decoding. Mispredicts and traces use
-     the same addresses as branches, so no need to add them *)
+  (* Collect all addresses that need decoding. Mispredicts and traces use the
+     same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
   let size =
     Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
@@ -180,8 +180,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   Hashtbl.iter_keys agg.instructions ~f:add;
   Hashtbl.iter_keys agg.branches ~f:add2;
 
-  (* A key may be used multiple times in keys of t.instruction and
-     t.branches *)
+  (* A key may be used multiple times in keys of t.instruction and t.branches *)
   let len = Hashtbl.length addresses in
   if !verbose then printf "size=%d,len=%d\n" size len;
   assert (len <= size);
@@ -229,9 +228,10 @@ let top_functions t =
 
 (* Translate linear ids of this function's locations to cfg labels within
    this function, find the corresponding basic blocks and update their
-   block_info. Perform lots of sanity checks to make sure the location of
-   the execounts match the instructions in the cfg. *)
-let create_cfg_info t func cfg =
+   block_info. Perform lots of sanity checks to make sure the location of the
+   execounts match the instructions in the cfg. *)
+let create_cfg_info t func cl =
+  let cfg = Cfg_with_layout.cfg cl in
   let get_loc addr = Hashtbl.find_exn t.addr2loc addr in
   let blocks = Cfg_info.create () in
   (* Associate instruction counts with basic blocks *)
@@ -249,7 +249,7 @@ let create_cfg_info t func cfg =
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      Cfg_info.record_trace blocks from_loc to_loc data func cfg);
+      Cfg_info.record_trace blocks from_loc to_loc data func cl);
   ( if !verbose then
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
@@ -270,12 +270,11 @@ let create_cfg_info t func cfg =
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      Cfg_info.record_branch blocks from_loc to_loc data mispredicts func
-        cfg);
+      Cfg_info.record_branch blocks from_loc to_loc data mispredicts func cfg);
   blocks
 
 (* Compute detailed execution counts for function [name] using its CFG *)
-let add t name cfg =
+let add t name cl =
   match Hashtbl.find t.name2id name with
   | None ->
       if !verbose then printf "Not found profile for %s with cfg.\n" name;
@@ -285,8 +284,8 @@ let add t name cfg =
       if Int64.(func.count > 0L) && func.has_linearids then (
         if !verbose then (
           printf "compute_cfg_execounts for %s\n" name;
-          Ocamlcfg.Print.debug_print "execount" Out_channel.stdout cfg );
-        let cfg_info = create_cfg_info t func cfg in
+          Cfg_with_layout.print_dot cl "execount" );
+        let cfg_info = create_cfg_info t func cl in
         Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
         Some cfg_info )
       else None

@@ -14,7 +14,7 @@ let quiet () =
   Filenames.verbose := false;
   Reorder.verbose := false;
   Report.verbose := false;
-  Ocamlcfg.Cfg_builder.verbose := false;
+  Ocamlcfg.verbose := false;
   Crcs.verbose := false;
   Wrapper.verbose := false;
   Linker_script.verbose := false;
@@ -51,11 +51,11 @@ module AltFlag (M : Alt) = struct
 end
 
 module Commonflag = struct
-  type t = {
-    name : string;
-    doc : string;
-    aliases : string list;
-  }
+  type t =
+    { name : string;
+      doc : string;
+      aliases : string list
+    }
 
   let optional t =
     Command.Param.(
@@ -66,41 +66,33 @@ module Commonflag = struct
       flag ~aliases:t.aliases t.name (required Filename.arg_type) ~doc:t.doc)
 
   let flag_binary_filename =
-    {
-      name = "-binary";
+    { name = "-binary";
       doc = "filename elf binary to optimize";
-      aliases = [];
+      aliases = []
     }
 
   let flag_perf_profile_filename =
-    {
-      name = "-perf-profile";
+    { name = "-perf-profile";
       doc = "perf.data output of perf record";
-      aliases = [];
+      aliases = []
     }
 
   let flag_linearid_profile_filename =
-    {
-      name = "-fdo-profile";
-      doc = "filename decoded profile";
-      aliases = [];
-    }
+    { name = "-fdo-profile"; doc = "filename decoded profile"; aliases = [] }
 
   let flag_output_filename =
     { name = "-o"; doc = "filename output"; aliases = [] }
 
   let flag_linker_script_template_filename =
-    {
-      name = "-linker-script-template";
+    { name = "-linker-script-template";
       doc = "filename linker script template";
-      aliases = [];
+      aliases = []
     }
 
   let flag_linker_script_hot_filename =
-    {
-      name = "-linker-script-hot";
+    { name = "-linker-script-hot";
       doc = "filename hot functions layout for linker script";
-      aliases = [];
+      aliases = []
     }
 end
 
@@ -120,7 +112,7 @@ let flag_dot_show_instr =
       ~doc:" emit detailed CFG in .dot format for debug")
 
 let flag_v =
-  Command.Param.(flag "-verbose" ~aliases:[ "-v" ] no_arg ~doc:" verbose")
+  Command.Param.(flag "-verbose" ~aliases:["-v"] no_arg ~doc:" verbose")
 
 let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
 
@@ -140,8 +132,7 @@ let flag_buildid =
       ~doc:" ignore mismatch in buildid between binary and perf.data")
 
 let flag_force =
-  Command.Param.(
-    flag "-f" no_arg ~doc:" no assertions in linker-script-hot")
+  Command.Param.(flag "-f" no_arg ~doc:" no assertions in linker-script-hot")
 
 let flag_write_linker_script_hot =
   Command.Param.(
@@ -159,9 +150,9 @@ let flag_auto =
     flag "-auto" no_arg
       ~doc:
         " Automatically figure out how to build.\n\
-        \         Given -fdo-profile <file>, if <file> does not exist, \
-         then add -extra-debug. Without -fdo-profile, invoke ocamlopt \
-         without splitting it into phases (ignore phase-specific ocamlfdo \
+        \         Given -fdo-profile <file>, if <file> does not exist, then \
+         add -extra-debug. Without -fdo-profile, invoke ocamlopt without \
+         splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
 let flag_no_crc =
@@ -175,8 +166,8 @@ let flag_crc =
   Command.Param.(
     flag "-md5" no_arg
       ~doc:
-        " use md5 to detect source changes at function and compilation \
-         unit level (implies both -md5-unit and -md5-fun)")
+        " use md5 to detect source changes at function and compilation unit \
+         level (implies both -md5-unit and -md5-fun)")
 
 let flag_unit_crc =
   Command.Param.(
@@ -216,8 +207,8 @@ let decode_command =
        $ ocamlfdo decode -perf-profile <perf.data> -binary <prog.exe> \n\n\
        It will generate a profile in prog.exe.fdo-profile.\n\
        The profile can be used to reoptimize the executable.\n\
-       With -write-linker-script-hot, ocamlfdo decode will also produce \
-       hot function layout in prog.exe.linker-script-hot file.\n")
+       With -write-linker-script-hot, ocamlfdo decode will also produce hot \
+       function layout in prog.exe.linker-script-hot file.\n")
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
@@ -237,13 +228,12 @@ let decode_command =
       if q then quiet ();
       if !verbose && not write_linker_script_hot then
         printf
-          "Ignoring -reorder-functions when -write-linker-script-hot is \
-           not provided.\n";
+          "Ignoring -reorder-functions when -write-linker-script-hot is not \
+           provided.\n";
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script_hot ~buildid ~expected_pids
-          ~check:(not force))
+          ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force))
 
 let opt_command =
   Command.basic
@@ -255,8 +245,7 @@ let opt_command =
        $ ocamlfdo opt -fdo-profile myexe.fdo-profile foo.cmir-linear \
        bar.cmir-linear\n\
        reads a profile from myexe.fdo-profile file, uses it\n\
-       to optimize foo.cmir-linear and bar.cmir-linear and save the result \
-       to\n\
+       to optimize foo.cmir-linear and bar.cmir-linear and save the result to\n\
        foo.cmir-linear-fdo and bar.cmir-linear-fdo.\n\
        The intermediate representation .cmir-linear files can be obtained by\n\
        $ ocamlopt -save-ir-after linearize foo.ml bar.ml <other options>\n\
@@ -367,9 +356,8 @@ let compile_command =
                 printf
                   "Missing -fdo-profile <file>, required for compilation\n\
                    when -auto is used. Calling ocamlopt directly, without\n\
-                  \ splitting compilation into phases, and not \
-                   intermediate IR is saved. All phase-specific arguments \
-                   are ignored.\n";
+                  \ splitting compilation into phases, and not intermediate \
+                   IR is saved. All phase-specific arguments are ignored.\n";
               None
           | Some file ->
               if Sys.file_exists_exn file then (
@@ -377,8 +365,7 @@ let compile_command =
                   printf
                     "With -auto, detected that -fdo-profile <%s> file does \
                      not exist.\n\n\
-                    \ Setting -extra-debug to true."
-                    file;
+                    \ Setting -extra-debug to true." file;
                 Some (None, true) )
               else (
                 if !verbose then
@@ -418,8 +405,8 @@ let linker_script_command =
        using a strategy specified by -reorder-functions, with default \
        strategy being\n\
        in the order of function execution counts. \n\
-       If -linker-script-hot is provided, function layout is read from \
-       that file.\n\
+       If -linker-script-hot is provided, function layout is read from that \
+       file.\n\
       \             Without -linker-script-hot and -fdo-profile arguments, \
        the marker is simply removed.\n\
       \       Argument of -linker-script-hot option must be a file that \
@@ -471,12 +458,10 @@ let main_command =
        Important: ocamlfdo relies on compiler-libs and thus the same build \
        of ocamlopt must be used for building both ocamlfdo and the \
        executable.")
-    [
-      ("decode", decode_command);
+    [ ("decode", decode_command);
       ("opt", opt_command);
       ("linker-script", linker_script_command);
       ("compile", compile_command);
-      ("check", check_command);
-    ]
+      ("check", check_command) ]
 
 let () = Command.run main_command

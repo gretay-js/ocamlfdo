@@ -1,6 +1,6 @@
 open Core
 open Core.Poly
-open Ocamlcfg
+module CL = Ocamlcfg.Cfg_with_layout
 
 let verbosity_level = 20
 
@@ -27,7 +27,9 @@ let report_linear ~name title f =
   Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
 
 let report_cfg ~name title cfg =
-  Report.with_outchannel ~name ~title ~sub:"lin" (Print.debug_print "") cfg
+  Report.with_outchannel ~name ~title ~sub:"lin"
+    (fun oc x -> CL.print x oc "")
+    cfg
 
 (* CR-soon gyorsh: this is intended as a report at source level and human
    readable form, like inlining report. Currently, just prints the IRs. Could
@@ -154,11 +156,11 @@ let check_equal f new_body =
    less code to deal with when computing layout will be more efficient. *)
 let transform f ~algo ~extra_debug ~preserve_orig_labels =
   print_linear "Before" f;
-  let cfg = Ocamlcfg.Linear_to_cfg.run f ~preserve_orig_labels in
+  let cfg = CL.of_linear f ~preserve_orig_labels in
   (* eliminate fallthrough implies dead block elimination *)
-  if not preserve_orig_labels then Eliminate.fallthrough_blocks cfg;
+  if not preserve_orig_labels then CL.eliminate_fallthrough_blocks cfg;
   let new_cfg = Reorder.apply ~algo cfg in
-  let new_body = Ocamlcfg.Cfg_to_linear.run new_cfg ~extra_debug in
+  let new_body = CL.to_linear new_cfg ~extra_debug in
   let fnew = { f with fun_body = new_body } in
   print_linear "After" fnew;
   fnew
