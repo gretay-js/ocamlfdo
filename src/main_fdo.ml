@@ -131,15 +131,19 @@ let reg_array_equal ra1 ra2 =
   with Not_equal_reg_array -> false
 
 let check_equal f new_body =
+  let is_label = function
+    | Linear.Llabel _ -> true
+    | _ -> false
+  in
   let open Linear in
   let rec equal i1 i2 =
     if
       i1.desc = i2.desc
-      (* && i1.id = i2.id *)
-      && reg_array_equal i1.arg i2.arg
-      && reg_array_equal i1.res i2.res
-      && reg_set_equal i1.live i2.live
-      (* && Debuginfo.compare i1.dbg i2.dbg = 0 *)
+      && ( is_label i1.desc
+         || reg_array_equal i1.arg i2.arg
+            && reg_array_equal i1.res i2.res
+            && reg_set_equal i1.live i2.live
+            && Debuginfo.compare i1.dbg i2.dbg = 0 )
     then if i1.desc = Lend then true else equal i1.next i2.next
     else (
       Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
