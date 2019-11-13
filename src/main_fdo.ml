@@ -134,9 +134,9 @@ let check_equal f new_body =
     if
       i1.desc = i2.desc
       (* && i1.id = i2.id *)
-      && reg_array_equal i1.arg i2.arg
-      && reg_array_equal i1.res i2.res
-      && Reg.Set.equal i1.live i2.live
+      (* && reg_array_equal i1.arg i2.arg
+       * && reg_array_equal i1.res i2.res
+       * && Reg.Set.equal i1.live i2.live *)
       (* && Debuginfo.compare i1.dbg i2.dbg = 0 *)
     then if i1.desc = Lend then true else equal i1.next i2.next
     else (
