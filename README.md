@@ -36,7 +36,7 @@ opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
 opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
 opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
 opam pin add owee https://github.com/let-def/owee.git
-opam install core opam install parsexp_io re2 shexp
+opam install core ppx_jane parsexp_io re2 shexp
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
 ```
 
