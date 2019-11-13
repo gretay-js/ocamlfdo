@@ -115,34 +115,36 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
 
 exception Not_equal_reg_array
 
-let reg_equal (r1 : Reg.t) (r2 : Reg.t) =
-  if not (r1.stamp = r2.stamp) then raise Not_equal_reg_array
-
-let reg_set_equal rs1 rs2 =
-  try
-    List.iter2_exn ~f:reg_equal (Reg.Set.elements rs1) (Reg.Set.elements rs2);
-    true
-  with Not_equal_reg_array -> false
-
 let reg_array_equal ra1 ra2 =
+  (* Uses stamps just like the implementation of compare for Reg.Set.t *)
+  let reg_equal (r1 : Reg.t) (r2 : Reg.t) =
+    if not (r1.stamp = r2.stamp) then raise Not_equal_reg_array
+  in
   try
     Array.iter2_exn ~f:reg_equal ra1 ra2;
     true
   with Not_equal_reg_array -> false
 
 let check_equal f new_body =
-  let is_label = function
-    | Linear.Llabel _ -> true
+  (* CR-someday gyorsh: we do not preserve live and dbg fields of some
+     instructions, such as labels, and instruction that do not exist in cfg,
+     like trap handling stuff, or things that CFG can generate new ones.
+
+     For live, this is fine because this field is used for Lop but not for
+     labels and trap handling instruciont. For dbg, it is fine for now
+     because mshinwell said so.*)
+  let ignored = function
+    | Linear.Llabel _ | Lentertrap | Ladjust_trap_depth _ -> true
     | _ -> false
   in
   let open Linear in
   let rec equal i1 i2 =
     if
       i1.desc = i2.desc
-      && ( is_label i1.desc
-         || reg_array_equal i1.arg i2.arg
-            && reg_array_equal i1.res i2.res
-            && reg_set_equal i1.live i2.live
+      && reg_array_equal i1.arg i2.arg
+      && reg_array_equal i1.res i2.res
+      && ( ignored i1.desc
+         || Reg.Set.equal i1.live i2.live
             && Debuginfo.compare i1.dbg i2.dbg = 0 )
     then if i1.desc = Lend then true else equal i1.next i2.next
     else (
