@@ -245,6 +245,7 @@ let check files =
     | Data _ -> ()
   in
   let process file =
+    printf "Checking %s...\n" file;
     let ui, _ = restore file in
     List.iter ui.items ~f:check_fun
   in
