@@ -115,16 +115,18 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
 
 exception Not_equal_reg_array
 
-let reg_array_equal ra1 ra2 =
-  let reg_equal r1 r2 =
-    let open Reg in
-    r1.stamp = r2.stamp
-  in
+let reg_equal (r1 : Reg.t) (r2 : Reg.t) =
+  if not (r1.stamp = r2.stamp) then raise Not_equal_reg_array
+
+let reg_set_equal rs1 rs2 =
   try
-    Array.iter2_exn
-      ~f:(fun r1 r2 ->
-        if not (reg_equal r1 r2) then raise Not_equal_reg_array)
-      ra1 ra2;
+    List.iter2_exn ~f:reg_equal (Reg.Set.elements rs1) (Reg.Set.elements rs2);
+    true
+  with Not_equal_reg_array -> false
+
+let reg_array_equal ra1 ra2 =
+  try
+    Array.iter2_exn ~f:reg_equal ra1 ra2;
     true
   with Not_equal_reg_array -> false
 
@@ -136,8 +138,8 @@ let check_equal f new_body =
       (* && i1.id = i2.id *)
       && reg_array_equal i1.arg i2.arg
       && reg_array_equal i1.res i2.res
-      (* && reg_set_equal i1.live i2.live *)
-      && Debuginfo.compare i1.dbg i2.dbg = 0
+      && reg_set_equal i1.live i2.live
+      (* && Debuginfo.compare i1.dbg i2.dbg = 0 *)
     then if i1.desc = Lend then true else equal i1.next i2.next
     else (
       Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
