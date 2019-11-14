@@ -9,15 +9,14 @@ type t =
   | Source
   | Linear
 
-(* CR-soon gyorsh: what are all the source file extensions we should
-   support? *)
+(* CR-soon gyorsh: what are all the source file extensions we should support? *)
 let extension = function
   | Linear -> ".cmir-linear"
   | Source -> ".ml"
 
 let suffix = function
-  | Linear -> [ ".cmir-linear" ]
-  | Source -> [ ".ml"; ".mli"; ".c"; ".h" ]
+  | Linear -> [".cmir-linear"]
+  | Source -> [".ml"; ".mli"; ".c"; ".h"]
 
 let make_fdo file = file ^ "-fdo"
 
@@ -28,7 +27,9 @@ let is_legal t s =
 let make t s =
   match t with
   | Source -> s
-  | Linear -> Filename.chop_extension s ^ extension t
+  | Linear ->
+      let b, _ = Filename.split_extension s in
+      b ^ extension t
 
 let compare t ~expected:func ~actual:file =
   match
