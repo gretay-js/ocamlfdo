@@ -13,6 +13,7 @@ build: [
 depends: [
   "ocaml" {>= "4.08"}
   "dune" {build & >= "1.8"}
+  "ocamlcfg" 
 ]
 synopsis: "Feedback-directed optimizer for OCaml"
 description: "OCamlFDO is a tool for Feedback-Directed Optimization (FDO)
