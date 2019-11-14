@@ -388,36 +388,37 @@ let linker_script_command =
     ~summary:
       "Create linker script from a template and a layout of hot functions."
     ~readme:(fun () ->
-      "Inserts the hot functions from linker-script-hot into the template \
-       linker script, replacing the marker\n\
-       INCLUDE linker-script-hot\n\n\
-       A linker script can be obtained by running the command \"ld \
-       --verbose\" and patching the output. See the default template, \
-       distributed with the tool, in resources directory.\n\n\
-       Use \"ocamlfdo decode\" to generate hot function layout.\n\
-       This command performs a trivial transformation on the files.\n\
-       It is useful when the linker runs from a different directory than \
-       the one where the linker-script-hot file resides, such as when \
-       ocamlfdo is used in a build system.\n\n\
-       At most one of -fdo-profile and -linker-script can be provided.\n\
-       If -fdo-profile is provided, hot functions layout is computed from \
-       the profile\n\
-       using a strategy specified by -reorder-functions, with default \
-       strategy being\n\
-       in the order of function execution counts. \n\
-       If -linker-script-hot is provided, function layout is read from that \
-       file.\n\
-      \             Without -linker-script-hot and -fdo-profile arguments, \
-       the marker is simply removed.\n\
-      \       Argument of -linker-script-hot option must be a file that \
-       contains\n\
-       a valid fragment of linker script syntax. It can be empty. If \
-       section names\n\
-      \        listed in the file do not exist during linking, they are \
-       simply ignored\n\
-      \        without a warning. It can happen when recompiling after \
-       source code change,\n\
-      \        the numbers at the end of the function symbols can change.\n")
+      {| Inserts the hot functions from linker-script-hot into the template
+         linker script, replacing the marker:
+         INCLUDE linker-script-hot
+
+        A linker script can be obtained by running the command
+        "ld --verbose" and patching the output. See the default template,
+       distributed with the tool.
+
+       Use "ocamlfdo decode" to generate hot function layout.
+       This command performs a trivial transformation on the files.
+       It is useful when the linker runs from a different directory than
+       the one where the linker-script-hot file resides, such as when
+       ocamlfdo is used in a build system.
+
+       At most one of -fdo-profile and -linker-script-hot can be provided.
+       If -fdo-profile is provided, hot functions layout is computed from
+       the profile using a strategy specified by -reorder-functions, with default
+       strategy being in the order of function execution counts.
+       If -linker-script-hot is provided, function layout is read from that
+       file. Without -linker-script-hot and -fdo-profile arguments, the marker is
+       simply removed.
+
+       Argument of -linker-script-hot option must be a file that contains
+       a valid fragment of linker script syntax. It can be empty. If
+       section names listed in the file do not exist during linking,
+       link will fail with an error.
+       It can happen when recompiling after source code change,
+       the numbers at the end of the function symbols can change.
+       Pass "-f" to force link (i.e., do not generate checks in the linker script).
+       No checks are generated for C code, because local symbols can't be checked.
+       Check manually with "nm -n". |})
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
