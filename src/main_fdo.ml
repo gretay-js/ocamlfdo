@@ -1,6 +1,7 @@
 open Core
 open Core.Poly
 module CL = Ocamlcfg.Cfg_with_layout
+module CP = Ocamlcfg.Passes
 
 let verbosity_level = 20
 
@@ -178,7 +179,7 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels =
   if not preserve_orig_labels then CL.eliminate_fallthrough_blocks cfg;
   ( if extra_debug then
     let file = to_symbol f.fun_name |> Filenames.(make Linear) in
-    CL.add_extra_debug cfg ~file );
+    CP.add_extra_debug (CL.cfg cfg) ~file );
   let new_cfg = Reorder.apply ~algo cfg in
   let new_body = CL.to_linear new_cfg in
   let fnew = { f with fun_body = new_body } in

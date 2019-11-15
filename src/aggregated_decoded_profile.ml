@@ -19,7 +19,7 @@ type t =
     (* logically it should be defined inside Func.t but it creates a cyclic
        dependency between . The advantage of the current design is smaller
        space that a Func takes if it doesn't have a cfg_info *)
-    execounts : Cfg_info.t Hashtbl.M(Int).t;
+    execounts : Cfg_info.blocks Hashtbl.M(Int).t;
     (* map name of compilation unit or function to its md5 digest. Currently
        contains only crcs of linear IR. Not using Caml.Digest.t because it
        does not have sexp. Not using Core's Digest because digests generated
@@ -231,25 +231,19 @@ let top_functions t =
    block_info. Perform lots of sanity checks to make sure the location of the
    execounts match the instructions in the cfg. *)
 let create_cfg_info t func cl =
-  let cfg = Cfg_with_layout.cfg cl in
   let get_loc addr = Hashtbl.find_exn t.addr2loc addr in
-  let blocks = Cfg_info.create () in
+  let i = Cfg_info.create cl func in
   (* Associate instruction counts with basic blocks *)
   Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
       let loc = get_loc key in
-      match Cfg_info.get_block loc cfg with
-      | None ->
-          if !verbose then
-            printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n"
-              loc.addr
-      | Some block -> Cfg_info.record blocks block ~count:data);
+      Cfg_info.record_ip i ~loc ~data);
 
   (* Associate fall-through trace counts with basic blocks *)
   Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      Cfg_info.record_trace blocks from_loc to_loc data func cl);
+      Cfg_info.record_trace i ~from_loc ~to_loc ~data);
   ( if !verbose then
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
@@ -270,8 +264,8 @@ let create_cfg_info t func cl =
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      Cfg_info.record_branch blocks from_loc to_loc data mispredicts func cfg);
-  blocks
+      Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
+  Cfg_info.blocks i
 
 (* Compute detailed execution counts for function [name] using its CFG *)
 let add t name cl =

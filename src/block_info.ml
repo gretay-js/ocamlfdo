@@ -1,5 +1,4 @@
 open Core
-open Loc
 
 (* CR-soon gyorsh: Improve different option fields. The reason for them is
    that we don't always have all of the information: Loc.t, label, linearid.
@@ -9,18 +8,18 @@ open Loc
    to describe the kind of location we have? *)
 
 (* Successor info *)
-type b = {
-  target : Loc.t option;
-  target_label : Cfg_label.t option;
-  target_id : int option;
-  (* is the target intraprocedural? *)
-  intra : bool;
-  fallthrough : bool;
-  (* true for fallthrough targets where counts are inferred from LBR; false
-     for branches that appeared explicitly in LBR *)
-  mutable taken : Execount.t;
-  mispredicts : Execount.t;
-}
+type b =
+  { target : Loc.t option;
+    target_label : Cfg_label.t option;
+    target_id : int option;
+    (* is the target intraprocedural? *)
+    intra : bool;
+    fallthrough : bool;
+    (* true for fallthrough targets where counts are inferred from LBR; false
+       for branches that appeared explicitly in LBR *)
+    mutable taken : Execount.t;
+    mispredicts : Execount.t
+  }
 [@@deriving sexp, compare]
 
 (* Function Must have at least one of target or target_label *)
@@ -29,26 +28,26 @@ type b = {
    location. *)
 
 (* call site info *)
-type c = {
-  callsite : Loc.t;
-  mutable callees : b list;
-}
+type c =
+  { callsite : Loc.t;
+    mutable callees : b list
+  }
 [@@deriving sexp, compare]
 
 (* Execution counts for a basic block *)
-type t = {
-  (* Label of this block *)
-  label : Cfg_label.t;
-  (* Instruction id for the first and last instruction. *)
-  (* [first_id] can be the same as terminator_id if body is empty *)
-  first_id : int;
-  terminator_id : int;
-  mutable count : Execount.t;
-  (* Number of times this block was executed. *)
-  mutable branches : b list;
-  (* Info about branch targets *)
-  mutable calls : c list; (* Info about call targets *)
-}
+type t =
+  { (* Label of this block *)
+    label : Cfg_label.t;
+    (* Instruction id for the first and last instruction. *)
+    (* [first_id] can be the same as terminator_id if body is empty *)
+    first_id : int;
+    terminator_id : int;
+    mutable count : Execount.t;
+    (* Number of times this block was executed. *)
+    mutable branches : b list;
+    (* Info about branch targets *)
+    mutable calls : c list (* Info about call targets *)
+  }
 [@@deriving sexp]
 
 let mk ~label ~first_id ~terminator_id =
@@ -78,8 +77,8 @@ let find branches branch =
             && [%compare.equal: int option] b.target_id branch.target_id );
           true
       | None, None, Some tid
-        when [%compare.equal: Cfg_label.t option] (Some tid)
-               branch.target_id ->
+        when [%compare.equal: Cfg_label.t option] (Some tid) branch.target_id
+        ->
           assert (is_none branch.target && is_none branch.target_label);
           true
       | None, None, None -> assert false
@@ -89,7 +88,7 @@ let add_call t ~callsite ~callee =
   (* Find the callsite's info *)
   match List.find t.calls ~f:(fun c -> Loc.equal c.callsite callsite) with
   | None ->
-      let c = { callsite; callees = [ callee ] } in
+      let c = { callsite; callees = [callee] } in
       t.calls <- c :: t.calls
   | Some c -> (
       (* Invariant: unique entry per call target. *)
