@@ -15,25 +15,32 @@ Currently, [ocamlfdo](https://github.com/gretay-js/ocamlfdo) is not
 yet available from opam repository.  It requires a few small changes to
 the upstream version of its dependencies:
 - [ocamlopt](https://github.com/ocaml/ocaml) compiler.  The changes
-  are [available here](https://github.com/gretay-js/ocaml/tree/fdo408)
-  on a branch off of a 4.08 version of the compiler. Corresponding PRs
-  are being reviewed upstream.
+  are [available here](https://github.com/gretay-js/ocaml)
+  on branch fdo408 and fdo409 for 4.08 and 4.09 versions of the upstream compiler.
+  Corresponding PRs are being reviewed upstream.
 - [owee](https://github.com/let-def/owee) library.
   Changes are not yet released in opam.
 - [ocamlcfg](https://github.com/gretay-js/ocamlcfg) library is not yet
   available from opam repository.
 - [ocaml-migrate-parsetree](https://github.com/ocaml-ppx/ocaml-migrate-parsetree)
   library.
-  To build ocamlfdo using the compiler branch above,
-  which is based on janestreet compiler,
+    This is not required for
+    [4.09 compiler branch](https://github.com/gretay-js/ocaml.git#fdo409), which is based on upstream ocaml release of 4.09.
+
+  To build ocamlfdo using
+  [4.08 compiler branch](https://github.com/gretay-js/ocaml.git#fdo408),
+  which is based on janestreet version of the compiler,
   we need to update ast in ocaml-migrate-parsetree to handle immediate64
   (an unrelated compiler change that will be included in 4.10).
+  ```
+  opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
+  ```
+
 
 For now, the process is:
 ```
-opam switch create fdo408 --empty
-opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo408
-opam pin add ocaml-migrate-parsetree https://github.com/gretay-js/ocaml-migrate-parsetree.git#409
+opam switch create fdo409 --empty
+opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo409
 opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
 opam pin add owee https://github.com/let-def/owee.git
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
