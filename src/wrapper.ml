@@ -86,7 +86,7 @@ let phase_args t phase =
   | Single_src_rename { src; target }, Emit ->
       (* replace <src>.ml with <target.cmir-linear-fdo> *)
       List.map t.args ~f:(fun s ->
-          if s = src then rename target Filenames.Linear else s)
+          if String.equal s src then rename target Filenames.Linear else s)
   | Standard _, Emit ->
       (* replace <src>.ml with <src.cmir-linear-fdo> *)
       List.map t.args ~f:(fun s ->

@@ -14,29 +14,29 @@ let mispredicted = function
   | M -> true
   | _ -> false
 
-type br = {
-  from_addr : Addr.t;
-  to_addr : Addr.t;
-  mispredict : mispredict_flag;
-  index : int;
-      (* Position on the stack, with 0 being the most recent branch. This
-         field is only used for only for validation. *)
-      (* cycles : int; *)
-}
+type br =
+  { from_addr : Addr.t;
+    to_addr : Addr.t;
+    mispredict : mispredict_flag;
+    index : int
+        (* Position on the stack, with 0 being the most recent branch. This
+           field is only used for only for validation. *)
+        (* cycles : int; *)
+  }
 [@@deriving compare, sexp]
 
-type sample = {
-  ip : Addr.t;
-  (* instruction pointer where the sample was taken *)
-  brstack : br list; (* branch stack is the last branch record (LBR) *)
-}
+type sample =
+  { ip : Addr.t;
+    (* instruction pointer where the sample was taken *)
+    brstack : br list (* branch stack is the last branch record (LBR) *)
+  }
 [@@deriving compare, sexp]
 
 type t = sample list [@@deriving compare, sexp]
 
 let parse_br index s =
   match String.split s ~on:'/' with
-  | [ from_addr; to_addr; m; t; a; c ] ->
+  | [from_addr; to_addr; m; t; a; c] ->
       let mispredict =
         match m with
         | "M" -> M
@@ -48,22 +48,19 @@ let parse_br index s =
       (* Parse and ignore t and a flags. *)
       ( match t with
       | "X" | "-" -> ()
-      | _ ->
-          Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
+      | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
       );
       ( match a with
       | "A" | "-" -> ()
-      | _ ->
-          Report.user_error "Cannot parse mispredict flag %s in %s" a s ()
+      | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" a s ()
       );
 
       (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
       let _cycles = Int.of_string c in
-      {
-        from_addr = Int64.of_string from_addr;
+      { from_addr = Int64.of_string from_addr;
         to_addr = Int64.of_string to_addr;
         index;
-        mispredict;
+        mispredict
       }
   | _ -> Report.user_error "Cannot parse %s\n" s ()
 
@@ -83,12 +80,12 @@ let split_on_whitespace row =
 
 let hex s = if String.is_prefix ~prefix:"0x" s then s else "0x" ^ s
 
-type mmap = {
-  pid : int;
-  name : string;
-  base : Addr.t;
-  size : Addr.t;
-}
+type mmap =
+  { pid : int;
+    name : string;
+    base : Addr.t;
+    size : Addr.t
+  }
 
 type row =
   | Unknown
@@ -113,14 +110,14 @@ let row_to_sample ~keep_pid row =
                 String.chop_suffix id ~suffix:":" |> Option.value_exn
               in
               ( match String.split id ~on:'/' with
-              | [ n; _tid ] ->
+              | [n; _tid] ->
                   (* Do we need to do anything with tid? what does it mean? *)
                   assert (Int.of_string n = pid)
               | _ -> Report.user_error "Unexpected format" );
 
               (* parse the important info *)
-              match String.split_on_chars pos ~on:[ '['; '('; ')' ] with
-              | [ base; size ] ->
+              match String.split_on_chars pos ~on:['['; '('; ')'] with
+              | [base; size] ->
                   let base = Addr.of_string base in
                   let size = Addr.of_string size in
                   Mmap { pid; name; base; size }
@@ -132,9 +129,8 @@ let row_to_sample ~keep_pid row =
       if keep_pid pid then (
         if !verbose then printf "parsing ip %s\n" ip;
         let sample =
-          {
-            ip = Int64.of_string (hex ip);
-            brstack = snd (parse_brstack (0, []) rest);
+          { ip = Int64.of_string (hex ip);
+            brstack = snd (parse_brstack (0, []) rest)
           }
         in
         if !verbose then (
@@ -163,12 +159,12 @@ let check_keep_pid expected_pids p ~ignore_buildid =
         p expected_pids;
     keep
 
-let script = [ "script"; "-F"; "pid,ip,brstack" ]
+let script = ["script"; "-F"; "pid,ip,brstack"]
 
-let buildid = [ "buildid-list"; "-f" ]
+let buildid = ["buildid-list"; "-f"]
 
 let perf_fold filename args ~init ~f =
-  let args = List.concat [ [ "perf" ]; args; [ "-i"; filename ] ] in
+  let args = List.concat [["perf"]; args; ["-i"; filename]] in
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
@@ -196,11 +192,11 @@ let read filename =
     Int.Set.iter !pids ~f:(fun pid -> Printf.printf "%d\n" pid) );
   t
 
-type stats = {
-  ignored : int;
-  total : int;
-  lbr : int;
-}
+type stats =
+  { ignored : int;
+    total : int;
+    lbr : int
+  }
 
 let inc table key =
   Hashtbl.update table key ~f:(fun v ->
@@ -221,7 +217,7 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
       let to_addr = cur.from_addr in
       if !verbose then printf "cur 0x%Lx->0x%Lx\n" cur.from_addr cur.to_addr;
       if !verbose then printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
-
+      let open Int64 in
       (* There appear to be a problem with perf output: last LBR entry is
          repeated twice sometimes. It may be related to the recent problem
          mentioned in a patch for perf script: Fix LBR skid dump problems in
@@ -282,16 +278,16 @@ let aggregate sample (aggregated : Aggregated_perf_profile.t) =
 let extract_pids data perf_data =
   (* find pids *)
   (* there seems to be no better way of mapping dso to pids, or restricting
-     the output of `perf script` to a particular dso. With `perf script`,
-     dso appearing attached to every address in brstacks, which makes the
-     output much bigger and longer to process. *)
-  (* CR-soon replace this hack with parsing the output of perf report, or a
-     better way to extract pids. *)
+     the output of `perf script` to a particular dso. With `perf script`, dso
+     appearing attached to every address in brstacks, which makes the output
+     much bigger and longer to process. *)
+  (* CR-soon gyorsh: replace this hack with parsing the output of perf
+     report, or a better way to extract pids. *)
   (* We could also extract buildid and dso association from this output,
      without calling buildid-list before it, but while the call to
-     buildid-list seems reasonable to keep long term, this function should
-     be replaced. *)
-  perf_fold perf_data [ "report"; "-F"; "dso,pid"; "--stdio"; "-v" ]
+     buildid-list seems reasonable to keep long term, this function should be
+     replaced. *)
+  perf_fold perf_data ["report"; "-F"; "dso,pid"; "--stdio"; "-v"]
     ~init:Int.Set.empty ~f:(fun acc s ->
       Printf.printf "[find pids] %s\n" s;
       if
@@ -313,7 +309,7 @@ let extract_pids data perf_data =
               if !verbose then
                 Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
               match String.split ~on:':' pid_comm with
-              | [ pid; _ ] ->
+              | [pid; _] ->
                   if !verbose then Printf.printf "[find pids] pid=%s\n" pid;
                   Int.Set.add acc (Int.of_string pid)
               | _ ->
@@ -331,7 +327,7 @@ let check_buildid binary perf_data ignore_buildid =
   in
   let parse row =
     match String.split ~on:' ' row with
-    | [ buildid; dso ] ->
+    | [buildid; dso] ->
         if String.equal binary_buildid buildid then Some dso else None
     | _ ->
         Report.user_error "Unexpected output format of `perf %s -i %s`:\n%s"
@@ -345,7 +341,7 @@ let check_buildid binary perf_data ignore_buildid =
         | Some d -> d :: acc)
   in
   ( match data with
-  | [ dso ] ->
+  | [dso] ->
       if !verbose then
         printf "Found comm for buildid %s: %s\n" binary_buildid dso
   | [] ->
@@ -413,10 +409,9 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
         { stats with ignored = stats.ignored + 1; total = stats.total + 1 }
     | Sample sample ->
         aggregate sample aggregated;
-        {
-          stats with
+        { stats with
           total = stats.total + 1;
-          lbr = stats.lbr + List.length sample.brstack;
+          lbr = stats.lbr + List.length sample.brstack
         }
     | Mmap _mmap -> stats
     (* CR-soon gyorsh: use memory map to translate ip addresses of samples
@@ -435,13 +430,14 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
        information and supply it in some format to ocamlfdo decode.
 
        If mmapping might change in the middle of execution (does ASLR do it?
-       other machinery?), will there be an event recorded for each change?
-       If so, do the samples need to be interpreted w.r.t. the appropriate
-       event preceeding mmap event, so we need to either keep track of the
-       order they are listed (is the output of perf script guaranteed to be
-       ordered by the time of samples) or parse the time of the samples and
-       map ip addresses accroding to their order relative to map events. *)
+       other machinery?), will there be an event recorded for each change? If
+       so, do the samples need to be interpreted w.r.t. the appropriate event
+       preceeding mmap event, so we need to either keep track of the order
+       they are listed (is the output of perf script guaranteed to be ordered
+       by the time of samples) or parse the time of the samples and map ip
+       addresses accroding to their order relative to map events. *)
   in
+
   let stats = perf_fold filename script ~init:empty_stats ~f in
   if !verbose then (
     Printf.printf "Read %d samples with %d LBR entries\n" stats.total

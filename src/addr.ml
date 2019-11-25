@@ -1,2 +1,1 @@
-open Core
-include Int64
+include Core.Int64

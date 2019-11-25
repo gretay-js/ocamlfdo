@@ -105,7 +105,8 @@ let reset_cache t =
     let hits = float_of_int h in
     let misses = float_of_int m in
     let ratio =
-      if misses +. hits > 0. then hits /. (misses +. hits) else 0.
+      Float.(
+      if misses +. hits > 0. then hits /. (misses +. hits) else 0.)
     in
     Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n" msg h m
       ratio
@@ -270,7 +271,7 @@ let resolve_function_containing t ~program_counter =
       (* Only cache in resolved_fun the pcs for which no name was found. The
          others have an entry in resolved_fun_cache cache. It takes longer
          to extract but uses less memory. *)
-      assert (name = None);
+      assert (Option.is_none name);
       None
   | None -> (
       t.fun_misses <- t.fun_misses + 1;
@@ -309,6 +310,7 @@ let resolve_function_containing t ~program_counter =
                    end of interval covers the start of the next symbol. This
                    may be a bug in Owee, or maybe intentional, but we can
                    work around it here. *)
+                let open Int64 in
                 if start = program_counter && size = 0L then (
                   if !verbose then
                     Printf.printf
@@ -352,7 +354,7 @@ let resolve_function_containing t ~program_counter =
 
 let resolve_range t ~start ~finish ~with_inverse =
   (* find function addresses *)
-  assert (start < finish);
+  assert Int64.(start < finish);
   if !verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx)%s\n" start
       finish

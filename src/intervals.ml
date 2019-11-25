@@ -51,7 +51,7 @@ let disjoint t i =
 
 let insert t interval =
   (* Non-empty intervals only *)
-  assert (interval.l < interval.r);
+  assert Int64.(interval.l < interval.r);
 
   (* Check that the new interval is disjoint from all existing intervals in
      [t] *)

@@ -33,7 +33,8 @@ module type Alt = sig
 end
 
 module AltFlag (M : Alt) = struct
-  let of_string s = List.find_exn M.all ~f:(fun t -> s = M.to_string t)
+  let of_string s = List.find_exn M.all
+                      ~f:(fun t -> String.equal s (M.to_string t))
 
   let alternatives heading =
     let names = List.map M.all ~f:M.to_string in
@@ -43,7 +44,7 @@ module AltFlag (M : Alt) = struct
       default
 
   let mk name ~doc =
-    assert (not (List.contains_dup ~compare M.all));
+    assert (not (List.contains_dup ~compare:Poly.compare M.all));
     Command.Param.(
       flag name
         (optional_with_default M.default (Command.Arg_type.create of_string))

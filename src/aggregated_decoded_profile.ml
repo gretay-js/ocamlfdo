@@ -82,7 +82,7 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       let update_br func =
         func.count <- Int64.(func.count + data);
         Hashtbl.add_exn func.agg.branches ~key ~data;
-        if mispredicts > 0L then
+        if Int64.(mispredicts > 0L) then
           Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts
       in
       process key update_br);
@@ -249,7 +249,7 @@ let create_cfg_info t func cl =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
     in
     let ratio =
-      if total_traces > 0L then
+      if Int64.(total_traces > 0L) then
         Int64.(func.malformed_traces * 100L / total_traces)
       else 0L
     in
