@@ -289,11 +289,13 @@ let extract_pids data perf_data =
      replaced. *)
   perf_fold perf_data ["report"; "-F"; "dso,pid"; "--stdio"; "-v"]
     ~init:Int.Set.empty ~f:(fun acc s ->
-      Printf.printf "[find pids] %s\n" s;
+      if !verbose then Printf.printf "[find pids] %s\n" s;
       if
         String.equal s ""
         || String.is_prefix s ~prefix:"build id event received for "
         || String.is_prefix s ~prefix:"#"
+        || String.is_suffix s
+             ~suffix:" not found, continuing without symbols"
       then acc
       else
         try
@@ -364,9 +366,9 @@ let check_buildid binary perf_data ignore_buildid =
           perf_data
   | _ -> () );
   if !verbose then (
-    printf "Found %d comms for buildid %s in %s." (List.length data)
+    printf "Found %d comms for buildid %s in %s.\n" (List.length data)
       binary_buildid perf_data;
-    if !verbose then List.iter data ~f:(printf "%s\n") );
+    List.iter data ~f:(printf "%s\n") );
   extract_pids data perf_data
 
 let pids_to_keep ~found_pids ~expected_pids =
