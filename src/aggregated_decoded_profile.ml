@@ -141,7 +141,8 @@ let decode_addr t addr interval dbg =
                 Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
               None
           | Some dbg ->
-              if !verbose then Printf.printf "%s:%d\n" dbg.file dbg.line;
+              if !verbose then
+                Printf.printf "%Lx:%Lx:%s:%d\n" addr start dbg.file dbg.line;
 
               (* Check that the filename has supported suffix and return it. *)
               if Filenames.(compare Linear ~expected:name ~actual:dbg.file)

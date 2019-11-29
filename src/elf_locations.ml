@@ -1,26 +1,26 @@
 open Core
 
-type t = {
-  map : Owee_buf.t;
-  sections : Owee_elf.section array;
-  strtab : Owee_elf.String_table.t;
-  symtab : Owee_elf.Symbol_table.t;
-  resolved : (string * int) option Hashtbl.M(Elf_addr).t;
-  resolved_fun : string option Hashtbl.M(Elf_addr).t;
-  mutable resolved_fun_intervals : string Intervals.t;
-  mutable hits : int;
-  mutable misses : int;
-  mutable fun_hits : int;
-  mutable fun_misses : int;
-  mutable intervals_hits : int;
-  mutable intervals_misses : int;
-  inverse : Elf_addr.t Hashtbl.M(Int).t Hashtbl.M(String).t;
-}
+type t =
+  { map : Owee_buf.t;
+    sections : Owee_elf.section array;
+    strtab : Owee_elf.String_table.t;
+    symtab : Owee_elf.Symbol_table.t;
+    resolved : (string * int) option Hashtbl.M(Elf_addr).t;
+    resolved_fun : string option Hashtbl.M(Elf_addr).t;
+    mutable resolved_fun_intervals : string Intervals.t;
+    mutable hits : int;
+    mutable misses : int;
+    mutable fun_hits : int;
+    mutable fun_misses : int;
+    mutable intervals_hits : int;
+    mutable intervals_misses : int;
+    inverse : Elf_addr.t Hashtbl.M(Int).t Hashtbl.M(String).t
+  }
 
 let verbose = ref true
 
 let create ~elf_executable =
-  let fd = Unix.openfile elf_executable ~mode:[ Unix.O_RDONLY ] ~perm:0 in
+  let fd = Unix.openfile elf_executable ~mode:[Unix.O_RDONLY] ~perm:0 in
   let len = Unix.lseek fd 0L ~mode:Unix.SEEK_END |> Int64.to_int_exn in
   let map =
     Bigarray.array1_of_genarray
@@ -39,8 +39,7 @@ let create ~elf_executable =
   | None, _ -> Report.user_error "Can't find symbol table in elf binary"
   | _, None -> Report.user_error "Can't find string table in elf binary"
   | Some symtab, Some strtab ->
-      {
-        map;
+      { map;
         sections;
         strtab;
         symtab;
@@ -53,16 +52,16 @@ let create ~elf_executable =
         fun_misses = 0;
         resolved_fun_intervals;
         intervals_hits = 0;
-        intervals_misses = 0;
+        intervals_misses = 0
       }
 
-(* CR-soon mshinwell: tidy all this up. Also, the pinpointing of which row
-   is the correct one isn't great. *)
+(* CR-soon mshinwell: tidy all this up. Also, the pinpointing of which row is
+   the correct one isn't great. *)
 
-type l = {
-  filename : string option;
-  state : Owee_debug_line.state;
-}
+type l =
+  { filename : string option;
+    state : Owee_debug_line.state
+  }
 
 let resolve_from_dwarf t ~f =
   match Owee_elf.find_section t.sections ".debug_line" with
@@ -87,9 +86,7 @@ let resolve_from_dwarf t ~f =
               if state.end_sequence then None
               else
                 let filename = Owee_debug_line.get_filename header state in
-                let cur =
-                  { filename; state = Owee_debug_line.copy state }
-                in
+                let cur = { filename; state = Owee_debug_line.copy state } in
                 f cur prev;
                 Some cur
             in
@@ -105,8 +102,7 @@ let reset_cache t =
     let hits = float_of_int h in
     let misses = float_of_int m in
     let ratio =
-      Float.(
-      if misses +. hits > 0. then hits /. (misses +. hits) else 0.)
+      Float.(if misses +. hits > 0. then hits /. (misses +. hits) else 0.)
     in
     Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n" msg h m
       ratio
@@ -179,8 +175,8 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
           | None ->
               if !verbose then
                 Printf.printf
-                  "adding new entry to line table for %s %d: 0x%x\n"
-                  filename line prev.state.address;
+                  "adding new entry to line table for %s %d: 0x%x\n" filename
+                  line prev.state.address;
               Hashtbl.set tbl ~key:line ~data:prev.state.address
           | Some addr ->
               if !verbose then
@@ -250,8 +246,8 @@ let resolve_all t addresses =
     let resolved = Hashtbl.count addresses ~f:Option.is_some in
     assert (resolved <= len);
     if !verbose then
-      Printf.printf "resolve_all: resolved %d out of %d addresses\n"
-        resolved len )
+      Printf.printf "resolve_all: resolved %d out of %d addresses\n" resolved
+        len )
 
 let report msg name program_counter =
   if !verbose then
@@ -269,15 +265,13 @@ let resolve_function_containing t ~program_counter =
       report "Found fun in cache" name program_counter;
 
       (* Only cache in resolved_fun the pcs for which no name was found. The
-         others have an entry in resolved_fun_cache cache. It takes longer
-         to extract but uses less memory. *)
+         others have an entry in resolved_fun_cache cache. It takes longer to
+         extract but uses less memory. *)
       assert (Option.is_none name);
       None
   | None -> (
       t.fun_misses <- t.fun_misses + 1;
-      match
-        Intervals.enclosing t.resolved_fun_intervals program_counter
-      with
+      match Intervals.enclosing t.resolved_fun_intervals program_counter with
       | Some fun_interval ->
           t.intervals_hits <- t.intervals_hits + 1;
           report "Found fun in interval cache" (Some fun_interval.v)
@@ -289,6 +283,20 @@ let resolve_function_containing t ~program_counter =
             Owee_elf.Symbol_table.functions_enclosing_address t.symtab
               ~address:program_counter
           in
+          if !verbose then (
+            Printf.printf "Found %d symbols for addr=0x%Lx\n"
+              (List.length syms) program_counter;
+            List.iter syms ~f:(fun sym ->
+                let start = Owee_elf.Symbol_table.Symbol.value sym in
+                let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
+                let finish = Addr.( + ) start size in
+                let name =
+                  match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
+                  | None -> "?noname?"
+                  | Some name -> name
+                in
+                Printf.printf "start=0x%Lx finish=0x%Lx size=%Ld %s\n" start
+                  finish size name) );
           let rec find_func syms =
             match syms with
             | [] ->
@@ -298,7 +306,7 @@ let resolve_function_containing t ~program_counter =
             | sym :: tail ->
                 let start = Owee_elf.Symbol_table.Symbol.value sym in
                 let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
-                let finish = Addr.( + ) start program_counter in
+                let finish = Addr.( + ) start size in
                 if !verbose then
                   Printf.printf
                     "Find func sym: start=0x%Lx finish=0x%Lx pc=0x%Lx\n"
@@ -306,10 +314,10 @@ let resolve_function_containing t ~program_counter =
 
                 (* Look for symbol that contains program counter. This is
                    needed because functions_enclosing_address is based on
-                   start+size of symbols, and sometimes previous symbol's
-                   end of interval covers the start of the next symbol. This
-                   may be a bug in Owee, or maybe intentional, but we can
-                   work around it here. *)
+                   start+size of symbols, and sometimes previous symbol's end
+                   of interval covers the start of the next symbol. This may
+                   be a bug in Owee, or maybe intentional, but we can work
+                   around it here. *)
                 let open Int64 in
                 if start = program_counter && size = 0L then (
                   if !verbose then
@@ -322,10 +330,10 @@ let resolve_function_containing t ~program_counter =
                   (size > 0L && start = program_counter)
                   || (* size is sometimes 0 even when the function is
                         non-empty *)
-                     (start < program_counter && program_counter < finish)
+                  (start < program_counter && program_counter < finish)
                   (* if size is non-zero, sometimes finish overlaps with the
-                     start of the next function, so we check that the
-                     program counter is strictly smaller. *)
+                     start of the next function, so we check that the program
+                     counter is strictly smaller. *)
                 then (
                   match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
                   | None ->
@@ -354,7 +362,7 @@ let resolve_function_containing t ~program_counter =
 
 let resolve_range t ~start ~finish ~with_inverse =
   (* find function addresses *)
-  assert Int64.(start < finish);
+  assert (Int64.(start < finish));
   if !verbose then
     Printf.printf "Resolving function for cache: (0x%Lx,0x%Lx)%s\n" start
       finish

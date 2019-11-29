@@ -33,8 +33,8 @@ module type Alt = sig
 end
 
 module AltFlag (M : Alt) = struct
-  let of_string s = List.find_exn M.all
-                      ~f:(fun t -> String.equal s (M.to_string t))
+  let of_string s =
+    List.find_exn M.all ~f:(fun t -> String.equal s (M.to_string t))
 
   let alternatives heading =
     let names = List.map M.all ~f:M.to_string in
@@ -140,6 +140,16 @@ let flag_write_linker_script_hot =
     flag "-write-linker-script-hot" no_arg
       ~doc:" write hot functions layout for linker script to a file")
 
+let flag_write_aggregated_perf_profile =
+  Command.Param.(
+    flag "-write-aggregated" no_arg
+      ~doc:" write aggregated counters from perf profile (not decoded)")
+
+let flag_read_aggregated_perf_profile =
+  Command.Param.(
+    flag "-read-aggregated" no_arg
+      ~doc:" read aggregated counters instead of perf profile")
+
 let flag_extra_debug =
   Command.Param.(
     flag "-extra-debug" no_arg
@@ -222,19 +232,27 @@ let decode_command =
       and linker_script_hot_filename =
         Commonflag.(optional flag_linker_script_hot_filename)
       and write_linker_script_hot = flag_write_linker_script_hot
+      and write_aggregated_perf_profile = flag_write_aggregated_perf_profile
+      and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
       and buildid = flag_buildid
       and expected_pids = flag_expected_pids
       and force = flag_force in
       verbose := v;
       if q then quiet ();
-      if !verbose && not write_linker_script_hot then
-        printf
-          "Ignoring -reorder-functions when -write-linker-script-hot is not \
-           provided.\n";
+      if !verbose then (
+        if write_aggregated_perf_profile && read_aggregated_perf_profile then
+          printf
+            "Ignoring -write-agreggated. Incompatible with -read-aggregated.\n";
+        if not write_linker_script_hot then
+          printf
+            "Ignoring -reorder-functions when -write-linker-script-hot is \
+             not provided. Call 'ocamlfdo linker-script' with fdo-profile \
+             to reorder.\n" );
       fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force))
+          ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force)
+          ~write_aggregated_perf_profile ~read_aggregated_perf_profile)
 
 let opt_command =
   Command.basic

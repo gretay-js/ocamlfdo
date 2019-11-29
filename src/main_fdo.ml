@@ -84,11 +84,26 @@ let load_crcs locations tbl =
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script_hot ~buildid ~expected_pids ~check =
+    ~write_linker_script_hot ~buildid ~expected_pids ~check
+    ~write_aggregated_perf_profile ~read_aggregated_perf_profile =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
-    Perf_profile.read_and_aggregate perf_profile_filename binary_filename
-      buildid expected_pids
+    if read_aggregated_perf_profile then
+      (* read pre-aggregated file, useful for debugging of decode *)
+      Aggregated_perf_profile.read perf_profile_filename
+    else
+      (* aggregate from perf.data *)
+      let aggr_perf_profile =
+        Perf_profile.read_and_aggregate perf_profile_filename binary_filename
+          buildid expected_pids
+      in
+      ( if write_aggregated_perf_profile then
+        let filename =
+          Option.value linearid_profile_filename
+            ~default:(binary_filename ^ ".agg")
+        in
+        Aggregated_perf_profile.write aggr_perf_profile filename );
+      aggr_perf_profile
   in
   let locations = load_locations binary_filename in
   let linearid_profile =
