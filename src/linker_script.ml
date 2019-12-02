@@ -37,13 +37,13 @@ let print_hot oc ~functions ~check =
     fprintf oc
       "ASSERT (DEFINED(%s)?(caml_hot__code_begin <= %s) && (%s <= \
        caml_hot__code_end):1, \n\
-       %s);"
+       %s);\n"
       n n n (msg n)
   in
   let ocaml_cond n =
     fprintf oc
       "ASSERT ((caml_hot__code_begin <= %s) && (%s <= caml_hot__code_end), \n\
-       %s);"
+       %s);\n"
       n n (msg n)
   in
   let print_check n = function
@@ -52,7 +52,7 @@ let print_hot oc ~functions ~check =
   in
   let print_section n = function
     | true -> ocaml_section_name n
-    | false -> section_name n
+    | false -> section_name n; ocaml_section_name n
   in
   let print name =
     let is_ocaml = Re2.matches ocaml_pattern name in
