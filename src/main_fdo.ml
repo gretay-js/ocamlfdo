@@ -85,17 +85,20 @@ let load_crcs locations tbl =
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
     ~write_linker_script_hot ~buildid ~expected_pids ~check
-    ~write_aggregated_perf_profile ~read_aggregated_perf_profile =
+    ~write_aggregated_perf_profile ~read_aggregated_perf_profile ~timings =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
     if read_aggregated_perf_profile then
       (* read pre-aggregated file, useful for debugging of decode *)
-      Aggregated_perf_profile.read perf_profile_filename
+      Profile.record ~accumulate:true "read_aggregated"
+        Aggregated_perf_profile.read perf_profile_filename
     else
       (* aggregate from perf.data *)
       let aggr_perf_profile =
-        Perf_profile.read_and_aggregate perf_profile_filename binary_filename
-          buildid expected_pids
+        Profile.record_call ~accumulate:true "agg_perf_data"
+          (fun () -> Perf_profile.read_and_aggregate
+                       perf_profile_filename binary_filename
+                       buildid expected_pids)
       in
       ( if write_aggregated_perf_profile then
         let filename =
@@ -105,9 +108,12 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
         Aggregated_perf_profile.write aggr_perf_profile filename );
       aggr_perf_profile
   in
-  let locations = load_locations binary_filename in
+  let locations =
+    Profile.record ~accumulate:true "load_elf_debug"
+      load_locations binary_filename in
   let linearid_profile =
-    Aggregated_decoded_profile.create locations aggr_perf_profile
+    Profile.record_call ~accumulate:true "decode"
+      (fun () -> Aggregated_decoded_profile.create locations aggr_perf_profile)
   in
   load_crcs locations linearid_profile.crcs;
 
@@ -125,8 +131,11 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       Option.value linker_script_hot_filename
         ~default:(binary_filename ^ ".linker-script-hot")
     in
-    Linker_script.write_hot filename ~linearid_profile ~reorder_functions
-      ~check );
+    Profile.record_call ~accumulate:true "linker_script_hot"
+    (fun () -> Linker_script.write_hot filename ~linearid_profile ~reorder_functions
+                 ~check ));
+  if timings then
+    Profile.print Format.std_formatter Profile.all_columns;
   ()
 
 exception Not_equal_reg_array
@@ -189,25 +198,34 @@ let check_equal f new_body =
    less code to deal with when computing layout will be more efficient. *)
 let transform f ~algo ~extra_debug ~preserve_orig_labels =
   print_linear "Before" f;
-  let cfg = CL.of_linear f ~preserve_orig_labels in
+  let cfg = Profile.record_call ~accumulate:true "linear_to_cfg"
+              (fun () -> CL.of_linear f ~preserve_orig_labels) in
   (* eliminate fallthrough implies dead block elimination *)
-  if not preserve_orig_labels then CL.eliminate_fallthrough_blocks cfg;
-  ( if extra_debug then
-    let file = to_symbol f.fun_name |> Filenames.(make Linear) in
-    CP.add_extra_debug (CL.cfg cfg) ~file );
-  let new_cfg = Reorder.apply ~algo cfg in
-  let new_body = CL.to_linear new_cfg in
+  (if not preserve_orig_labels then
+     (Profile.record ~accumulate:true "eliminate_fallthrough"
+       CL.eliminate_fallthrough_blocks cfg));
+  (if extra_debug then
+      let file = to_symbol f.fun_name |> Filenames.(make Linear) in
+      Profile.record_call ~accumulate:true "extra_debug"
+        (fun () -> CP.add_extra_debug (CL.cfg cfg) ~file ));
+  let new_cfg = Profile.record_call ~accumulate:true "reorder"
+                  (fun () -> Reorder.apply ~algo cfg) in
+  let new_body = Profile.record ~accumulate:true "cfg_to_linear"
+                   CL.to_linear new_cfg in
   let fnew = { f with fun_body = new_body } in
   print_linear "After" fnew;
   fnew
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report =
+    ~func_crc ~report ~timings =
   if report then Report.start ();
   let profile =
     match fdo_profile with
     | None -> None
-    | Some filename -> Some (Aggregated_decoded_profile.read filename)
+    | Some filename ->
+      let agg = Profile.record ~accumulate:true "read_fdo_profile"
+                  Aggregated_decoded_profile.read filename in
+      Some agg
   in
   let algo =
     let open Config_reorder.Reorder_blocks in
@@ -246,8 +264,14 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
       | dl -> ui.items <- ui.items @ [Data dl] );
     save out_filename ui
   in
+  let process file =
+    Profile.record_call ~accumulate:true "process" (fun () -> process file)
+  in
   List.iter files ~f:process;
-  if report then Report.finish ()
+  if report then Report.finish ();
+  if timings then
+    Profile.print Format.std_formatter Profile.all_columns;
+  ()
 
 let check files =
   let open Linear_format in
@@ -274,15 +298,17 @@ let check files =
    compiler internals. There are multiple ways in which they can be set
    (e.g., from cmd line or from env or config), order matters, etc. *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report =
+    ~func_crc ~report ~timings =
   let open Wrapper in
   let w = wrap args in
   if can_split_compile w then (
-    call_ocamlopt w Compile;
+    Profile.record_call ~accumulate:true "compile"
+      (fun () -> call_ocamlopt w Compile);
     let files = artifacts w Filenames.Linear in
     optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-      ~func_crc ~report;
-    call_ocamlopt w Emit )
+      ~func_crc ~report ~timings;
+    Profile.record_call ~accumulate:true "compile"
+      (fun () -> call_ocamlopt w Emit) )
   else (
     if !verbose && (Option.is_some fdo_profile || extra_debug) then
       printf "Calling ocamlopt directly, without FDO.\n";

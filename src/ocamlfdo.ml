@@ -190,6 +190,10 @@ let flag_func_crc =
     flag "-md5-fun" no_arg
       ~doc:" use md5 per function to detect source changes")
 
+let flag_timings =
+  Command.Param.(
+    flag "-dtimings" no_arg ~doc:" print timings information for each pass")
+
 let anon_files =
   Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
 
@@ -236,7 +240,8 @@ let decode_command =
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
       and buildid = flag_buildid
       and expected_pids = flag_expected_pids
-      and force = flag_force in
+      and force = flag_force
+      and timings = flag_timings in
       verbose := v;
       if q then quiet ();
       if !verbose then (
@@ -252,7 +257,8 @@ let decode_command =
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
           ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force)
-          ~write_aggregated_perf_profile ~read_aggregated_perf_profile)
+          ~write_aggregated_perf_profile ~read_aggregated_perf_profile
+          ~timings)
 
 let opt_command =
   Command.basic
@@ -280,7 +286,8 @@ let opt_command =
       and func_crc = flag_func_crc
       and crc = flag_crc
       and no_crc = flag_no_crc
-      and files = anon_files in
+      and files = anon_files
+      and timings = flag_timings in
       verbose := v;
       if q then quiet ();
       let unit_crc = (unit_crc || crc) && not no_crc in
@@ -288,7 +295,7 @@ let opt_command =
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report)
+          ~func_crc ~report ~timings)
 
 let check_command =
   Command.basic
@@ -362,7 +369,7 @@ let compile_command =
         Command.Param.(
           flag "--" escape
             ~doc:"ocamlopt_args standard options passed to ocamlopt")
-      in
+      and timings = flag_timings in
       verbose := v;
       if q then quiet ();
       let unit_crc = (unit_crc || crc) && not no_crc in
@@ -400,7 +407,7 @@ let compile_command =
         | None -> ocamlopt args
         | Some (fdo_profile, extra_debug) ->
             compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-              ~func_crc ~report)
+              ~func_crc ~report ~timings)
 
 let linker_script_command =
   Command.basic

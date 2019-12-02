@@ -55,7 +55,9 @@ let reorder_random cl ~random_state =
 (* Basic block layout using clustering algorihtm. *)
 let reorder_opt cfg_info cl =
   let orig_cfg_layout = CL.layout cl in
-  let new_cfg_layout = Clusters.optimize_layout orig_cfg_layout cfg_info in
+  let new_cfg_layout =
+    Profile.record_call ~accumulate:true "optimize_layout"
+      (fun () -> Clusters.optimize_layout orig_cfg_layout cfg_info) in
   check cl new_cfg_layout;
   CL.set_layout cl new_cfg_layout;
   cl
@@ -70,7 +72,9 @@ let reorder_opt cfg_info cl =
    recomping the counters but that's not long and there would be many files. *)
 let reorder_profile cl linearid_profile =
   let name = C.fun_name (CL.cfg cl) in
-  let cfg_info = Aggregated_decoded_profile.add linearid_profile name cl in
+  let cfg_info =
+    Profile.record_call ~accumulate:true "cfg_info"
+    (fun () -> Aggregated_decoded_profile.add linearid_profile name cl) in
   match cfg_info with
   | None -> cl
   | Some cfg_info -> reorder_opt cfg_info cl
