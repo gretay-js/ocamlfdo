@@ -254,11 +254,13 @@ let decode_command =
              not provided. Call 'ocamlfdo linker-script' with fdo-profile \
              to reorder.\n" );
       fun () ->
+        Profile.record_call "decode"
+          (fun () ->
         decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~linker_script_hot_filename ~linearid_profile_filename
           ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force)
           ~write_aggregated_perf_profile ~read_aggregated_perf_profile
-          ~timings)
+          ~timings))
 
 let opt_command =
   Command.basic
@@ -294,8 +296,10 @@ let opt_command =
       let func_crc = (func_crc || crc) && not no_crc in
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
+        Profile.record_call "opt"
+          (fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report ~timings)
+          ~func_crc ~report ~timings))
 
 let check_command =
   Command.basic
@@ -406,8 +410,10 @@ let compile_command =
         match fdo with
         | None -> ocamlopt args
         | Some (fdo_profile, extra_debug) ->
+          Profile.record_call "compile"
+          (fun () ->
             compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-              ~func_crc ~report ~timings)
+              ~func_crc ~report ~timings))
 
 let linker_script_command =
   Command.basic
@@ -471,9 +477,12 @@ let linker_script_command =
         printf
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
-        Linker_script.write ~output_filename ~linker_script_template
-          ~linker_script_hot ~linearid_profile_filename ~reorder_functions
-          ~check:(not force))
+        Profile.record_call "linker_script"
+          (fun () ->
+             Linker_script.write
+               ~output_filename ~linker_script_template
+               ~linker_script_hot ~linearid_profile_filename ~reorder_functions
+               ~check:(not force)))
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"

@@ -103,7 +103,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       ( if write_aggregated_perf_profile then
         let filename =
           Option.value linearid_profile_filename
-            ~default:(binary_filename ^ ".agg")
+            ~default:(binary_filename ^ ".tmp.agg")
         in
         Aggregated_perf_profile.write aggr_perf_profile filename );
       aggr_perf_profile
