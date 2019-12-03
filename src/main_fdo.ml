@@ -235,8 +235,13 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     | Opt -> (
         match profile with
         | None ->
-            Report.user_error
-              "-reorder-blocks opt is not allowed without -fdo-profile"
+          if !verbose then (
+            (* This is not an error so that options passed to opt
+               by jenga rules with and without the profile
+               can be overwritten from one environment variable. *)
+            Printf.printf
+              "Ignoring -reorder-blocks opt : not allowed without -fdo-profile");
+          Reorder.Identity
         | Some profile -> Reorder.Profile profile )
   in
   let crcs =
