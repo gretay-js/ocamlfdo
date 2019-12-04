@@ -113,9 +113,13 @@ let flag_dot_show_instr =
       ~doc:" emit detailed CFG in .dot format for debug")
 
 let flag_v =
-  Command.Param.(flag "-verbose" ~aliases:["-v"] no_arg ~doc:" verbose")
+  Command.Param.(
+    flag "-verbose" ~aliases:["-v"] no_arg
+      ~doc:" print lots of info for debug")
 
-let flag_q = Command.Param.(flag "-q" no_arg ~doc:" quiet")
+let flag_q =
+  Command.Param.(
+    flag "-quiet" ~aliases:["-q"] no_arg ~doc:" don't print anything")
 
 let flag_expected_pids =
   Command.Param.(
@@ -192,7 +196,7 @@ let flag_func_crc =
 
 let flag_timings =
   Command.Param.(
-    flag "-dtimings" no_arg ~doc:" print timings information for each pass")
+    flag "-timings" no_arg ~doc:" print timings information for each pass")
 
 let anon_files =
   Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
@@ -254,13 +258,14 @@ let decode_command =
              not provided. Call 'ocamlfdo linker-script' with fdo-profile \
              to reorder.\n" );
       fun () ->
-        Profile.record_call "decode"
-          (fun () ->
-        decode ~binary_filename ~perf_profile_filename ~reorder_functions
-          ~linker_script_hot_filename ~linearid_profile_filename
-          ~write_linker_script_hot ~buildid ~expected_pids ~check:(not force)
-          ~write_aggregated_perf_profile ~read_aggregated_perf_profile
-          ~timings))
+        Profile.record_call "decode" (fun () ->
+            decode ~binary_filename ~perf_profile_filename ~reorder_functions
+              ~linker_script_hot_filename ~linearid_profile_filename
+              ~write_linker_script_hot ~buildid ~expected_pids
+              ~check:(not force) ~write_aggregated_perf_profile
+              ~read_aggregated_perf_profile);
+        if timings then
+          Profile.print Format.std_formatter Profile.all_columns)
 
 let opt_command =
   Command.basic
@@ -296,10 +301,11 @@ let opt_command =
       let func_crc = (func_crc || crc) && not no_crc in
       if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
-        Profile.record_call "opt"
-          (fun () ->
-        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report ~timings))
+        Profile.record_call "opt" (fun () ->
+            optimize files ~fdo_profile ~reorder_blocks ~extra_debug
+              ~unit_crc ~func_crc ~report);
+        if timings then
+          Profile.print Format.std_formatter Profile.all_columns)
 
 let check_command =
   Command.basic
@@ -410,10 +416,11 @@ let compile_command =
         match fdo with
         | None -> ocamlopt args
         | Some (fdo_profile, extra_debug) ->
-          Profile.record_call "compile"
-          (fun () ->
-            compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-              ~func_crc ~report ~timings))
+            Profile.record_call "compile" (fun () ->
+                compile args ~fdo_profile ~reorder_blocks ~extra_debug
+                  ~unit_crc ~func_crc ~report;
+                if timings then
+                  Profile.print Format.std_formatter Profile.all_columns))
 
 let linker_script_command =
   Command.basic
@@ -477,12 +484,10 @@ let linker_script_command =
         printf
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
-        Profile.record_call "linker_script"
-          (fun () ->
-             Linker_script.write
-               ~output_filename ~linker_script_template
-               ~linker_script_hot ~linearid_profile_filename ~reorder_functions
-               ~check:(not force)))
+        Profile.record_call "linker_script" (fun () ->
+            Linker_script.write ~output_filename ~linker_script_template
+              ~linker_script_hot ~linearid_profile_filename
+              ~reorder_functions ~check:(not force)))
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
