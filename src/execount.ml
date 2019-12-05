@@ -1,3 +1,1 @@
-open Core
-
-type t = int64 [@@deriving sexp, compare, equal]
+include Core.Int64

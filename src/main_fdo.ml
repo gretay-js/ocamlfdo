@@ -61,30 +61,95 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-let load_crcs locations tbl =
-  let prefix = Crcs.symbol_prefix in
-  let on = Crcs.symbol_sep in
-  Elf_locations.iter_symbols locations ~f:(fun s ->
-      match String.chop_prefix s ~prefix with
-      | None -> ()
-      | Some suffix -> (
-          let name, hex = String.rsplit2_exn suffix ~on in
-          let crc = Md5.of_hex_exn hex in
-          if !verbose then (
-            printf "crc_symbol=%s\n" s;
-            printf "name=%s hex=%s\n" name hex );
-          match Hashtbl.find tbl name with
-          | None -> Hashtbl.set tbl ~key:name ~data:crc
-          | Some old_crc ->
-              (* The symbol can appear multiple times if it enters more than
-                 one symbol tables, e.g., both static and dynamic. *)
-              if not (Md5.equal old_crc crc) then
-                Report.user_error "Duplicate crc for %s\nold:%s\nnew:%s\n"
-                  name (Md5.to_hex old_crc) (Md5.to_hex crc) () ))
+let merge_buildid b1 b2 ~ignore_buildid =
+  match (b1, b2, uildid) with
+  | None, None -> None
+  | Some b, None | None, Some b -> b
+  | Some b1, Some b2 ->
+      if String.equal b1 b2 then Some b1
+      else
+        let msg = sprintf "Mismatched buildids:\n%s\n%s\n" b1 b2 in
+        if ignore_buildid then (
+          if !verbose then Printf.printf msg;
+          None )
+        else Report.user_error msg
+
+let merge_agg files ~unit_crc ~func_crc ~ignore_buildid ~output_filename =
+  let agg =
+    match files with
+    | [] -> Aggregated_perf_profile.empty
+    | [agg] -> agg
+    | init :: rest ->
+        List.fold rest ~init ~f:(fun acc file ->
+            let agg = Aggregated_perf_profile.read file in
+            let buildid =
+              merge_buildid agg.buildid acc.buildid ~ignore_buildid
+            in
+            Aggregated_perf_profile.merge_into ~src:agg ~dst:acc ~buildid)
+  in
+  Aggregated_perf_profile.write agg output_filename
+
+let merge_decoded files ~unit_crc ~func_crc ~ignore_buildid ~output_filename
+    =
+  let profile =
+    match files with
+    | [] -> Aggregated_perf_profile.empty
+    | [profile] -> profile
+    | init :: rest ->
+        List.fold rest ~init ~f:(fun acc file ->
+            let profile = Aggregated_decoded_profile.read file in
+            let buildid =
+              merge_buildid agg.buildid acc.buildid ~ignore_buildid
+            in
+            Aggregated_decoded_profile.merge_into ~src:agg ~dst:acc ~unit_crc
+              ~func_crc ~buildid)
+  in
+  Aggregated_decoded_profile.write profile output_filename
+
+module Merge (Profile : sig
+  type t
+
+  val read : string -> t
+end) =
+struct
+  let merge kind files ~unit_crc ~func_crc ~ignore_buildid ~output_filename =
+    let profile =
+      match files with
+      | [] -> Aggregated_perf_profile.empty
+      | [profile] -> profile
+      | init :: rest ->
+          List.fold rest ~init ~f:(fun acc file ->
+              let profile = Profile.read file in
+              let buildid =
+                merge_buildid agg.buildid acc.buildid ~ignore_buildid
+              in
+              Profile.merge_into ~src:agg ~dst:acc ~unit_crc ~func_crc
+                ~buildid)
+    in
+    Profile.write profile output_filename
+end
+
+module Merge_decoded = Merge (Decoded)
+module Merge_aggregated = Merge (Decoded)
+
+(* CR-someday gyorsh: make the central logic independ of the profile type and
+   unify the two functions. how to make it polymorphic?
+
+   Also, if some of the profiles are very large: order the files according to
+   profile size (function size? addr2loc size? and merge into the largest
+   profiles. *)
+let merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
+    ~ignore_buildid ~output_filename =
+  if read_aggregated_perf_profile then
+    Merge_aggregated.merge files ~unit_crc ~func_crc ~ignore_buildid
+      ~output_filename
+  else
+    Merge_decoded.merge files ~unit_crc ~func_crc ~ignore_buildid
+      ~output_filename
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script_hot ~buildid ~expected_pids ~check
+    ~write_linker_script_hot ~ignore_buildid ~expected_pids ~check
     ~write_aggregated_perf_profile ~read_aggregated_perf_profile =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
@@ -97,7 +162,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       let aggr_perf_profile =
         Profile.record_call ~accumulate:true "agg_perf_data" (fun () ->
             Perf_profile.read_and_aggregate perf_profile_filename
-              binary_filename buildid expected_pids)
+              binary_filename ~ignore_buildid expected_pids)
       in
       ( if write_aggregated_perf_profile then
         let filename =
@@ -115,8 +180,6 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     Profile.record_call ~accumulate:true "decode" (fun () ->
         Aggregated_decoded_profile.create locations aggr_perf_profile)
   in
-  load_crcs locations linearid_profile.crcs;
-
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
   let linearid_profile_filename =
@@ -246,7 +309,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
                  one environment variable. *)
               Printf.printf
                 "Ignoring -reorder-blocks opt : not allowed without \
-                 -fdo-profile";
+                 -fdo-profile \n";
             Reorder.Identity
         | Some profile -> Reorder.Profile profile )
   in
