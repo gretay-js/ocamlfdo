@@ -74,42 +74,11 @@ let merge_buildid b1 b2 ~ignore_buildid =
           None )
         else Report.user_error msg
 
-let merge_agg files ~unit_crc ~func_crc ~ignore_buildid ~output_filename =
-  let agg =
-    match files with
-    | [] -> Aggregated_perf_profile.empty
-    | [agg] -> agg
-    | init :: rest ->
-        List.fold rest ~init ~f:(fun acc file ->
-            let agg = Aggregated_perf_profile.read file in
-            let buildid =
-              merge_buildid agg.buildid acc.buildid ~ignore_buildid
-            in
-            Aggregated_perf_profile.merge_into ~src:agg ~dst:acc ~buildid)
-  in
-  Aggregated_perf_profile.write agg output_filename
-
-let merge_decoded files ~unit_crc ~func_crc ~ignore_buildid ~output_filename
-    =
-  let profile =
-    match files with
-    | [] -> Aggregated_perf_profile.empty
-    | [profile] -> profile
-    | init :: rest ->
-        List.fold rest ~init ~f:(fun acc file ->
-            let profile = Aggregated_decoded_profile.read file in
-            let buildid =
-              merge_buildid agg.buildid acc.buildid ~ignore_buildid
-            in
-            Aggregated_decoded_profile.merge_into ~src:agg ~dst:acc ~unit_crc
-              ~func_crc ~buildid)
-  in
-  Aggregated_decoded_profile.write profile output_filename
-
 module Merge (Profile : sig
   type t
 
   val read : string -> t
+  val empty :
 end) =
 struct
   let merge kind files ~unit_crc ~func_crc ~ignore_buildid ~output_filename =

@@ -201,7 +201,8 @@ let flag_timings =
     flag "-timings" no_arg ~doc:" print timings information for each pass")
 
 let anon_files =
-  Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
+  Command.Param.(
+    anon (non_empty_sequence_as_list ("input" %: Filename.arg_type)))
 
 let flag_reorder_blocks =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
@@ -252,7 +253,6 @@ let merge_command =
       if q then quiet ();
       let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
       let func_crc = set_crc func_crc ~all_crc ~no_crc in
-      if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
         merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
           ~ignore_buildid ~output_filename)
@@ -345,7 +345,6 @@ let opt_command =
       if q then quiet ();
       let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
       let func_crc = set_crc func_crc ~all_crc ~no_crc in
-      if !verbose && List.is_empty files then printf "No input files\n";
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
