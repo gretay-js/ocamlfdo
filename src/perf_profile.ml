@@ -319,10 +319,10 @@ let extract_pids data perf_data =
               | _ ->
                   Report.user_error
                     "Cannot find pid. Unexpect output of perf report:%s\n" s
-              )
+                    () )
         with _ ->
           Report.user_error
-            "Cannot find pid. Unexpect output of perf report:%s\n" s)
+            "Cannot find pid. Unexpect output of perf report:%s\n" s ())
 
 let check_buildid binary perf_data ignore_buildid =
   let binary_buildid =
