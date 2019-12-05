@@ -165,6 +165,7 @@ let buildid = ["buildid-list"; "-f"]
 
 let perf_fold filename args ~init ~f =
   let args = List.concat [["perf"]; args; ["-i"; filename]] in
+  if !verbose then Printf.printf "%s\n" (String.concat args);
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
@@ -306,7 +307,8 @@ let extract_pids data perf_data =
           | None -> acc
           | Some _ -> (
               let pid_comm =
-                String.drop_prefix s (String.rindex_exn s ' ' + 1)
+                String.drop_prefix s (String.index_exn s ' ' + 1)
+                |> String.strip
               in
               if !verbose then
                 Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
