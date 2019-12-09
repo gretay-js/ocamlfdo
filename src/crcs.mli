@@ -1,15 +1,24 @@
-(* Manipulate Md5 hashes for intermediate representation per compilation
-   unit and function *)
+(* Manipulate Md5 hashes for intermediate representation per compilation unit
+   and function *)
 open Core
+module Crc : sig
+  type t
 
-(* map name to the corresponding md5 *)
-type tbl = Md5.t Hashtbl.M(String).t
+  val equals : ?ignore_kind:bool -> t -> t -> bool
+
+  val to_string : t -> string
+end
+
+type tbl = private Crc Hashtbl.M(String).t
+(** map name to the corresponding md5 *)
 
 type kind =
   | Create
   | Compare of tbl
 
 type t
+
+val mk_tbl : unit -> tbl
 
 val mk : kind -> t
 

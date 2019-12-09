@@ -7,24 +7,27 @@ module P = struct
   type t = Addr.t * Addr.t [@@deriving compare, hash, sexp]
 end
 
-type t = {
-  instructions : Execount.t Hashtbl.M(Addr).t;
-  branches : Execount.t Hashtbl.M(P).t;
-  (* number of times the branch was taken. *)
-  mispredicts : Execount.t Hashtbl.M(P).t;
-  (* number of times the branch was mispredicted: branch target mispredicted
-     or branch direction was mispredicted. *)
-  traces : Execount.t Hashtbl.M(P).t;
-      (* execution count: number of times the trace was taken. *)
-}
+type t =
+  { instructions : Execount.t Hashtbl.M(Addr).t;
+    branches : Execount.t Hashtbl.M(P).t;
+        (** number of times the branch was taken. *)
+    mispredicts : Execount.t Hashtbl.M(P).t;
+        (** number of times the branch was mispredicted: branch target
+            mispredicted or branch direction was mispredicted. *)
+    traces : Execount.t Hashtbl.M(P).t;
+        (** execution count: number of times the trace was taken. *)
+    buildid : string option
+        (** identifier of the relevant unit (i.e., binary's buildid or
+            function's crc), if known *)
+  }
 [@@deriving sexp]
 
 let empty () =
-  {
-    instructions = Hashtbl.create (module Addr);
+  { instructions = Hashtbl.create (module Addr);
     branches = Hashtbl.create (module P);
     mispredicts = Hashtbl.create (module P);
     traces = Hashtbl.create (module P);
+    buildid = None
   }
 
 let read filename =
@@ -45,3 +48,22 @@ let write t filename =
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
+
+let merge_into ~src ~dst ~buildid =
+  let merge_execounts ~key a = function
+    | None -> Set_to a
+    | Some b -> Set_to (Execount.add a b)
+  in
+  { instructions =
+      Hashtbl.merge_into ~src:src.instructions ~dst:dst.instructions
+        ~f:merge_execounts;
+    branches =
+      Hashtbl.merge_into ~src:src.branches ~dst:dst.branches
+        ~f:merge_execounts;
+    mispredicts =
+      Hashtbl.merge_into ~src:src.mispredicts ~dst:dst.mispredicts
+        ~f:merge_execounts;
+    traces =
+      Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts;
+    buildid
+  }

@@ -20,6 +20,8 @@ let quiet () =
   Linker_script.verbose := false;
   ()
 
+let set_crc kind ~all_crc ~no_crc = (kind || all_crc) && not no_crc
+
 (* Utility for handling variant type command line options. *)
 (* Print all variants in option's help string. *)
 module type Alt = sig
@@ -131,7 +133,7 @@ let flag_expected_pids =
         "pids include samples only from these pids, specified as a \
          comma-separated list of integers")
 
-let flag_buildid =
+let flag_ignore_buildid =
   Command.Param.(
     flag "-ignore-buildid" no_arg
       ~doc:" ignore mismatch in buildid between binary and perf.data")
@@ -147,12 +149,12 @@ let flag_write_linker_script_hot =
 let flag_write_aggregated_perf_profile =
   Command.Param.(
     flag "-write-aggregated" no_arg
-      ~doc:" write aggregated counters from perf profile (not decoded)")
+      ~doc:" write counters aggregated from perf profile (not decoded)")
 
 let flag_read_aggregated_perf_profile =
   Command.Param.(
     flag "-read-aggregated" no_arg
-      ~doc:" read aggregated counters instead of perf profile")
+      ~doc:" read aggregated counters (not decoded)")
 
 let flag_extra_debug =
   Command.Param.(
@@ -177,7 +179,7 @@ let flag_no_crc =
         " turn off -md5-unit and -md5-fun, regardless of the order they\n\
         \ are specified in.")
 
-let flag_crc =
+let flag_all_crc =
   Command.Param.(
     flag "-md5" no_arg
       ~doc:
@@ -199,7 +201,8 @@ let flag_timings =
     flag "-timings" no_arg ~doc:" print timings information for each pass")
 
 let anon_files =
-  Command.Param.(anon (sequence ("input" %: Filename.arg_type)))
+  Command.Param.(
+    anon (non_empty_sequence_as_list ("input" %: Filename.arg_type)))
 
 let flag_reorder_blocks =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
@@ -210,6 +213,49 @@ let flag_reorder_functions =
   let module RF = AltFlag (Config_reorder.Reorder_functions) in
   RF.mk "-reorder-functions"
     ~doc:"heuristics used for function layout generated in linker script"
+
+let merge_command =
+  Command.basic ~summary:"Merge profiles "
+    ~readme:(fun () ->
+      {| Merge decoded profiles produced by executing the same binary,
+         possibly with different inputs.
+
+         Merge aggregated (not decoded) profiles produced from the same
+         executable (using buildid to identify the match).
+
+         All input files must be of the same kind, i.e., all decoded
+         or all aggregated.
+
+         Uses buildid and MD5 digest of compilation units or functions
+         to assert that profile match (i.e., come from the same executable).
+
+         If one of the profiles is missing extra debug info on some of the
+         functions, then the debug info can be copied from another profile.
+
+         Experimental: merge decoded profiles that come from different
+         versions of the executable, if the compilation unit
+         or function haven't changed. For changed ones, keep both versions,
+         such that the correct version will be chosen used based on the digests.
+         This can be disabled and profiles merged based on unit or function names.
+      |})
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and unit_crc = flag_unit_crc
+      and func_crc = flag_func_crc
+      and all_crc = flag_all_crc
+      and no_crc = flag_no_crc
+      and ignore_buildid = flag_ignore_buildid
+      and files = anon_files
+      and output_filename = Commonflag.(required flag_output_filename)
+      and read_aggregated_perf_profile = flag_read_aggregated_perf_profile in
+      verbose := v;
+      if q then quiet ();
+      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
+      let func_crc = set_crc func_crc ~all_crc ~no_crc in
+      fun () ->
+        merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
+          ~ignore_buildid ~output_filename)
 
 let decode_command =
   Command.basic
@@ -242,7 +288,7 @@ let decode_command =
       and write_linker_script_hot = flag_write_linker_script_hot
       and write_aggregated_perf_profile = flag_write_aggregated_perf_profile
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
-      and buildid = flag_buildid
+      and ignore_buildid = flag_ignore_buildid
       and expected_pids = flag_expected_pids
       and force = flag_force
       and timings = flag_timings in
@@ -261,7 +307,7 @@ let decode_command =
         Profile.record_call "decode" (fun () ->
             decode ~binary_filename ~perf_profile_filename ~reorder_functions
               ~linker_script_hot_filename ~linearid_profile_filename
-              ~write_linker_script_hot ~buildid ~expected_pids
+              ~write_linker_script_hot ~ignore_buildid ~expected_pids
               ~check:(not force) ~write_aggregated_perf_profile
               ~read_aggregated_perf_profile);
         if timings then
@@ -291,15 +337,14 @@ let opt_command =
       and report = flag_report
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
-      and crc = flag_crc
+      and all_crc = flag_all_crc
       and no_crc = flag_no_crc
       and files = anon_files
       and timings = flag_timings in
       verbose := v;
       if q then quiet ();
-      let unit_crc = (unit_crc || crc) && not no_crc in
-      let func_crc = (func_crc || crc) && not no_crc in
-      if !verbose && List.is_empty files then printf "No input files\n";
+      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
+      let func_crc = set_crc func_crc ~all_crc ~no_crc in
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
@@ -373,7 +418,7 @@ let compile_command =
       and report = flag_report
       and unit_crc = flag_unit_crc
       and func_crc = flag_func_crc
-      and crc = flag_crc
+      and all_crc = flag_all_crc
       and no_crc = flag_no_crc
       and args =
         Command.Param.(
@@ -382,8 +427,8 @@ let compile_command =
       and timings = flag_timings in
       verbose := v;
       if q then quiet ();
-      let unit_crc = (unit_crc || crc) && not no_crc in
-      let func_crc = (func_crc || crc) && not no_crc in
+      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
+      let func_crc = set_crc func_crc ~all_crc ~no_crc in
       let fdo =
         if auto then
           match fdo_profile with
@@ -492,8 +537,7 @@ let linker_script_command =
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
     ~readme:(fun () ->
-      "\n\
-       decode: parses perf.data to generate a profile using debug info in \
+      "decode: parses perf.data to generate a profile using debug info in \
        the executable. \n\
        opt: transforms intermediate IR using a profile\n\n\
        Important: ocamlfdo relies on compiler-libs and thus the same build \
@@ -503,6 +547,7 @@ let main_command =
       ("opt", opt_command);
       ("linker-script", linker_script_command);
       ("compile", compile_command);
-      ("check", check_command) ]
+      ("check", check_command);
+      ("merge", merge_command) ]
 
 let () = Command.run main_command

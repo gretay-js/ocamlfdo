@@ -371,7 +371,7 @@ let check_buildid binary perf_data ignore_buildid =
     printf "Found %d comms for buildid %s in %s.\n" (List.length data)
       binary_buildid perf_data;
     List.iter data ~f:(printf "%s\n") );
-  extract_pids data perf_data
+  (binary_buildid, extract_pids data perf_data)
 
 let pids_to_keep ~found_pids ~expected_pids =
   match expected_pids with
@@ -397,7 +397,7 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
   (* check that buildid of the binary matches buildid of some dso sampled in
      the profile, and return the pids with which that dso appears in the
      profile. *)
-  let found_pids =
+  let buildid, found_pids =
     if (not ignore_buildid) || !verbose then
       check_buildid binary filename ignore_buildid
     else Int.Set.empty
@@ -406,6 +406,7 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
     check_keep_pid ~ignore_buildid (pids_to_keep ~found_pids ~expected_pids)
   in
   let aggregated = Aggregated_perf_profile.empty () in
+  if not ignore_buildid then aggregated.buildid <- buildid;
   let empty_stats = { ignored = 0; total = 0; lbr = 0 } in
   let f stats row =
     match row_to_sample ~keep_pid row with
