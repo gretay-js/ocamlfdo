@@ -4,7 +4,7 @@ maintainer: "Greta Yorsh <gyorsh@janestreet.com>"
 authors: "Greta Yorsh <gyorsh@janestreet.com>"
 homepage: "https://github.com/gretay-js/ocamlfdo"
 bug-reports: "https://github.com/gretay-js/ocamlfdo/issues"
-license: "GNU Lesser General Public License version 2.1"
+license: "MIT License"
 dev-repo: "git+https://gretay-js/ocamlfdo.git"
 build: [
   ["dune" "subst"] {pinned}
