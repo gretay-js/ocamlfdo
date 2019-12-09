@@ -162,26 +162,21 @@ let decode_addr t addr interval dbg =
   Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
 let load_crcs locations =
-  let tbl = Crcs.mk_tbl () in
-  let prefix = Crcs.symbol_prefix in
-  let on = Crcs.symbol_sep in
+  let crcs = Crcs.(mk Create) in
   Elf_locations.iter_symbols locations ~f:(fun s ->
-      match String.chop_prefix s ~prefix with
+    decode_symbol crcs s)
+    fun s ->
+      match Crcs.parse_symbol s with
       | None -> ()
-      | Some suffix -> (
-          let name, hex = String.rsplit2_exn suffix ~on in
-          let crc = Md5.of_hex_exn hex in
-          if !verbose then (
-            printf "crc_symbol=%s\n" s;
-            printf "name=%s hex=%s\n" name hex );
+      | Some (name, crc) -> (
           match Hashtbl.find tbl name with
           | None -> Hashtbl.set tbl ~key:name ~data:crc
           | Some old_crc ->
               (* The symbol can appear multiple times if it enters more than
                  one symbol tables, e.g., both static and dynamic. *)
-              if not (Md5.equal old_crc crc) then
+              if Crcs.Crc.equal old_crc crc then
                 Report.user_error "Duplicate crc for %s\nold:%s\nnew:%s\n"
-                  name (Md5.to_hex old_crc) (Md5.to_hex crc) () ));
+                  name (Crcs.to_string old_crc) (Crcs.to_string crc) () ));
   tbl
 
 let create locations (agg : Aggregated_perf_profile.t) =
@@ -311,66 +306,105 @@ let add t name cl =
         Some cfg_info )
       else None
 
-let merge_crcs ~unit_crc ~func_crc ~key a b  =
-  let check_crcs a b error =
+let merge_crcs ~unit_crc ~func_crc ~key a b =
+  let check_crcs a b =
     if Crcs.Crc.equals a b then Set_to b
-      else
-        let msg =
-          sprintf
-            "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-             %s\n\
-             %s\n"
-            key (Crcs.Crc.to_string a) (Crcs.Crc.to_string b)
-        in
-        if error then Report.user_error msg
-        else
-          (if !verbose then Printf.printf msg;
-           Remove)
+    else
+      let msg () =
+        sprintf
+          "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
+           %s\n\
+           %s\n"
+          key (Crcs.Crc.to_string a) (Crcs.Crc.to_string b)
+      in
+      if unit_crc || func_crc then Report.user_error (msg ())
+      else (
+        if !verbose then Printf.printf (msg ());
+        Remove )
   in
   match b with
   | None -> Set_to a
-  | Some b ->
-    if Crcs.Crc.equals a b then
-    | (Func a), (Func b) -> check_crcs a b func_crc "function"
-    | (Unit a) (Unit b) -> check_crcs a b unit_crc "compilation unit"
-    | _ ->
-      if !verbose then (
-        Printf.printf
-        "Merge aggregated decoded profiles: mismatched crcs for %s" key
-      )
-      check_crcs a b (unit_crc || func_crc) "compilation unit"
+  | Some b -> check_crcs a b "compilation unit"
 
- (* CR-soon gyorsh: use information from t.crcs when merging functions.
+(* let check_for_merge t file ~ignore_error =
+ *   let check agg file ~ignore_error =
+ *     if not (Hashtbl.is_empty t.execounts) then(
+ *       let msg () =
+ *         sprintf
+ *           "Merge of execounts is not implemented.\n\
+ *            Non-empty execount field of profile %s." file
+ *       in
+ *       if ignore_error then (if !verbose then Printf.printf msg ())
+ *       else Report.user_error (msg ())) *)
 
-     If crc checks are disabled (-no-md5 command line option),
-     then a mismatch in crcs is reported in verbose
-     and then we can do one of the following alternatives:
+let rename t old2new =
+  if not (Hashtbl.is_empty t.execounts) then
+    Report.user_error "Rename of execounts is not implemented";
+  { t with
+    addr2loc =
+      Hashtbl.map_inplace addr2loc ~f:(fun loc ->
+          let newid = Hashtbl.find_exn old2new id in
+          Loc.rename loc newid);
+    name2id =
+      Hashtbl.mapi_inplace name2id ~f:(fun ~key:name ~data:id ->
+          Hashtbl.find_exn old2new id);
+    functions =
+      Hashtbl.map_inplace functions ~f:(fun func ->
+          let newid = Hashtbl.find_exn old2new id in
+          Func.rename func newid)
+  }
 
-     1) ignore the mismatch: functions are considered identical for the purpose of merging
-     their execution counts.
-     2) keep both copies of the function, and use the one that applies
-     when compiling with fdo.
-     3) remove both functions from the profile when there is a mismatch because
-     we do not know which is the current/more recent.
-     4) keep only the most recent, as specified by the user (need extra argument).
+let compare_size_for_merge t1 t2 =
+  let a1 = Hashtbl.length t1.addr2loc in
+  let a2 = Hashtbl.length t2.addr2loc in
+  let b1 = Hashtbl.length t1.name2id in
+  let b2 = Hashtbl.length t2.name2id in
+  a1 - a2 + (b1 - b2)
 
-     Current implementation is effectively (1), because CRC are not used when merging the
-     functions. CR-soon gyorsh: enable the above alternatives through a command line
-     option, for experiments.  *)
-let merge t1 t2 ~unit_crc ~func_crc ~buildid =
-  (* *)
-  let  = Hashtbl.length dst.name2id
-  let map = Hashtbl.create(module Int) in
+(* CR-soon gyorsh: use information from t.crcs when merging functions.
+   WARNING: modifies the input profiles inplace, to avoid allocations.
+
+   If crc checks are disabled (-no-md5 command line option), then a mismatch
+   in crcs is reported in verbose and then we can do one of the following
+   alternatives:
+
+   1) ignore the mismatch: functions are considered identical for the purpose
+   of merging their execution counts. 2) keep both copies of the function,
+   and use the one that applies when compiling with fdo. 3) remove both
+   functions from the profile when there is a mismatch because we do not know
+   which is the current/more recent. 4) keep only the most recent, as
+   specified by the user (need extra argument).
+
+   Current implementation is effectively (1), because CRC are not used when
+   merging the functions. CR-soon gyorsh: enable the above alternatives
+   through a command line option, for experiments. *)
+let merge_into ~src ~dst ~unit_crc ~func_crc ~buildid =
+  (* refresh ids of function in src, so as not to clash with dst: if func is
+     in both src and dst, use the id from dst, otherwise rename src id to a
+     fresh id. *)
+  let fresh = ref (Hashtbl.length dst.name2id) in
+  let refresh id =
+    let newid = !fresh in
+    inc fresh;
+    newid
+  in
+  let old2new = Hashtbl.create (module Int) in
+  let merge_name2id ~key a b =
+    let newid =
+      match b with
+      | None -> refresh a
+      | Some b -> b
+    in
+    Hashtbl.add_exn old2new ~key:a ~data:newid;
+    Set_to newid
+  in
+  let name2id =
+    Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id
+  in
+  let src = rename src old2new in
   let merge_addr2loc ~key a = function
     | None -> Set_to a
     | Some b -> Set_to (Loc.merge a b)
-  in
-  let merge_name2id ~key a =
-    function
-    | None -> Set_to a;
-    | Some b ->
-      if (a = b) then Set_to a
-      else
   in
   let merge_functions ~key a = function
     | None -> Set_to a
@@ -380,27 +414,18 @@ let merge t1 t2 ~unit_crc ~func_crc ~buildid =
     | None -> Set_to a
     | Some b -> Set_to (Execount.add a b)
   in
-  let name2id = Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id
-                  ~f:merge_name2id in
-  let rename t name2id =
-    ...
-  in
-  let src = rename src name2id map
-              { src with name2id = Hashtbl.
-              }
-  {
+  { buildid;
+    name2id;
     addr2loc =
       Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
         ~f:merge_addr2loc;
-    name2id = Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id
-                  ~f:merge_name2id
     functions =
-    Hashtbl.merge_into ~src:src.functions
-      ~dst:dst.functions ~f:merge_functions;
+      Hashtbl.merge_into ~src:src.functions ~dst:dst.functions
+        ~f:merge_functions;
     execounts =
       Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts
         ~f:merge_execounts;
-    crcs = Hashtbl.merge_into ~src:src.crcs ~dst:dst.crcs
-             ~f:(merge_crcs ~unit_crc ~func_crc);
-    buildid;
+    crcs =
+      Hashtbl.merge_into ~src:src.crcs ~dst:dst.crcs
+        ~f:(merge_crcs ~unit_crc ~func_crc)
   }

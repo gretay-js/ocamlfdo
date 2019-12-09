@@ -16,7 +16,7 @@ type t =
             mispredicted or branch direction was mispredicted. *)
     traces : Execount.t Hashtbl.M(P).t;
         (** execution count: number of times the trace was taken. *)
-    buildid : string option
+    mutable buildid : string option
         (** identifier of the relevant unit (i.e., binary's buildid or
             function's crc), if known *)
   }
@@ -49,21 +49,19 @@ let write t filename =
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
 
+let approx_size_for_merge t =
+  Hashtbl.length t.instructions
+  + Hashtbl.length t.branches + Hashtbl.length t.traces
+
 let merge_into ~src ~dst ~buildid =
-  let merge_execounts ~key a = function
-    | None -> Set_to a
-    | Some b -> Set_to (Execount.add a b)
+  let merge_execounts ~key:_ a = function
+    | None -> Hashtbl.Set_to a
+    | Some b -> Hashtbl.Set_to Execount.(a + b)
   in
-  { instructions =
-      Hashtbl.merge_into ~src:src.instructions ~dst:dst.instructions
-        ~f:merge_execounts;
-    branches =
-      Hashtbl.merge_into ~src:src.branches ~dst:dst.branches
-        ~f:merge_execounts;
-    mispredicts =
-      Hashtbl.merge_into ~src:src.mispredicts ~dst:dst.mispredicts
-        ~f:merge_execounts;
-    traces =
-      Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts;
-    buildid
-  }
+  Hashtbl.merge_into ~src:src.instructions ~dst:dst.instructions
+    ~f:merge_execounts;
+  Hashtbl.merge_into ~src:src.branches ~dst:dst.branches ~f:merge_execounts;
+  Hashtbl.merge_into ~src:src.mispredicts ~dst:dst.mispredicts
+    ~f:merge_execounts;
+  Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts;
+  { dst with buildid }

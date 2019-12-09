@@ -61,61 +61,6 @@ let load_locations binary_filename =
   if !verbose then Elf_locations.print_dwarf elf_locations;
   elf_locations
 
-let merge_buildid b1 b2 ~ignore_buildid =
-  match (b1, b2, uildid) with
-  | None, None -> None
-  | Some b, None | None, Some b -> b
-  | Some b1, Some b2 ->
-      if String.equal b1 b2 then Some b1
-      else
-        let msg = sprintf "Mismatched buildids:\n%s\n%s\n" b1 b2 in
-        if ignore_buildid then (
-          if !verbose then Printf.printf msg;
-          None )
-        else Report.user_error msg
-
-module Merge (Profile : sig
-  type t
-
-  val read : string -> t
-  val empty :
-end) =
-struct
-  let merge kind files ~unit_crc ~func_crc ~ignore_buildid ~output_filename =
-    let profile =
-      match files with
-      | [] -> Aggregated_perf_profile.empty
-      | [profile] -> profile
-      | init :: rest ->
-          List.fold rest ~init ~f:(fun acc file ->
-              let profile = Profile.read file in
-              let buildid =
-                merge_buildid agg.buildid acc.buildid ~ignore_buildid
-              in
-              Profile.merge_into ~src:agg ~dst:acc ~unit_crc ~func_crc
-                ~buildid)
-    in
-    Profile.write profile output_filename
-end
-
-module Merge_decoded = Merge (Decoded)
-module Merge_aggregated = Merge (Decoded)
-
-(* CR-someday gyorsh: make the central logic independ of the profile type and
-   unify the two functions. how to make it polymorphic?
-
-   Also, if some of the profiles are very large: order the files according to
-   profile size (function size? addr2loc size? and merge into the largest
-   profiles. *)
-let merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
-    ~ignore_buildid ~output_filename =
-  if read_aggregated_perf_profile then
-    Merge_aggregated.merge files ~unit_crc ~func_crc ~ignore_buildid
-      ~output_filename
-  else
-    Merge_decoded.merge files ~unit_crc ~func_crc ~ignore_buildid
-      ~output_filename
-
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~linearid_profile_filename
     ~write_linker_script_hot ~ignore_buildid ~expected_pids ~check

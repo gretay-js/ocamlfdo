@@ -2,44 +2,61 @@ open Core
 
 let verbose = ref true
 
-module Crc = struct
+module Kind = struct
   type t =
-    | Func of Md5.t
-    | Unit of Md5.t
+    | Func
+    | Unit
+  [@@deriving sexp]
 
-  let equals ?(ignore_kind = false) t1 t2 =
-    match (t1, t2) with
-    | Func c1, Func c2 | Unit c1, Unit c2 -> Md5.equal c1 c2
-    | Func c1, Unit c2 | Unit c1, Func c2 ->
-        if ignore_type then Md5.equal c1 c2 else false
+  let all = [Func; Unit]
 
-  let to_string t =
-    let kind =
-      match t with
-      | Unit c -> "compilation unit"
-      | Func c -> "function"
-    in
-    sprintf "%s (%s)" kind (Md5.to_hex c)
+  let to_string = function
+    | Unit _ -> "unit"
+    | Fun _ -> "func"
+
+  let of_string_exn = function
+    | "unit" -> Unit
+    | "func" -> Func
+    | _ ->
+        Report.user_error "Unknown kind: %s. Must be one of: %s\n" kind
+          (String.concat ~sep:" " (List.map ~f:to_string all))
 end
 
-type tbl = Crc.t Hashtbl.M(String).t
+module Crc = struct
+  type t =
+    { kind : Kind.t;
+      crc : Md5.t
+    }
+  [@@deriving sexp]
 
-type kind =
+  let equal ?(ignore_kind = false) t1 t2 =
+    if t1.kind = t2.kind || ignore_kind then Md5.equal c1 c2 else false
+
+  let of_string kind crc =
+    let crc = Md5.of_hex_exn hex in
+    { kind = Kind.of_string kind; crc }
+
+  let to_string t =
+    sprintf "%s (%s)" (Md5.to_hex t.crc) (Kind.to_string t.kind)
+end
+
+type tbl = Crc.t Hashtbl.M(String).t [@@deriving sexp]
+(** map name to the corresponding Crc *)
+
+type action =
   | Create
   | Compare of tbl
 
 type t =
   { acc : tbl;
-    kind : kind
+    action : action
   }
 
-let mk_tbl () = Hashtbl.create (module String)
-
-let mk kind = { kind; acc = Hashtbl.create (module String) }
+let mk action = { action; acc = Hashtbl.create (module String) }
 
 let check_and_add t ~name crc ~file =
   (* Check *)
-  ( match t.kind with
+  ( match t.action with
   | Create -> ()
   | Compare tbl ->
       Hashtbl.find_and_call tbl name
@@ -91,8 +108,10 @@ let symbol_prefix = "caml___cRc___"
 
 let symbol_sep = '_'
 
-let mk_symbol name crc =
-  sprintf "%s%s%c%s" symbol_prefix name symbol_sep (Md5.to_hex crc)
+let mk_symbol name (crc : Crc.t) =
+  String.concat
+    ~sep:(String.of_char symbol_sep)
+    [Kind.to_string kind; name; Md5.to_hex crc]
 
 (* Creates the symbols and clears the accumulator *)
 let emit_symbols t =
@@ -100,13 +119,31 @@ let emit_symbols t =
   else
     let open Cmm in
     let items =
-      Hashtbl.fold t.acc ~init:[] ~f:(fun ~key:name ~data items ->
-          let crc =
-            match data with
-            | Unit crc | Func crc -> crc
-          in
+      Hashtbl.fold t.acc ~init:[] ~f:(fun ~key:name ~data:crc items ->
           let symbol = mk_symbol name crc in
           Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
     in
     Hashtbl.clear t.acc;
     items
+
+let decode_symbol s =
+  match String.chop_prefix s ~prefix:symbol_prefix with
+  | None -> ()
+  | Some suffix -> (
+      let kind, rest = String.lsplit2_exn suffix ~on:symbol_sep in
+      let name, hex = String.rsplit2_exn rest ~on:symbol_sep in
+      let crc = Crc.of_string kind hex in
+      if !verbose then (
+        printf "crc_symbol=%s\n" s;
+        printf "name=%s, crc=%s\n" name (Crc.to_string crc) );
+      check_and_add t ~name crc ~file:"specified by -binary option"
+      (* check if the symbol has already been recorded *)
+      match Hashtbl.find tbl name with
+      | None -> Hashtbl.set t.acc ~key:name ~data:crc
+      | Some old_crc ->
+          (* The symbol can appear multiple times if it enters more than one
+             symbol tables, e.g., both static and dynamic. This shouldn't
+             happen any more*)
+          if Crcs.Crc.equal old_crc crc then
+            Report.user_error "Duplicate crc for %s\nold:%s\nnew:%s\n" name
+              (Crcs.to_string old_crc) (Crcs.to_string crc) () )
