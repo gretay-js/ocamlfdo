@@ -5,7 +5,7 @@ open Func
 module Cfg_with_layout = Ocamlcfg.Cfg_with_layout
 module Cfg = Ocamlcfg.Cfg
 
-let verbose = ref true
+let verbose = ref false
 
 type t =
   { (* map raw addresses to locations *)

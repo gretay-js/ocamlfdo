@@ -2,7 +2,7 @@
 
 open Core
 
-let verbose = ref true
+let verbose = ref false
 
 type mispredict_flag =
   | M
