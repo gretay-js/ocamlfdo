@@ -18,7 +18,7 @@ type t =
         (** execution count: number of times the trace was taken. *)
     mutable buildid : string option
         (** identifier of the relevant unit (i.e., binary's buildid or
-            function's crc), if known *)
+            function's crc in the future), if known. *)
   }
 [@@deriving sexp]
 
@@ -49,11 +49,8 @@ let write t filename =
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
 
-let approx_size_for_merge t =
-  Hashtbl.length t.instructions
-  + Hashtbl.length t.branches + Hashtbl.length t.traces
-
-let merge_into ~src ~dst ~buildid =
+let merge_into ~src ~dst ~ignore_buildid =
+  let buildid = Merge.buildid t1.buildid t2.buildid ~ignore_buildid in
   let merge_execounts ~key:_ a = function
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to Execount.(a + b)
@@ -65,3 +62,21 @@ let merge_into ~src ~dst ~buildid =
     ~f:merge_execounts;
   Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts;
   { dst with buildid }
+
+module M = Merge (struct
+  type t = t
+
+  let emty = empty
+
+  let read = read
+
+  let write = write
+
+  let approx_size t =
+    Hashtbl.length t.instructions
+    + Hashtbl.length t.branches + Hashtbl.length t.traces
+
+  let merge_into ~unit_crc:_ ~func_crc:_ = merge_into
+end)
+
+let merge = M.merge

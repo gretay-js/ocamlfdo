@@ -27,8 +27,7 @@ let get_id name =
 let get_filename ~name ~title ~sub =
   let filename = sprintf "%s-%s.%s" name title sub in
   if String.length name < 255 then filename
-  else
-    sprintf "%s-%d-%s.%s" (String.prefix name 200) (get_id name) title sub
+  else sprintf "%s-%d-%s.%s" (String.prefix name 200) (get_id name) title sub
 
 let with_outchannel ~name ~title ~sub printer x =
   let filename = get_filename ~name ~title ~sub in

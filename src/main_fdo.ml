@@ -259,6 +259,15 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   if report then Report.finish ();
   ()
 
+let merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
+    ~ignore_buildid ~output_filename =
+  if read_aggregated_perf_profile then
+    Aggregated_perf_profile.M.merge_files files ~ignore_buildid
+      ~output_filename
+  else
+    Aggregated_decoded_profile.M.merge_files files ~unit_crc ~func_crc
+      ~ignore_buildid ~output_filename
+
 let check files =
   let open Linear_format in
   let check_fun = function

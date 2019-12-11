@@ -161,24 +161,6 @@ let decode_addr t addr interval dbg =
   in
   Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
-let load_crcs locations =
-  let crcs = Crcs.(mk Create) in
-  Elf_locations.iter_symbols locations ~f:(fun s ->
-    decode_symbol crcs s)
-    fun s ->
-      match Crcs.parse_symbol s with
-      | None -> ()
-      | Some (name, crc) -> (
-          match Hashtbl.find tbl name with
-          | None -> Hashtbl.set tbl ~key:name ~data:crc
-          | Some old_crc ->
-              (* The symbol can appear multiple times if it enters more than
-                 one symbol tables, e.g., both static and dynamic. *)
-              if Crcs.Crc.equal old_crc crc then
-                Report.user_error "Duplicate crc for %s\nold:%s\nnew:%s\n"
-                  name (Crcs.to_string old_crc) (Crcs.to_string crc) () ));
-  tbl
-
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
   (* Collect all addresses that need decoding. Mispredicts and traces use the
@@ -207,9 +189,9 @@ let create locations (agg : Aggregated_perf_profile.t) =
   assert (len <= size);
   (* Resolve all addresses seen in samples in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses;
-
-  let crcs = load_crcs locations in
-  let t = mk len crcs in
+  let crcs = Crcs.(mk Create) in
+  Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add_symbol crcs);
+  let t = mk len (Crcs.tbl crcs) in
   (* Decode all locations: map addresses to locations. *)
   Hashtbl.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
       (* this is cached using interval tree *)
@@ -306,60 +288,14 @@ let add t name cl =
         Some cfg_info )
       else None
 
-let merge_crcs ~unit_crc ~func_crc ~key a b =
-  let check_crcs a b =
-    if Crcs.Crc.equals a b then Set_to b
-    else
-      let msg () =
-        sprintf
-          "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-           %s\n\
-           %s\n"
-          key (Crcs.Crc.to_string a) (Crcs.Crc.to_string b)
-      in
-      if unit_crc || func_crc then Report.user_error (msg ())
-      else (
-        if !verbose then Printf.printf (msg ());
-        Remove )
-  in
-  match b with
-  | None -> Set_to a
-  | Some b -> check_crcs a b "compilation unit"
-
-(* let check_for_merge t file ~ignore_error =
- *   let check agg file ~ignore_error =
- *     if not (Hashtbl.is_empty t.execounts) then(
- *       let msg () =
- *         sprintf
- *           "Merge of execounts is not implemented.\n\
- *            Non-empty execount field of profile %s." file
- *       in
- *       if ignore_error then (if !verbose then Printf.printf msg ())
- *       else Report.user_error (msg ())) *)
-
 let rename t old2new =
   if not (Hashtbl.is_empty t.execounts) then
     Report.user_error "Rename of execounts is not implemented";
-  { t with
-    addr2loc =
-      Hashtbl.map_inplace addr2loc ~f:(fun loc ->
-          let newid = Hashtbl.find_exn old2new id in
-          Loc.rename loc newid);
-    name2id =
-      Hashtbl.mapi_inplace name2id ~f:(fun ~key:name ~data:id ->
-          Hashtbl.find_exn old2new id);
-    functions =
-      Hashtbl.map_inplace functions ~f:(fun func ->
-          let newid = Hashtbl.find_exn old2new id in
-          Func.rename func newid)
-  }
-
-let compare_size_for_merge t1 t2 =
-  let a1 = Hashtbl.length t1.addr2loc in
-  let a2 = Hashtbl.length t2.addr2loc in
-  let b1 = Hashtbl.length t1.name2id in
-  let b2 = Hashtbl.length t2.name2id in
-  a1 - a2 + (b1 - b2)
+  Hashtbl.mapi_inplace t.name2id ~f:(fun ~key:name ~data:id ->
+      Hashtbl.find_exn old2new id);
+  Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
+  Hashtbl.map_inplace t.functions ~f:(Func.rename ~old2new);
+  t
 
 (* CR-soon gyorsh: use information from t.crcs when merging functions.
    WARNING: modifies the input profiles inplace, to avoid allocations.
@@ -378,14 +314,15 @@ let compare_size_for_merge t1 t2 =
    Current implementation is effectively (1), because CRC are not used when
    merging the functions. CR-soon gyorsh: enable the above alternatives
    through a command line option, for experiments. *)
-let merge_into ~src ~dst ~unit_crc ~func_crc ~buildid =
+let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
+  let buildid = Merge.buildid t1.buildid t2.buildid ~ignore_buildid in
   (* refresh ids of function in src, so as not to clash with dst: if func is
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
   let fresh = ref (Hashtbl.length dst.name2id) in
   let refresh id =
     let newid = !fresh in
-    inc fresh;
+    fresh := !fresh + 1;
     newid
   in
   let old2new = Hashtbl.create (module Int) in
@@ -396,23 +333,23 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~buildid =
       | Some b -> b
     in
     Hashtbl.add_exn old2new ~key:a ~data:newid;
-    Set_to newid
+    Hashtbl.Set_to newid
   in
   let name2id =
     Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id
   in
   let src = rename src old2new in
   let merge_addr2loc ~key a = function
-    | None -> Set_to a
-    | Some b -> Set_to (Loc.merge a b)
+    | None -> Hashtbl.Set_to a
+    | Some b -> Hashtbl.Set_to (Loc.merge a b)
   in
   let merge_functions ~key a = function
-    | None -> Set_to a
-    | Some b -> Set_to (Func.merge a b)
+    | None -> Hashtbl.Set_to a
+    | Some b -> Hashtbl.Set_to (Func.merge a b)
   in
   let merge_execounts ~key a = function
-    | None -> Set_to a
-    | Some b -> Set_to (Execount.add a b)
+    | None -> Hashtbl.Set_to a
+    | Some b -> Hashtbl.Set_to (Execount.add a b)
   in
   { buildid;
     name2id;
@@ -425,7 +362,19 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~buildid =
     execounts =
       Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts
         ~f:merge_execounts;
-    crcs =
-      Hashtbl.merge_into ~src:src.crcs ~dst:dst.crcs
-        ~f:(merge_crcs ~unit_crc ~func_crc)
+    crcs = Crcs.merge_into ~src:src.crcs ~dst:dst.crcs ~unit_crc ~func_crc
   }
+
+module M = Merge (struct
+  type t = t
+
+  let merge_into = merge_into
+
+  let empty = empty
+
+  let read = read
+
+  let write = write
+
+  let approx_size t = Hashtbl.length t.addr2loc + Hashtbl.length t.name2id
+end)
