@@ -76,7 +76,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       let aggr_perf_profile =
         Profile.record_call ~accumulate:true "agg_perf_data" (fun () ->
             Perf_profile.read_and_aggregate perf_profile_filename
-              binary_filename ~ignore_buildid expected_pids)
+              binary_filename ignore_buildid expected_pids)
       in
       ( if write_aggregated_perf_profile then
         let filename =
@@ -262,10 +262,10 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
 let merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
     ~ignore_buildid ~output_filename =
   if read_aggregated_perf_profile then
-    Aggregated_perf_profile.M.merge_files files ~ignore_buildid
-      ~output_filename
+    Aggregated_perf_profile.Merge.merge_files files ~unit_crc ~func_crc
+      ~ignore_buildid ~output_filename
   else
-    Aggregated_decoded_profile.M.merge_files files ~unit_crc ~func_crc
+    Aggregated_decoded_profile.Merge.merge_files files ~unit_crc ~func_crc
       ~ignore_buildid ~output_filename
 
 let check files =

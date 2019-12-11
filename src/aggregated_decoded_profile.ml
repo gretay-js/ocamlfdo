@@ -26,17 +26,17 @@ type t =
        by the compiler using Caml.Digest might disagree. *)
     crcs : Crcs.tbl;
     (* buildid of the executable, if known *)
-    buildid : string option
+    mutable buildid : string option
   }
 [@@deriving sexp]
 
-let mk size crcs =
+let mk size crcs buildid =
   { addr2loc = Hashtbl.create ~size (module Addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
     execounts = Hashtbl.create (module Int);
     crcs;
-    buildid = None
+    buildid
   }
 
 let get_func t addr =
@@ -191,7 +191,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   Elf_locations.resolve_all locations addresses;
   let crcs = Crcs.(mk Create) in
   Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add_symbol crcs);
-  let t = mk len (Crcs.tbl crcs) in
+  let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
   Hashtbl.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
       (* this is cached using interval tree *)
@@ -291,8 +291,7 @@ let add t name cl =
 let rename t old2new =
   if not (Hashtbl.is_empty t.execounts) then
     Report.user_error "Rename of execounts is not implemented";
-  Hashtbl.mapi_inplace t.name2id ~f:(fun ~key:name ~data:id ->
-      Hashtbl.find_exn old2new id);
+  Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
   Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
   Hashtbl.map_inplace t.functions ~f:(Func.rename ~old2new);
   t
@@ -315,62 +314,47 @@ let rename t old2new =
    merging the functions. CR-soon gyorsh: enable the above alternatives
    through a command line option, for experiments. *)
 let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
-  let buildid = Merge.buildid t1.buildid t2.buildid ~ignore_buildid in
+  dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
   (* refresh ids of function in src, so as not to clash with dst: if func is
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
   let fresh = ref (Hashtbl.length dst.name2id) in
-  let refresh id =
-    let newid = !fresh in
-    fresh := !fresh + 1;
-    newid
-  in
   let old2new = Hashtbl.create (module Int) in
-  let merge_name2id ~key a b =
+  let merge_name2id ~key:_ a b =
     let newid =
       match b with
-      | None -> refresh a
+      | None ->
+          let newid = !fresh in
+          fresh := !fresh + 1;
+          newid
       | Some b -> b
     in
     Hashtbl.add_exn old2new ~key:a ~data:newid;
     Hashtbl.Set_to newid
   in
-  let name2id =
-    Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id
-  in
+  Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
   let src = rename src old2new in
-  let merge_addr2loc ~key a = function
+  let merge_addr2loc ~key:_ a = function
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to (Loc.merge a b)
   in
-  let merge_functions ~key a = function
+  let merge_functions ~key:_ a = function
     | None -> Hashtbl.Set_to a
-    | Some b -> Hashtbl.Set_to (Func.merge a b)
+    | Some b ->
+        Hashtbl.Set_to (Func.merge a b ~unit_crc ~func_crc ~ignore_buildid)
   in
-  let merge_execounts ~key a = function
-    | None -> Hashtbl.Set_to a
-    | Some b -> Hashtbl.Set_to (Execount.add a b)
+  let merge_execounts ~key:_ _a =
+    Report.user_error "Merge of cfg_info is not supported yet"
   in
-  { buildid;
-    name2id;
-    addr2loc =
-      Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
-        ~f:merge_addr2loc;
-    functions =
-      Hashtbl.merge_into ~src:src.functions ~dst:dst.functions
-        ~f:merge_functions;
-    execounts =
-      Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts
-        ~f:merge_execounts;
-    crcs = Crcs.merge_into ~src:src.crcs ~dst:dst.crcs ~unit_crc ~func_crc
-  }
+  Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc ~f:merge_addr2loc;
+  Hashtbl.merge_into ~src:src.functions ~dst:dst.functions ~f:merge_functions;
+  Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts ~f:merge_execounts;
+  Crcs.merge_into ~src:src.crcs ~dst:dst.crcs ~unit_crc ~func_crc
 
-module M = Merge (struct
-  type t = t
+module Merge = Merge.Make (struct
+  type nonrec t = t
 
   let merge_into = merge_into
-
-  let empty = empty
 
   let read = read
 

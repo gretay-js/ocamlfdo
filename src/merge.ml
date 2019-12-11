@@ -5,7 +5,7 @@ let verbose = ref false
 let buildid b1 b2 ~ignore_buildid =
   match (b1, b2) with
   | None, None -> None
-  | Some b, None | None, Some b -> b1
+  | Some b, None | None, Some b -> Some b
   | Some b1, Some b2 ->
       if String.equal b1 b2 then Some b1
       else if ignore_buildid then (
@@ -13,14 +13,12 @@ let buildid b1 b2 ~ignore_buildid =
         None )
       else Report.user_error "Mismatched buildids:\n%s\n%s\n" b1 b2
 
-module Merge (Profile : sig
+module Make (Profile : sig
   type t
 
   val read : string -> t
 
   val write : t -> string -> unit
-
-  val empty : unit -> t
 
   val approx_size : t -> int
   (** approximate sizes of [t] for merge *)
@@ -35,7 +33,7 @@ module Merge (Profile : sig
   (** might mutate both [src] and [dst] *)
 end) =
 struct
-  let helper t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
+  let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
     (* choose the biggest profile to merge into, for faster merge. *)
     let src, dst =
       let s1 = Profile.approx_size t1 in
@@ -49,13 +47,12 @@ struct
       =
     let profile =
       match files with
-      | [] -> Profile.empty ()
-      | [profile] -> profile
-      | init :: rest ->
-          List.fold rest ~init ~f:(fun acc file ->
+      | [] -> Report.user_error "Cannot merge, no input files"
+      | file :: rest ->
+          List.fold rest ~init:(Profile.read file) ~f:(fun acc file ->
               let profile = Profile.read file in
               if !verbose then Printf.printf "Merging %s\n" file;
-              helper profile acc ~unit_crc ~func_crc ~ignore_buildid)
+              merge profile acc ~unit_crc ~func_crc ~ignore_buildid)
     in
     Profile.write profile output_filename
 end

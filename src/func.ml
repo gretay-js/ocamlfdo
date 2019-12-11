@@ -43,7 +43,7 @@ let compare f1 f2 =
 
 let rename t ~old2new = { t with id = Hashtbl.find_exn old2new t.id }
 
-let merge t1 t2 ~ignore_buildid =
+let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
   if
     not
       ( t1.id = t2.id
@@ -54,6 +54,7 @@ let merge t1 t2 ~ignore_buildid =
     Report.user_error
       !"Cannot merge functions:\n%{sexp:t}\n%{sexp:t}\n"
       t1 t2;
+
   { id = t1.id;
     name = t1.name;
     start = t1.start;
@@ -61,5 +62,7 @@ let merge t1 t2 ~ignore_buildid =
     has_linearids = t1.has_linearids || t2.has_linearids;
     count = Execount.(t1.count + t2.count);
     malformed_traces = Execount.(t1.malformed_traces + t2.malformed_traces);
-    agg = Aggregated_perf_profile.merge t1.agg t2.agg ~ignore_buildid
+    agg =
+      Aggregated_perf_profile.Merge.merge t1.agg t2.agg ~unit_crc ~func_crc
+        ~ignore_buildid
   }

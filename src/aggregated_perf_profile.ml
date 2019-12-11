@@ -50,7 +50,7 @@ let write t filename =
   Out_channel.close chan
 
 let merge_into ~src ~dst ~ignore_buildid =
-  let buildid = Merge.buildid t1.buildid t2.buildid ~ignore_buildid in
+  dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
   let merge_execounts ~key:_ a = function
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to Execount.(a + b)
@@ -60,13 +60,10 @@ let merge_into ~src ~dst ~ignore_buildid =
   Hashtbl.merge_into ~src:src.branches ~dst:dst.branches ~f:merge_execounts;
   Hashtbl.merge_into ~src:src.mispredicts ~dst:dst.mispredicts
     ~f:merge_execounts;
-  Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts;
-  { dst with buildid }
+  Hashtbl.merge_into ~src:src.traces ~dst:dst.traces ~f:merge_execounts
 
-module M = Merge (struct
-  type t = t
-
-  let emty = empty
+module Merge = Merge.Make (struct
+  type nonrec t = t
 
   let read = read
 
@@ -76,7 +73,6 @@ module M = Merge (struct
     Hashtbl.length t.instructions
     + Hashtbl.length t.branches + Hashtbl.length t.traces
 
-  let merge_into ~unit_crc:_ ~func_crc:_ = merge_into
+  let merge_into ~src ~dst ~unit_crc:_ ~func_crc:_ ~ignore_buildid =
+    merge_into ~src ~dst ~ignore_buildid
 end)
-
-let merge = M.merge
