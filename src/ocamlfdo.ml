@@ -282,8 +282,7 @@ let decode_command =
       and perf_profile_filename =
         Commonflag.(required flag_perf_profile_filename)
       and reorder_functions = flag_reorder_functions
-      and linearid_profile_filename =
-        Commonflag.(optional flag_linearid_profile_filename)
+      and output_filename = Commonflag.(optional flag_output_filename)
       and linker_script_hot_filename =
         Commonflag.(optional flag_linker_script_hot_filename)
       and write_linker_script_hot = flag_write_linker_script_hot
@@ -307,7 +306,7 @@ let decode_command =
       fun () ->
         Profile.record_call "decode" (fun () ->
             decode ~binary_filename ~perf_profile_filename ~reorder_functions
-              ~linker_script_hot_filename ~linearid_profile_filename
+              ~linker_script_hot_filename ~output_filename
               ~write_linker_script_hot ~ignore_buildid ~expected_pids
               ~check:(not force) ~write_aggregated_perf_profile
               ~read_aggregated_perf_profile);

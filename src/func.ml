@@ -46,8 +46,8 @@ let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
     not
       ( t1.id = t2.id
       && String.equal t1.name t2.name
-      && Addr.equal t1.start t2.start
-      && Addr.equal t1.finish t2.finish )
+      && ( (Addr.equal t1.start t2.start && Addr.equal t1.finish t2.finish)
+         || ignore_buildid ) )
   then
     Report.user_error
       !"Cannot merge functions:\n%{sexp:t}\n%{sexp:t}\n"

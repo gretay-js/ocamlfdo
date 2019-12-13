@@ -293,11 +293,13 @@ let rename t old2new =
     Report.user_error "Rename of execounts is not implemented";
   Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
   Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
+  let size = Hashtbl.length t.functions in
+  let functions = Hashtbl.create ~size (module Int) in
   Hashtbl.iteri old2new ~f:(fun ~key:id ~data:newid ->
       let func = Hashtbl.find_exn t.functions id in
-      Hashtbl.remove t.functions id;
-      Hashtbl.set t.functions ~key:newid ~data:{ func with id = newid });
-  t
+      Hashtbl.set functions ~key:newid ~data:{ func with id = newid });
+  assert (Hashtbl.length functions = size);
+  { t with functions }
 
 (* CR-soon gyorsh: use information from t.crcs when merging functions.
    WARNING: modifies the input profiles inplace, to avoid allocations.
@@ -326,7 +328,9 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
   let fresh = ref (Hashtbl.length dst.name2id) in
-  let old2new = Hashtbl.create (module Int) in
+  let old2new =
+    Hashtbl.create ~size:(Hashtbl.length src.name2id) (module Int)
+  in
   let merge_name2id ~key:_ a b =
     let newid =
       match b with
@@ -343,9 +347,10 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
     Printf.printf !"src:\n%{sexp:(string, int) Hashtbl.t}\n" src.name2id;
     Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
   Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
+  if !verbose then
+    Printf.printf !"old2new:\n%{sexp:(int, int) Hashtbl.t}\n" old2new;
   let src = rename src old2new in
   if !verbose then (
-    Printf.printf !"old2new:\n%{sexp:(int, int) Hashtbl.t}\n" old2new;
     Printf.printf !"src:\n%{sexp:(string, int)Hashtbl.t}\n" src.name2id;
     Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
   let merge_addr2loc ~key:_ a = function

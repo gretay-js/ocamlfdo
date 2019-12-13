@@ -62,9 +62,9 @@ let load_locations binary_filename =
   elf_locations
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
-    ~linker_script_hot_filename ~linearid_profile_filename
-    ~write_linker_script_hot ~ignore_buildid ~expected_pids ~check
-    ~write_aggregated_perf_profile ~read_aggregated_perf_profile =
+    ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
+    ~ignore_buildid ~expected_pids ~check ~write_aggregated_perf_profile
+    ~read_aggregated_perf_profile =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
     if read_aggregated_perf_profile then
@@ -79,11 +79,10 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
               binary_filename ignore_buildid expected_pids)
       in
       ( if write_aggregated_perf_profile then
-        let filename =
-          Option.value linearid_profile_filename
-            ~default:(binary_filename ^ ".tmp.agg")
+        let agg_filename =
+          Option.value output_filename ~default:(binary_filename ^ ".tmp.agg")
         in
-        Aggregated_perf_profile.write aggr_perf_profile filename );
+        Aggregated_perf_profile.write aggr_perf_profile agg_filename );
       aggr_perf_profile
   in
   let locations =
@@ -96,12 +95,11 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   in
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
-  let linearid_profile_filename =
-    Option.value linearid_profile_filename
-      ~default:(binary_filename ^ ".fdo-profile")
+  let output_filename =
+    Option.value output_filename ~default:(binary_filename ^ ".fdo-profile")
     (* dirname ^ "/fdo-profile" *)
   in
-  Aggregated_decoded_profile.write linearid_profile linearid_profile_filename;
+  Aggregated_decoded_profile.write linearid_profile output_filename;
 
   ( if write_linker_script_hot then
     let filename =
