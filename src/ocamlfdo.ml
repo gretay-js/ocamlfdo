@@ -18,6 +18,7 @@ let quiet () =
   Crcs.verbose := false;
   Wrapper.verbose := false;
   Linker_script.verbose := false;
+  Merge.verbose := false;
   ()
 
 let set_crc kind ~all_crc ~no_crc = (kind || all_crc) && not no_crc

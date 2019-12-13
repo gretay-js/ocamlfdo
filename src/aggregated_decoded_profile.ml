@@ -5,7 +5,7 @@ open Func
 module Cfg_with_layout = Ocamlcfg.Cfg_with_layout
 module Cfg = Ocamlcfg.Cfg
 
-let verbose = ref false
+let verbose = ref true
 
 type t =
   { (* map raw addresses to locations *)
@@ -293,7 +293,10 @@ let rename t old2new =
     Report.user_error "Rename of execounts is not implemented";
   Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
   Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
-  Hashtbl.map_inplace t.functions ~f:(Func.rename ~old2new);
+  Hashtbl.iteri old2new ~f:(fun ~key:id ~data:newid ->
+      let func = Hashtbl.find_exn t.functions id in
+      Hashtbl.remove t.functions id;
+      Hashtbl.set t.functions ~key:newid ~data:{ func with id = newid });
   t
 
 (* CR-soon gyorsh: use information from t.crcs when merging functions.
@@ -312,7 +315,11 @@ let rename t old2new =
 
    Current implementation is effectively (1), because CRC are not used when
    merging the functions. CR-soon gyorsh: enable the above alternatives
-   through a command line option, for experiments. *)
+   through a command line option, for experiments.
+
+   When ignoring buildid and crcs, it is possible to merge profiles from
+   binaries that differ only in addresses, for example, profiles collected
+   from different layouts of the same code. *)
 let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
   dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
   (* refresh ids of function in src, so as not to clash with dst: if func is
@@ -332,8 +339,15 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
     Hashtbl.add_exn old2new ~key:a ~data:newid;
     Hashtbl.Set_to newid
   in
+  if !verbose then (
+    Printf.printf !"src:\n%{sexp:(string, int) Hashtbl.t}\n" src.name2id;
+    Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
   Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
   let src = rename src old2new in
+  if !verbose then (
+    Printf.printf !"old2new:\n%{sexp:(int, int) Hashtbl.t}\n" old2new;
+    Printf.printf !"src:\n%{sexp:(string, int)Hashtbl.t}\n" src.name2id;
+    Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
   let merge_addr2loc ~key:_ a = function
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to (Loc.merge a b)

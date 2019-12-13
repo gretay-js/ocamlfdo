@@ -54,7 +54,7 @@ let tbl t = t.acc
 
 let mk action = { action; acc = Hashtbl.create (module String) }
 
-let check_and_add t ~name crc ~file =
+let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
   (* Check *)
   ( match t.action with
   | Create -> ()
@@ -73,23 +73,34 @@ let check_and_add t ~name crc ~file =
             Printf.printf
               "Linear IR for %s from file %s was not used for creating the \
                profiled binary.\n\
-               new crc: %s" name file (Crc.to_string crc)) );
+               new crc: %s\n"
+              name file (Crc.to_string crc)) );
 
   (* Add to accumulator *)
-  Hashtbl.update t.acc name ~f:(function
-    | None -> crc
-    | Some old_crc ->
-        if Crc.equal old_crc crc then
-          Report.user_error
+  let dup old_crc =
+    if Crc.equal old_crc crc then
+      if error_on_duplicate then
+        Report.user_error
+          "Duplicate! Linear IR for %s from file %s has already been \
+           processed.\n\
+           crc: %s" name file (Crc.to_string crc)
+      else (
+        if !verbose then
+          Printf.printf
             "Duplicate! Linear IR for %s from file %s has already been \
              processed.\n\
-            \                crc: %s" name file (Crc.to_string crc) ()
-        else
-          Report.user_error
-            "Linear IR for %s from file %s processed earlier does not match.\n\
-            \             old crc: %s\n\
-            \             new crc: %s" name file (Crc.to_string old_crc)
-            (Crc.to_string crc) ())
+             crc: %s\n"
+            name file (Crc.to_string crc);
+        old_crc )
+    else
+      Report.user_error
+        "Linear IR for %s from file %s processed earlier does not match.\n\
+         old crc: %s\n\
+         new crc: %s" name file (Crc.to_string old_crc) (Crc.to_string crc)
+  in
+  Hashtbl.update t.acc name ~f:(function
+    | None -> crc
+    | Some old_crc -> dup old_crc)
 
 let add_unit t ~name crc ~file =
   check_and_add t ~name { kind = Unit; crc } ~file
@@ -144,7 +155,11 @@ let decode_and_add_symbol t s =
         printf "crc_symbol=%s\n" s;
         printf "name=%s, crc=%s\n" name (Crc.to_string crc) );
       (* check if the symbol has already been recorded *)
-      check_and_add t ~name crc ~file:"specified by -binary option"
+      (* CR-soon gyorsh: owee returns duplicate symbols, even though the
+         symbol table has only one entry in the symbol table, because of the
+         way owee iterates over symbols using interval tree. *)
+      check_and_add ~error_on_duplicate:false t ~name crc
+        ~file:"specified by -binary option"
 
 let merge_crcs ~unit_crc ~func_crc ~key a b =
   let check_crcs a b =

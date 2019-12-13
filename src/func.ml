@@ -41,8 +41,6 @@ let compare f1 f2 =
   let res = Int64.compare f2.count f1.count in
   if res = 0 then String.compare f1.name f2.name else res
 
-let rename t ~old2new = { t with id = Hashtbl.find_exn old2new t.id }
-
 let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
   if
     not

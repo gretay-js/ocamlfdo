@@ -1,6 +1,6 @@
 open Core
 
-let verbose = ref false
+let verbose = ref true
 
 let buildid b1 b2 ~ignore_buildid =
   match (b1, b2) with
