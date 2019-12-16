@@ -176,10 +176,7 @@ let flag_auto =
 let flag_crc_config =
   let open Command.Param in
   let flag_no_crc =
-    flag "-no-md5" no_arg
-      ~doc:
-        " turn off -md5-unit and -md5-fun, regardless of the order they\n\
-        \ are specified in."
+    flag "-no-md5" no_arg ~doc:" turn off -md5-unit and -md5-fun."
     |> map ~f:(function
          | true -> Some { Crcs.unit = false; func = false }
          | false -> None)
@@ -195,14 +192,14 @@ let flag_crc_config =
   in
   let flag_unit_crc =
     flag "-md5-unit" no_arg
-      ~doc:" use md5 per compilation unit to detect source changes"
+      ~doc:" use md5 per compilation unit only to detect source changes"
     |> map ~f:(function
          | true -> Some { Crcs.unit = true; func = false }
          | false -> None)
   in
   let flag_func_crc =
     flag "-md5-fun" no_arg
-      ~doc:" use md5 per function to detect source changes"
+      ~doc:" use md5 per function only to detect source changes"
     |> map ~f:(function
          | true -> Some { Crcs.unit = false; func = true }
          | false -> None)
