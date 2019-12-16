@@ -41,7 +41,7 @@ let compare f1 f2 =
   let res = Int64.compare f2.count f1.count in
   if res = 0 then String.compare f1.name f2.name else res
 
-let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
+let merge t1 t2 ~crc_config ~ignore_buildid =
   if
     not
       ( t1.id = t2.id
@@ -61,6 +61,6 @@ let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
     count = Execount.(t1.count + t2.count);
     malformed_traces = Execount.(t1.malformed_traces + t2.malformed_traces);
     agg =
-      Aggregated_perf_profile.Merge.merge t1.agg t2.agg ~unit_crc ~func_crc
+      Aggregated_perf_profile.Merge.merge t1.agg t2.agg ~crc_config
         ~ignore_buildid
   }

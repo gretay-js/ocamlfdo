@@ -24,27 +24,21 @@ module Make (Profile : sig
   (** approximate sizes of [t] for merge *)
 
   val merge_into :
-    src:t ->
-    dst:t ->
-    unit_crc:bool ->
-    func_crc:bool ->
-    ignore_buildid:bool ->
-    unit
+    src:t -> dst:t -> crc_config:Crcs.config -> ignore_buildid:bool -> unit
   (** might mutate both [src] and [dst] *)
 end) =
 struct
-  let merge t1 t2 ~unit_crc ~func_crc ~ignore_buildid =
+  let merge t1 t2 ~crc_config ~ignore_buildid =
     (* choose the biggest profile to merge into, for faster merge. *)
     let src, dst =
       let s1 = Profile.approx_size t1 in
       let s2 = Profile.approx_size t2 in
       if s1 <= s2 then (t1, t2) else (t2, t1)
     in
-    Profile.merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid;
+    Profile.merge_into ~src ~dst ~crc_config ~ignore_buildid;
     dst
 
-  let merge_files files ~unit_crc ~func_crc ~ignore_buildid ~output_filename
-      =
+  let merge_files files ~crc_config ~ignore_buildid ~output_filename =
     let profile =
       match files with
       | [] -> Report.user_error "Cannot merge, no input files"
@@ -52,7 +46,7 @@ struct
           List.fold rest ~init:(Profile.read file) ~f:(fun acc file ->
               let profile = Profile.read file in
               if !verbose then Printf.printf "Merging %s\n" file;
-              merge profile acc ~unit_crc ~func_crc ~ignore_buildid)
+              merge profile acc ~crc_config ~ignore_buildid)
     in
     Profile.write profile output_filename
 end

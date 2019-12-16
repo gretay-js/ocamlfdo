@@ -189,7 +189,10 @@ let create locations (agg : Aggregated_perf_profile.t) =
   assert (len <= size);
   (* Resolve all addresses seen in samples in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses;
-  let crcs = Crcs.(mk Create) in
+  (* set config to all true to decode all symbols from the binary and store
+     in the profile, even if the user chooses to ignore them later. *)
+  let crc_config = { Crcs.unit = true; func = false } in
+  let crcs = Crcs.(mk Create crc_config) in
   Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add_symbol crcs);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
@@ -322,7 +325,7 @@ let rename t old2new =
    When ignoring buildid and crcs, it is possible to merge profiles from
    binaries that differ only in addresses, for example, profiles collected
    from different layouts of the same code. *)
-let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
+let merge_into ~src ~dst ~crc_config ~ignore_buildid =
   dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
   (* refresh ids of function in src, so as not to clash with dst: if func is
      in both src and dst, use the id from dst, otherwise rename src id to a
@@ -359,8 +362,7 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
   in
   let merge_functions ~key:_ a = function
     | None -> Hashtbl.Set_to a
-    | Some b ->
-        Hashtbl.Set_to (Func.merge a b ~unit_crc ~func_crc ~ignore_buildid)
+    | Some b -> Hashtbl.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
   let merge_execounts ~key:_ _a =
     Report.user_error "Merge of cfg_info is not supported yet"
@@ -368,7 +370,7 @@ let merge_into ~src ~dst ~unit_crc ~func_crc ~ignore_buildid =
   Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc ~f:merge_addr2loc;
   Hashtbl.merge_into ~src:src.functions ~dst:dst.functions ~f:merge_functions;
   Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts ~f:merge_execounts;
-  Crcs.merge_into ~src:src.crcs ~dst:dst.crcs ~unit_crc ~func_crc
+  Crcs.merge_into ~src:src.crcs ~dst:dst.crcs crc_config
 
 module Merge = Merge.Make (struct
   type nonrec t = t

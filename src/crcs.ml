@@ -45,14 +45,21 @@ type action =
   | Create
   | Compare of tbl
 
+type config =
+  { unit : bool;
+    func : bool
+  }
+
 type t =
   { acc : tbl;
-    action : action
+    action : action;
+    config : config
   }
 
 let tbl t = t.acc
 
-let mk action = { action; acc = Hashtbl.create (module String) }
+let mk action config =
+  { action; acc = Hashtbl.create (module String); config }
 
 let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
   (* Check *)
@@ -103,12 +110,13 @@ let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
     | Some old_crc -> dup old_crc)
 
 let add_unit t ~name crc ~file =
-  check_and_add t ~name { kind = Unit; crc } ~file
+  if t.config.unit then check_and_add t ~name { kind = Unit; crc } ~file
 
 let add_fun t f ~file =
-  let name = f.Linear.fun_name in
-  let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
-  check_and_add t ~name { kind = Func; crc } ~file
+  if t.config.func then
+    let name = f.Linear.fun_name in
+    let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
+    check_and_add t ~name { kind = Func; crc } ~file
 
 (* Symbols in the binary with a special naming sceme to communite crc of the
    linear IR it was compiled from. This is used to ensure that the profile is
@@ -133,7 +141,7 @@ let mk_symbol name (crc : Crc.t) =
 
 (* Creates the symbols and clears the accumulator *)
 let emit_symbols t =
-  if Hashtbl.is_empty t.acc then []
+  if Hashtbl.is_empty t.acc || not (t.config.unit || t.config.func) then []
   else
     let open Cmm in
     let items =
@@ -161,27 +169,34 @@ let decode_and_add_symbol t s =
       check_and_add ~error_on_duplicate:false t ~name crc
         ~file:"specified by -binary option"
 
-let merge_crcs ~unit_crc ~func_crc ~key a b =
-  let check_crcs a b =
+let merge_into ~src ~dst config =
+  let check_crcs ~key a b =
     if Crc.equal a b then Hashtbl.Set_to b
-    else if unit_crc || func_crc then
-      Report.user_error
-        "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-         %s\n\
-         %s\n"
-        key (Crc.to_string a) (Crc.to_string b)
-    else (
-      if !verbose then
-        Printf.printf
+    else
+      let fail =
+        (config.unit || config.func)
+        && ( (not (Kind.equal a.kind b.kind))
+           || (Kind.equal a.kind Unit && config.unit)
+           || (Kind.equal a.kind Func && config.func) )
+      in
+      if fail then
+        Report.user_error
           "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
            %s\n\
            %s\n"
-          key (Crc.to_string a) (Crc.to_string b);
-      Hashtbl.Remove )
+          key (Crc.to_string a) (Crc.to_string b)
+      else (
+        if !verbose then
+          Printf.printf
+            "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
+             %s\n\
+             %s\n"
+            key (Crc.to_string a) (Crc.to_string b);
+        Hashtbl.Remove )
   in
-  match b with
-  | None -> Hashtbl.Set_to a
-  | Some b -> check_crcs a b
-
-let merge_into ~src ~dst ~unit_crc ~func_crc =
-  Hashtbl.merge_into ~src ~dst ~f:(merge_crcs ~unit_crc ~func_crc)
+  let merge_crcs ~key a b =
+    match b with
+    | None -> Hashtbl.Set_to a
+    | Some b -> check_crcs ~key a b
+  in
+  Hashtbl.merge_into ~src ~dst ~f:merge_crcs

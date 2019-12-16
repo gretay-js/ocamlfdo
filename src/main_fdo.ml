@@ -194,8 +194,8 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels =
   print_linear "After" fnew;
   fnew
 
-let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report =
+let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
+    ~report =
   if report then Report.start ();
   let profile =
     match fdo_profile with
@@ -227,8 +227,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   in
   let crcs =
     match profile with
-    | None -> Crcs.(mk Create)
-    | Some profile -> Crcs.(mk (Compare profile.crcs))
+    | None -> Crcs.(mk Create crc_config)
+    | Some profile -> Crcs.(mk (Compare profile.crcs) crc_config)
   in
   let process file =
     (* CR-soon gyorsh: identify format based on the file extension and magic
@@ -237,14 +237,14 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
     let open Linear_format in
     let ui, crc = restore file in
     let crc = Md5.of_hex_exn (Caml.Digest.to_hex crc) in
-    if unit_crc then Crcs.add_unit crcs ~name:ui.unit_name crc ~file;
+    Crcs.add_unit crcs ~name:ui.unit_name crc ~file;
     ui.items <-
       List.map ui.items ~f:(function
         | Func f ->
-            if func_crc then Crcs.add_fun crcs f ~file;
+            Crcs.add_fun crcs f ~file;
             Func (transform f ~algo ~extra_debug ~preserve_orig_labels:false)
         | Data dl -> Data dl);
-    ( if extra_debug && (unit_crc || func_crc) then
+    ( if extra_debug then
       match Crcs.emit_symbols crcs with
       | [] -> ()
       | dl -> ui.items <- ui.items @ [Data dl] );
@@ -257,13 +257,13 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
   if report then Report.finish ();
   ()
 
-let merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
-    ~ignore_buildid ~output_filename =
+let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
+    ~output_filename =
   if read_aggregated_perf_profile then
-    Aggregated_perf_profile.Merge.merge_files files ~unit_crc ~func_crc
+    Aggregated_perf_profile.Merge.merge_files files ~crc_config
       ~ignore_buildid ~output_filename
   else
-    Aggregated_decoded_profile.Merge.merge_files files ~unit_crc ~func_crc
+    Aggregated_decoded_profile.Merge.merge_files files ~crc_config
       ~ignore_buildid ~output_filename
 
 let check files =
@@ -290,8 +290,8 @@ let check files =
    environment etc is currently very cumbersome and highly dependent on the
    compiler internals. There are multiple ways in which they can be set
    (e.g., from cmd line or from env or config), order matters, etc. *)
-let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-    ~func_crc ~report =
+let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
+    ~report =
   let open Wrapper in
   let w = wrap args in
   if can_split_compile w then (
@@ -299,8 +299,8 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
         call_ocamlopt w Compile);
     let files = artifacts w Filenames.Linear in
     Profile.record_call ~accumulate:true "opt" (fun () ->
-        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~unit_crc
-          ~func_crc ~report);
+        optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
+          ~report);
     Profile.record_call ~accumulate:true "phase II:emit" (fun () ->
         call_ocamlopt w Emit) )
   else (

@@ -21,8 +21,6 @@ let quiet () =
   Merge.verbose := false;
   ()
 
-let set_crc kind ~all_crc ~no_crc = (kind || all_crc) && not no_crc
-
 (* Utility for handling variant type command line options. *)
 (* Print all variants in option's help string. *)
 module type Alt = sig
@@ -173,29 +171,45 @@ let flag_auto =
          splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
-let flag_no_crc =
-  Command.Param.(
+(* CR-someday gyorsh: this is just boolean combination of func and unit. Is
+   there a cleaner way to define it as cmdline options? *)
+let flag_crc_config =
+  let open Command.Param in
+  let flag_no_crc =
     flag "-no-md5" no_arg
       ~doc:
         " turn off -md5-unit and -md5-fun, regardless of the order they\n\
-        \ are specified in.")
-
-let flag_all_crc =
-  Command.Param.(
+        \ are specified in."
+    |> map ~f:(function
+         | true -> Some { Crcs.unit = false; func = false }
+         | false -> None)
+  in
+  let flag_all_crc =
     flag "-md5" no_arg
       ~doc:
         " use md5 to detect source changes at function and compilation unit \
-         level (implies both -md5-unit and -md5-fun)")
-
-let flag_unit_crc =
-  Command.Param.(
+         level (implies both -md5-unit and -md5-fun)"
+    |> map ~f:(function
+         | true -> Some { Crcs.unit = true; func = true }
+         | false -> None)
+  in
+  let flag_unit_crc =
     flag "-md5-unit" no_arg
-      ~doc:" use md5 per compilation unit to detect source changes")
-
-let flag_func_crc =
-  Command.Param.(
+      ~doc:" use md5 per compilation unit to detect source changes"
+    |> map ~f:(function
+         | true -> Some { Crcs.unit = true; func = false }
+         | false -> None)
+  in
+  let flag_func_crc =
     flag "-md5-fun" no_arg
-      ~doc:" use md5 per function to detect source changes")
+      ~doc:" use md5 per function to detect source changes"
+    |> map ~f:(function
+         | true -> Some { Crcs.unit = false; func = true }
+         | false -> None)
+  in
+  choose_one
+    [flag_unit_crc; flag_func_crc; flag_all_crc; flag_no_crc]
+    ~if_nothing_chosen:(Default_to { Crcs.unit = true; func = false })
 
 let flag_timings =
   Command.Param.(
@@ -242,21 +256,16 @@ let merge_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
-      and unit_crc = flag_unit_crc
-      and func_crc = flag_func_crc
-      and all_crc = flag_all_crc
-      and no_crc = flag_no_crc
+      and crc_config = flag_crc_config
       and ignore_buildid = flag_ignore_buildid
       and files = anon_files
       and output_filename = Commonflag.(required flag_output_filename)
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile in
       verbose := v;
       if q then quiet ();
-      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
-      let func_crc = set_crc func_crc ~all_crc ~no_crc in
       fun () ->
-        merge files ~read_aggregated_perf_profile ~unit_crc ~func_crc
-          ~ignore_buildid ~output_filename)
+        merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
+          ~output_filename)
 
 let decode_command =
   Command.basic
@@ -335,20 +344,15 @@ let opt_command =
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
-      and unit_crc = flag_unit_crc
-      and func_crc = flag_func_crc
-      and all_crc = flag_all_crc
-      and no_crc = flag_no_crc
+      and crc_config = flag_crc_config
       and files = anon_files
       and timings = flag_timings in
       verbose := v;
       if q then quiet ();
-      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
-      let func_crc = set_crc func_crc ~all_crc ~no_crc in
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
-              ~unit_crc ~func_crc ~report);
+              ~crc_config ~report);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
@@ -416,10 +420,7 @@ let compile_command =
       and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
-      and unit_crc = flag_unit_crc
-      and func_crc = flag_func_crc
-      and all_crc = flag_all_crc
-      and no_crc = flag_no_crc
+      and crc_config = flag_crc_config
       and args =
         Command.Param.(
           flag "--" escape
@@ -427,8 +428,7 @@ let compile_command =
       and timings = flag_timings in
       verbose := v;
       if q then quiet ();
-      let unit_crc = set_crc unit_crc ~all_crc ~no_crc in
-      let func_crc = set_crc func_crc ~all_crc ~no_crc in
+
       let fdo =
         if auto then
           match fdo_profile with
@@ -463,7 +463,7 @@ let compile_command =
         | Some (fdo_profile, extra_debug) ->
             Profile.record_call "compile" (fun () ->
                 compile args ~fdo_profile ~reorder_blocks ~extra_debug
-                  ~unit_crc ~func_crc ~report;
+                  ~crc_config ~report;
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 

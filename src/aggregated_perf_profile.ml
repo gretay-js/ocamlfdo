@@ -73,6 +73,6 @@ module Merge = Merge.Make (struct
     Hashtbl.length t.instructions
     + Hashtbl.length t.branches + Hashtbl.length t.traces
 
-  let merge_into ~src ~dst ~unit_crc:_ ~func_crc:_ ~ignore_buildid =
+  let merge_into ~src ~dst ~crc_config:_ ~ignore_buildid =
     merge_into ~src ~dst ~ignore_buildid
 end)

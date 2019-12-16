@@ -18,10 +18,15 @@ type action =
   | Create  (** create a new table *)
   | Compare of tbl  (** compare to existing table *)
 
+type config =
+  { unit : bool;
+    func : bool
+  }
+
 type t
 (** Underlying table is mutable *)
 
-val mk : action -> t
+val mk : action -> config -> t
 
 val tbl : t -> tbl
 (** all we can do to it is save and restore it somewhere *)
@@ -38,4 +43,4 @@ val emit_symbols : t -> Cmm.data_item list
 
 val verbose : bool ref
 
-val merge_into : src:tbl -> dst:tbl -> unit_crc:bool -> func_crc:bool -> unit
+val merge_into : src:tbl -> dst:tbl -> config -> unit
