@@ -170,33 +170,46 @@ let decode_and_add_symbol t s =
         ~file:"specified by -binary option"
 
 let merge_into ~src ~dst config =
-  let check_crcs ~key a b =
-    if Crc.equal a b then Hashtbl.Set_to b
-    else
-      let fail =
-        (config.unit || config.func)
-        && ( (not (Kind.equal a.kind b.kind))
-           || (Kind.equal a.kind Unit && config.unit)
-           || (Kind.equal a.kind Func && config.func) )
-      in
-      if fail then
-        Report.user_error
-          "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-           %s\n\
-           %s\n"
-          key (Crc.to_string a) (Crc.to_string b)
-      else (
-        if !verbose then
-          Printf.printf
-            "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-             %s\n\
-             %s\n"
-            key (Crc.to_string a) (Crc.to_string b);
-        Hashtbl.Remove )
-  in
-  let merge_crcs ~key a b =
+  let merge_crcs ~key (a : Crc.t) b =
     match b with
-    | None -> Hashtbl.Set_to a
-    | Some b -> check_crcs ~key a b
+    | None ->
+        (* If one of the CRC is missing, we can't check it, so require
+           -no-md5 option *)
+        let fail =
+          (Kind.equal a.kind Unit && config.unit)
+          || (Kind.equal a.kind Func && config.func)
+        in
+        if fail then
+          Report.user_error
+            "Merge aggregated decoded profiles: one profile is missing crc \
+             for %s,\n\
+            \          another profile has\n\
+             %s\n"
+            key (Crc.to_string a)
+        else Hashtbl.Set_to a
+    | Some b ->
+        if Crc.equal a b then Hashtbl.Set_to b
+        else
+          let fail =
+            (config.unit || config.func)
+            && ( (not (Kind.equal a.kind b.kind))
+               || (Kind.equal a.kind Unit && config.unit)
+               || (Kind.equal a.kind Func && config.func) )
+          in
+          if fail then
+            Report.user_error
+              "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
+               %s\n\
+               %s\n"
+              key (Crc.to_string a) (Crc.to_string b)
+          else (
+            if !verbose then
+              Printf.printf
+                "Merge aggregated decoded profiles: mismatched crcs for %s:\n\
+                 %s\n\
+                 %s\n"
+                key (Crc.to_string a) (Crc.to_string b);
+            Hashtbl.Remove )
   in
+
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs

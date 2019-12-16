@@ -5,8 +5,6 @@ open Core
 module Crc : sig
   type t [@@deriving sexp, equal]
 
-  val equal : t -> t -> bool
-
   val to_string : t -> string
 end
 
@@ -22,6 +20,7 @@ type config =
   { unit : bool;
     func : bool
   }
+(** User can define what crcs to create and compare. *)
 
 type t
 (** Underlying table is mutable *)
