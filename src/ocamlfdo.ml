@@ -1,24 +1,24 @@
 open Core
 open Main_fdo
 
-let quiet () =
-  verbose := false;
-  Perf_profile.verbose := false;
-  Aggregated_decoded_profile.verbose := false;
-  Aggregated_perf_profile.verbose := false;
-  Bolt_profile.verbose := false;
-  Decoded_bolt_profile.verbose := false;
-  Cfg_info.verbose := false;
-  Clusters.verbose := false;
-  Elf_locations.verbose := false;
-  Filenames.verbose := false;
-  Reorder.verbose := false;
-  Report.verbose := false;
-  Ocamlcfg.Util.verbose := false;
-  Crcs.verbose := false;
-  Wrapper.verbose := false;
-  Linker_script.verbose := false;
-  Merge.verbose := false;
+let set_verbose v =
+  verbose := v;
+  Perf_profile.verbose := v;
+  Aggregated_decoded_profile.verbose := v;
+  Aggregated_perf_profile.verbose := v;
+  Bolt_profile.verbose := v;
+  Decoded_bolt_profile.verbose := v;
+  Cfg_info.verbose := v;
+  Clusters.verbose := v;
+  Elf_locations.verbose := v;
+  Filenames.verbose := v;
+  Reorder.verbose := v;
+  Report.verbose := v;
+  Ocamlcfg.Util.verbose := v;
+  Crcs.verbose := v;
+  Wrapper.verbose := v;
+  Linker_script.verbose := v;
+  Merge.verbose := v;
   ()
 
 (* Utility for handling variant type command line options. *)
@@ -261,8 +261,8 @@ let merge_command =
       and files = anon_files
       and output_filename = Commonflag.(required flag_output_filename)
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile in
-      verbose := v;
-      if q then quiet ();
+      if v then set_verbose true;
+      if q then set_verbose false;
       fun () ->
         merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
           ~output_filename)
@@ -301,8 +301,8 @@ let decode_command =
       and expected_pids = flag_expected_pids
       and force = flag_force
       and timings = flag_timings in
-      verbose := v;
-      if q then quiet ();
+      if v then set_verbose true;
+      if q then set_verbose false;
       if !verbose then (
         if write_aggregated_perf_profile && read_aggregated_perf_profile then
           printf
@@ -347,8 +347,8 @@ let opt_command =
       and crc_config = flag_crc_config
       and files = anon_files
       and timings = flag_timings in
-      verbose := v;
-      if q then quiet ();
+      if v then set_verbose true;
+      if q then set_verbose false;
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
@@ -369,9 +369,8 @@ let check_command =
 |})
     Command.Let_syntax.(
       let%map v = flag_v and q = flag_q and files = anon_files in
-      verbose := v;
-      if q then quiet ();
-      if !verbose && List.is_empty files then printf "No input files\n";
+      if v then set_verbose true;
+      if q then set_verbose false;
       fun () -> check files)
 
 let compile_command =
@@ -426,8 +425,8 @@ let compile_command =
           flag "--" escape
             ~doc:"ocamlopt_args standard options passed to ocamlopt")
       and timings = flag_timings in
-      verbose := v;
-      if q then quiet ();
+      if v then set_verbose true;
+      if q then set_verbose false;
 
       let fdo =
         if auto then
@@ -515,8 +514,8 @@ let linker_script_command =
         Commonflag.(optional flag_linearid_profile_filename)
       and reorder_functions = flag_reorder_functions
       and force = flag_force in
-      verbose := v;
-      if q then quiet ();
+      if v then set_verbose true;
+      if q then set_verbose false;
       if
         Option.is_some linearid_profile_filename
         && Option.is_some linker_script_hot
@@ -550,4 +549,6 @@ let main_command =
       ("check", check_command);
       ("merge", merge_command) ]
 
-let () = Command.run main_command
+let () =
+  set_verbose false;
+  Command.run main_command
