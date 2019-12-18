@@ -232,7 +232,10 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   in
   let process file =
     (* CR-soon gyorsh: identify format based on the file extension and magic
-       number. Only matters when fdo handles with more than one IR. *)
+       number. Only matters when fdo handles with more than one IR.
+
+       CR-someday gyorsh: 4.11 will have a nicer interface to magic numbers,
+       use it. *)
     let out_filename = Filenames.make_fdo file in
     let open Linear_format in
     let ui, crc = restore file in
@@ -245,9 +248,22 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
             Func (transform f ~algo ~extra_debug ~preserve_orig_labels:false)
         | Data dl -> Data dl);
     ( if extra_debug then
-      match Crcs.emit_symbols crcs with
-      | [] -> ()
-      | dl -> ui.items <- ui.items @ [Data dl] );
+      (* emit crc symbols *)
+      (* CR-soon gyorsh: emit into a separate data section, not interleaved
+         with normal data items. We need to add named data sections to Cmm.
+         In emit, change looks like this: D.section [".data.ocamlfdo.crcs"]
+         (Some "") [ "%note" ]; Not sure about the "note" but the goal is to
+         make it non-allocatable, so that it is not loa. *)
+      (* CR-someday gyorsh: can we use elf notes format instead of creating
+         all these useless symbols? D.section [".note.ocamlfdo"] (Some "") [
+         "%note" ]; Can owee read notes sections? *)
+      let syms = Crcs.encode crcs in
+      let dl =
+        List.fold syms ~init:[] ~f:(fun items symbol ->
+            let open Cmm in
+            Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
+      in
+      ui.items <- ui.items @ [Data dl] );
     save out_filename ui
   in
   let process file =

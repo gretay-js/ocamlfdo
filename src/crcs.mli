@@ -4,8 +4,6 @@ open Core
 
 module Crc : sig
   type t [@@deriving sexp, equal]
-
-  val to_string : t -> string
 end
 
 type tbl [@@deriving sexp]
@@ -34,11 +32,12 @@ val add_unit : t -> name:string -> Md5.t -> file:string -> unit
 
 val add_fun : t -> Linear.fundecl -> file:string -> unit
 
-val decode_and_add_symbol : t -> string -> unit
-(** parses the symbol name and if it consitutes a valid encoding of crc,
-    decodes it and adds it to the table. *)
+val decode_and_add : t -> string -> unit
+(** Parses the symbol name and if it consitutes a valid encoding of crc,
+    decodes it and adds it to [t]. *)
 
-val emit_symbols : t -> Cmm.data_item list
+val encode : t -> string list
+(** Creates symbol names for all the Crcs stored in [t] and clears [t] *)
 
 val verbose : bool ref
 

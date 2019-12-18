@@ -193,7 +193,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
      in the profile, even if the user chooses to ignore them later. *)
   let crc_config = { Crcs.unit = true; func = false } in
   let crcs = Crcs.(mk Create crc_config) in
-  Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add_symbol crcs);
+  Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add crcs);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
   Hashtbl.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
@@ -207,21 +207,35 @@ let create locations (agg : Aggregated_perf_profile.t) =
   t
 
 let read filename =
+  let mode = "txt" in
   if !verbose then
-    printf "Reading aggregated decoded profile from %s\n" filename;
+    printf "Reading aggregated decoded profile from %s (mode:%s)\n" filename
+      mode;
   let t =
     match Parsexp_io.load (module Parsexp.Single) ~filename with
-    | Ok t_sexp -> t_of_sexp t_sexp
+    | Ok t_sexp -> (
+        match t_of_sexp t_sexp with
+        | t -> t
+        | exception e ->
+            Printf.fprintf stderr
+              "Cannot parse aggregated decoded profile file, incompatible \
+               format.\n\
+               Hint: if you are using an old profile, try generating a new \
+               one.";
+            raise e )
     | Error error ->
         Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
         Report.user_error "Cannot parse aggregated decoded profile file"
   in
+
   if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
   t
 
 let write t filename =
+  let mode = "txt" in
   if !verbose then
-    printf "Writing aggregated decoded profile to %s\n" filename;
+    printf "Writing aggregated decoded profile to %s (mode:%s)\n" filename
+      mode;
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan

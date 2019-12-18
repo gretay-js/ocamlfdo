@@ -154,6 +154,7 @@ SECTIONS
   {
     *(.data .data.* .gnu.linkonce.d.*)
     SORT(CONSTRUCTORS)
+    *(.data.ocamlfdo.*)
   }
   .data1          : { *(.data1) }
   _edata = .; PROVIDE (edata = .);
