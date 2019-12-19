@@ -214,18 +214,16 @@ let read filename =
   let t =
     match Parsexp_io.load (module Parsexp.Single) ~filename with
     | Ok t_sexp -> (
-        match t_of_sexp t_sexp with
-        | t -> t
-        | exception e ->
-            Printf.fprintf stderr
-              "Cannot parse aggregated decoded profile file, incompatible \
-               format.\n\
-               Hint: if you are using an old profile, try generating a new \
-               one.";
-            raise e )
+        try t_of_sexp t_sexp
+        with e ->
+          Report.user_error ~hint:(Some Report.Hint.Old_profile)
+            ~exn:(Some e)
+            "Cannot parse aggregated decoded profile from file %s." filename
+        )
     | Error error ->
         Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        Report.user_error "Cannot parse aggregated decoded profile file"
+        Report.user_error "Cannot parse aggregated decoded profile file %s"
+          filename
   in
 
   if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;

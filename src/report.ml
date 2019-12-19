@@ -65,8 +65,26 @@ let finish () =
   if !verbose then printf "Written summary to %s\n" filename;
   enabled := false
 
-let user_error fmt =
+module Hint = struct
+  type t = Old_profile
+
+  let to_fmt = function
+    | Old_profile ->
+        format_of_string
+          "Profile format may have changed.\n\
+           If you are using an old profile, try generating a new one."
+end
+
+let user_error ?(hint = None) ?(exn = None) fmt =
+  let fmt_hint =
+    match hint with
+    | None -> fmt
+    | Some h -> fmt ^^ "\nHint: " ^^ Hint.to_fmt h
+  in
   Format.kfprintf
-    (fun _ -> exit 321)
+    (fun _ ->
+      match exn with
+      | None -> exit 321
+      | Some exn -> raise exn)
     Format.err_formatter
-    ("@?Error: " ^^ fmt ^^ "@.")
+    ("@?Error: " ^^ fmt_hint ^^ "@.")

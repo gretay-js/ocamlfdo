@@ -14,12 +14,17 @@ module Kind = struct
     | Unit -> "u"
     | Func -> "f"
 
+  exception Parse_error of string
+
   let of_string_exn s =
     match List.find all ~f:(fun k -> String.equal s (to_string k)) with
     | Some k -> k
     | None ->
-        Report.user_error "Unknown kind: %s. Must be one of: %s\n" s
-          (String.concat ~sep:" " (List.map ~f:to_string all))
+        let msg =
+          sprintf "Unknown kind: %s. Kind must be one of: %s\n" s
+            (String.concat ~sep:" " (List.map ~f:to_string all))
+        in
+        raise (Parse_error msg)
 end
 
 module Crc = struct
@@ -155,7 +160,12 @@ let decode_and_add t s =
   | Some suffix ->
       let kind, rest = String.lsplit2_exn suffix ~on:symbol_sep in
       let name, hex = String.rsplit2_exn rest ~on:symbol_sep in
-      let crc = Crc.of_string kind hex in
+      let crc =
+        try Crc.of_string kind hex
+        with Kind.Parse_error msg ->
+          Report.user_error ~hint:(Some Report.Hint.Old_profile)
+            "Cannot decode crc symbol %s\n%s" s msg
+      in
       if !verbose then (
         printf "crc_symbol=%s\n" s;
         printf !"name=%s, crc=%{sexp:Crc.t}\n" name crc );
