@@ -207,10 +207,8 @@ let create locations (agg : Aggregated_perf_profile.t) =
   t
 
 let read filename =
-  let mode = "txt" in
   if !verbose then
-    printf "Reading aggregated decoded profile from %s (mode:%s)\n" filename
-      mode;
+    printf "Reading aggregated decoded profile from %s\n" filename;
   let t =
     match Parsexp_io.load (module Parsexp.Single) ~filename with
     | Ok t_sexp -> (
@@ -230,10 +228,8 @@ let read filename =
   t
 
 let write t filename =
-  let mode = "txt" in
   if !verbose then
-    printf "Writing aggregated decoded profile to %s (mode:%s)\n" filename
-      mode;
+    printf "Writing aggregated decoded profile to %s\n" filename;
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
