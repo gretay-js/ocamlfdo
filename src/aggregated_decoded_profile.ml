@@ -100,14 +100,13 @@ let get_func_id t ~name ~start ~finish =
   match Hashtbl.find t.name2id name with
   | None ->
       let id = Hashtbl.length t.functions in
-      let func = Func.mk ~id ~name ~start ~finish in
+      let func = Func.mk ~id ~start ~finish in
       Hashtbl.add_exn t.functions ~key:id ~data:func;
       Hashtbl.add_exn t.name2id ~key:name ~data:id;
       func.id
   | Some id ->
       let func = Hashtbl.find_exn t.functions id in
       assert (func.id = id);
-      assert (String.equal func.name name);
       assert (Raw_addr.equal func.start start);
       assert (Raw_addr.equal func.finish finish);
       func.id
@@ -233,11 +232,18 @@ let write t filename =
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
 
+let id2name t =
+  Hashtbl.to_alist t.name2id
+  |> List.Assoc.inverse
+  |> Map.of_alist_exn (module Int)
+
 let top_functions t =
   (* Sort functions using preliminary function-level execution counts in
      descending order. *)
   let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
-  let fl = List.map sorted ~f:(fun func -> func.name) in
+  (* reverse the mapping: from name2id to id2name *)
+  let id2name = id2name t in
+  let fl = List.map sorted ~f:(fun func -> Map.find_exn id2name func.id) in
   fl
 
 (* Translate linear ids of this function's locations to cfg labels within

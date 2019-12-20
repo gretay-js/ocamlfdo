@@ -3,8 +3,6 @@ open Core
 type t =
   { (* Unique identifier we assign to this function *)
     id : int;
-    (* Name of the function symbol *)
-    name : string;
     (* Raw start address of the function in original binary *)
     start : Raw_addr.t;
     finish : Raw_addr.t;
@@ -21,9 +19,8 @@ type t =
   }
 [@@deriving sexp]
 
-let mk ~id ~name ~start ~finish =
+let mk ~id ~start ~finish =
   { id;
-    name;
     start;
     finish;
     has_linearids = false;
@@ -33,19 +30,18 @@ let mk ~id ~name ~start ~finish =
   }
 
 (* Descending order of execution counts (reverse order of compare).Tie
-   breaker using name. Slower than id but more stable w.r.t. changes in perf
+   breaker using id. Slower than id but more stable w.r.t. changes in perf
    data and ocamlfdo, because ids are an artifact of the way ocamlfdo reads
    and decodes locations. Change to tie breaker using id if speed becomes a
    problem. *)
 let compare f1 f2 =
   let res = Int64.compare f2.count f1.count in
-  if res = 0 then String.compare f1.name f2.name else res
+  if res = 0 then Int.compare f1.id f2.id else res
 
 let merge t1 t2 ~crc_config ~ignore_buildid =
   if
     not
       ( t1.id = t2.id
-      && String.equal t1.name t2.name
       && ( Raw_addr.equal t1.start t2.start
            && Raw_addr.equal t1.finish t2.finish
          || ignore_buildid ) )
@@ -55,7 +51,6 @@ let merge t1 t2 ~crc_config ~ignore_buildid =
       t1 t2;
 
   { id = t1.id;
-    name = t1.name;
     start = t1.start;
     finish = t1.finish;
     has_linearids = t1.has_linearids || t2.has_linearids;

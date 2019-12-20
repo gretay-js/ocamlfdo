@@ -190,6 +190,7 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
        form to %s\n"
       filename;
   let chan = Out_channel.create filename in
+  let id2name = Aggregated_decoded_profile.id2name p in
   let get_loc addr =
     let loc = Hashtbl.find_exn p.addr2loc addr in
     let id = loc.dbg in
@@ -197,7 +198,12 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
     | None -> None
     | Some rel ->
         let func = Hashtbl.find_exn p.functions rel.id in
-        Some { name = func.name; offset = rel.offset; id; addr = None }
+        Some
+          { name = Map.find_exn id2name func.id;
+            offset = rel.offset;
+            id;
+            addr = None
+          }
   in
   Hashtbl.iteri agg.branches ~f:(fun ~key ~data:count ->
       let mis =
@@ -214,6 +220,7 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
   Out_channel.close chan
 
 let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
+  let id2name = Aggregated_decoded_profile.id2name p in
   if !verbose then
     printf
       "Writing fallthrough from aggregated decoded profile in decoded bolt \
@@ -231,7 +238,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
                     let mis = b.mispredicts in
                     let src =
                       Some
-                        { name = func.name;
+                        { name = Map.find_exn id2name func.id;
                           id = Some bi.terminator_id;
                           offset = 0;
                           addr = None
@@ -239,7 +246,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
                     in
                     let dst =
                       Some
-                        { name = func.name;
+                        { name = Map.find_exn id2name func.id;
                           id = b.target_id;
                           offset = 0;
                           addr = None

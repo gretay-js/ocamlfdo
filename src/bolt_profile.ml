@@ -26,11 +26,11 @@ module Kind = struct
 end
 
 module Bolt_loc = struct
-  type t = {
-    kind : Kind.t;
-    name : string;
-    offset : int;
-  }
+  type t =
+    { kind : Kind.t;
+      name : string;
+      offset : int
+    }
   [@@deriving sexp]
 
   let to_string t =
@@ -58,12 +58,12 @@ module Bolt_loc = struct
 end
 
 module Bolt_branch = struct
-  type t = {
-    src : Bolt_loc.t;
-    dst : Bolt_loc.t;
-    mis : Int64.t;
-    count : Int64.t;
-  }
+  type t =
+    { src : Bolt_loc.t;
+      dst : Bolt_loc.t;
+      mis : Int64.t;
+      count : Int64.t
+    }
   [@@deriving sexp]
 
   let print ~chan t =
@@ -74,21 +74,18 @@ module Bolt_branch = struct
 
   let of_string s =
     match String.split ~on:' ' s with
-    | [
-     src_kind;
-     src_name;
-     src_offset;
-     dst_kind;
-     dst_name;
-     dst_offset;
-     mis;
-     count;
-    ] ->
-        {
-          src = Bolt_loc.of_strings src_kind src_name src_offset;
+    | [ src_kind;
+        src_name;
+        src_offset;
+        dst_kind;
+        dst_name;
+        dst_offset;
+        mis;
+        count ] ->
+        { src = Bolt_loc.of_strings src_kind src_name src_offset;
           dst = Bolt_loc.of_strings dst_kind dst_name dst_offset;
           mis = Int64.of_string mis;
-          count = Int64.of_string count;
+          count = Int64.of_string count
         }
     | _ -> assert false
 end
@@ -120,7 +117,7 @@ let write t ~filename =
 
 (* For each function, check its execounts and collect inferred fallthrough
    edges. *)
-let fallthroughs locations (p : Aggregated_decoded_profile.t) =
+let fallthroughs locations (p : Aggregated_decoded_profile.t) id2name =
   (* Try to get the raw address in the original binary. We could try to
      create Loc.t with it. Create Bolt_loc.t with it directly because it is
      only used for debugging to generating bolt fdata. *)
@@ -129,13 +126,13 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
     Elf_locations.to_address locations { file; line }
   in
   let make_bolt_loc (func : Func.t) linearid =
-    match inverse func.name linearid with
+    let func_name = Map.find_exn id2name func.id in
+    match inverse func_name linearid with
     | None -> Bolt_loc.unknown
     | Some addr ->
-        {
-          kind = Symbol;
-          name = func.name;
-          offset = Int64.(to_int_trunc (addr - func.start));
+        { kind = Symbol;
+          name = func_name;
+          offset = Int64.(to_int_trunc (addr - func.start))
         }
   in
   Hashtbl.fold p.functions ~init:[] ~f:(fun ~key:_ ~data:func acc ->
@@ -160,7 +157,8 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
                       printf
                         "Found fallthrough in %s at linearids %d->%d \
                          count=%Ld\n"
-                        func.name src_id dst_id count;
+                        (Map.find_exn id2name func.id)
+                        src_id dst_id count;
                     let boltb = { Bolt_branch.src; dst; count; mis } in
                     boltb :: acc )
                   else acc))
@@ -169,13 +167,16 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) =
 (* Make and fold using init and f *)
 let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
     locations ~init ~f =
+  let id2name = Aggregated_decoded_profile.id2name p in
   let get_bolt_loc addr =
     let loc = Hashtbl.find_exn p.addr2loc addr in
     match loc.rel with
     | None -> Bolt_loc.unknown
     | Some rel ->
-        let func = Hashtbl.find_exn p.functions rel.id in
-        { kind = Symbol; name = func.name; offset = rel.offset }
+        { kind = Symbol;
+          name = Map.find_exn id2name rel.id;
+          offset = rel.offset
+        }
   in
   let append_if_valid acc b =
     let open Bolt_branch in
@@ -196,7 +197,7 @@ let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
         let b = { Bolt_branch.src; dst; mis; count } in
         append_if_valid acc b)
   in
-  let ft = fallthroughs locations p in
+  let ft = fallthroughs locations p id2name in
   if !verbose then (
     printf "fallthroughs:\n";
     List.iter ft ~f:(Bolt_branch.print ~chan:Out_channel.stdout);

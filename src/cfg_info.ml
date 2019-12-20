@@ -162,15 +162,16 @@ let get_block t (loc : Loc.t) =
   | Some dbg -> (
       match id_to_label t dbg with
       | None ->
-          Report.user_error "No cfg label for linearid %d in %s" dbg
-            t.func.name ()
+          Report.user_error "No cfg label for linearid %d in %d" dbg
+            t.func.id ()
       | Some label -> (
           match Cfg.get_block (CL.cfg t.cl) label with
           | Some block -> Some block
           | None ->
               Report.user_error
-                "Can't find cfg basic block labeled %d for linearid %d in %s\n"
-                label dbg t.func.name () ) )
+                "Can't find cfg basic block labeled %d for linearid %d in \
+                 func %d\n"
+                label dbg t.func.id () ) )
 
 let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
   let from_block = get_block t from_loc in
@@ -373,8 +374,8 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
       | Some (to_pos, _) -> List.take fallthrough to_pos
     in
     if !verbose then (
-      printf "%s trace (from_lbl=%d,to_lbl=%d)\n fallthrough: " t.func.name
-        from_lbl to_lbl;
+      printf "func %d trace (from_lbl=%d,to_lbl=%d)\n fallthrough: "
+        t.func.id from_lbl to_lbl;
       List.iter fallthrough ~f:(fun lbl -> printf " %d" lbl);
       printf "\nlayout=";
       List.iter layout ~f:(fun lbl -> printf " %d" lbl);
@@ -388,10 +389,10 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
       | Branch _ | Switch _ ->
           if !verbose then (
             printf
-              "check_fallthrough in %s trace (from_lbl=%d,to_lbl=%d): \
+              "check_fallthrough in func %d trace (from_lbl=%d,to_lbl=%d): \
                src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
-              t.func.name from_lbl to_lbl src_lbl dst_lbl;
+              t.func.id from_lbl to_lbl src_lbl dst_lbl;
             List.iter (Cfg.successor_labels cfg block) ~f:(fun lbl ->
                 printf "%d\n" lbl) );
           if
@@ -402,19 +403,19 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
           else (
             if !verbose then
               printf
-                "Malformed fallthrough in %s trace (from_lbl=%d,to_lbl=%d): \
-                 src_lbl=%d dst_lbl=%d\n\
+                "Malformed fallthrough in func %d trace \
+                 (from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
                  src_block.successor_labels:\n"
-                t.func.name from_lbl to_lbl src_lbl dst_lbl;
+                t.func.id from_lbl to_lbl src_lbl dst_lbl;
             raise Malformed_fallthrough_trace )
       | _ ->
           if !verbose then
             printf
-              "Unexpected terminator %s in fallthrough trace \
-               %s(from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
+              "Unexpected terminator %s in fallthrough trace func %d \
+               (from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
               (terminator_to_string desc)
-              t.func.name from_lbl to_lbl src_lbl dst_lbl;
+              t.func.id from_lbl to_lbl src_lbl dst_lbl;
           raise Malformed_fallthrough_trace
     in
     assert (
