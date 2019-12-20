@@ -8,18 +8,19 @@ module Bolt_loc : sig
 end
 
 module Bolt_branch : sig
-  type t = {
-    src : Bolt_loc.t;
-    dst : Bolt_loc.t;
-    mis : Int64.t;
-    count : Int64.t;
-  }
+  type t =
+    { src : Bolt_loc.t;
+      dst : Bolt_loc.t;
+      mis : Int64.t;
+      count : Int64.t
+    }
 end
 
 type t = Bolt_branch.t list [@@deriving sexp]
 
 val create :
   Aggregated_decoded_profile.t ->
+  Linearid_profile.t ->
   Aggregated_perf_profile.t ->
   Elf_locations.t ->
   t
@@ -27,6 +28,7 @@ val create :
 (* Writes directly to file without creating the entire profile in memory. *)
 val save :
   Aggregated_decoded_profile.t ->
+  Linearid_profile.t ->
   Aggregated_perf_profile.t ->
   Elf_locations.t ->
   filename:string ->
@@ -34,7 +36,11 @@ val save :
 
 (* Writes directly to file without creating the entire profile in memory. *)
 val save_fallthrough :
-  Aggregated_decoded_profile.t -> Elf_locations.t -> filename:string -> unit
+  Aggregated_decoded_profile.t ->
+  Linearid_profile.t ->
+  Elf_locations.t ->
+  filename:string ->
+  unit
 
 val read : filename:string -> t
 

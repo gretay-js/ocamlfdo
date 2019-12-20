@@ -11,7 +11,10 @@ val save :
   unit
 
 val save_fallthrough :
-  Aggregated_decoded_profile.t -> filename:string -> unit
+  Aggregated_decoded_profile.t ->
+  Linearid_profile.t ->
+  filename:string ->
+  unit
 
 val write : t -> filename:string -> unit
 

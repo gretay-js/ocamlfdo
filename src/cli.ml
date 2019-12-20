@@ -8,6 +8,7 @@ let set_verbose v =
   Aggregated_perf_profile.verbose := v;
   Bolt_profile.verbose := v;
   Decoded_bolt_profile.verbose := v;
+  Linearid_profile.verbose := v;
   Cfg_info.verbose := v;
   Clusters.verbose := v;
   Elf_locations.verbose := v;

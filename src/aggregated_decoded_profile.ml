@@ -14,12 +14,6 @@ type t =
     name2id : int Hashtbl.M(String).t;
     (* map func id to func info *)
     functions : Func.t Hashtbl.M(Int).t;
-    (* map func id to cfg_info of that function. *)
-    (* sparse, only holds functions that have cfg *and* execounts. *)
-    (* logically it should be defined inside Func.t but it creates a cyclic
-       dependency between . The advantage of the current design is smaller
-       space that a Func takes if it doesn't have a cfg_info *)
-    execounts : Cfg_info.blocks Hashtbl.M(Int).t;
     (* map name of compilation unit or function to its md5 digest. Currently
        contains only crcs of linear IR. Not using Caml.Digest.t because it
        does not have sexp. Not using Core's Digest because digests generated
@@ -34,7 +28,6 @@ let mk size crcs buildid =
   { addr2loc = Hashtbl.create ~size (module Raw_addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
-    execounts = Hashtbl.create (module Int);
     crcs;
     buildid
   }
@@ -260,67 +253,7 @@ let top_functions t =
   let fl = List.map sorted ~f:name in
   fl
 
-(* Translate linear ids of this function's locations to cfg labels within
-   this function, find the corresponding basic blocks and update their
-   block_info. Perform lots of sanity checks to make sure the location of the
-   execounts match the instructions in the cfg. *)
-let create_cfg_info t func cl =
-  let get_loc addr = Hashtbl.find_exn t.addr2loc addr in
-  let i = Cfg_info.create cl func in
-  (* Associate instruction counts with basic blocks *)
-  Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
-      let loc = get_loc key in
-      Cfg_info.record_ip i ~loc ~data);
-
-  (* Associate fall-through trace counts with basic blocks *)
-  Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
-      let from_addr, to_addr = key in
-      let from_loc = get_loc from_addr in
-      let to_loc = get_loc to_addr in
-      Cfg_info.record_trace i ~from_loc ~to_loc ~data);
-  ( if !verbose then
-    let total_traces =
-      List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
-    in
-    let m = Cfg_info.malformed_traces i in
-    let ratio =
-      if Int64.(total_traces > 0L) then Int64.(m * 100L / total_traces)
-      else 0L
-    in
-    printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n" m total_traces
-      ratio );
-
-  (* Associate branch counts with basic blocks *)
-  Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
-      let mispredicts =
-        Option.value (Hashtbl.find func.agg.mispredicts key) ~default:0L
-      in
-      let from_addr, to_addr = key in
-      let from_loc = get_loc from_addr in
-      let to_loc = get_loc to_addr in
-      Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
-  Cfg_info.blocks i
-
-(* Compute detailed execution counts for function [name] using its CFG *)
-let add t name cl =
-  match Hashtbl.find t.name2id name with
-  | None ->
-      if !verbose then printf "Not found profile for %s with cfg.\n" name;
-      None
-  | Some id ->
-      let func = Hashtbl.find_exn t.functions id in
-      if Int64.(func.count > 0L) && func.has_linearids then (
-        if !verbose then (
-          printf "compute_cfg_execounts for %s\n" name;
-          Cfg_with_layout.print_dot cl "execount" );
-        let cfg_info = create_cfg_info t func cl in
-        Hashtbl.add_exn t.execounts ~key:id ~data:cfg_info;
-        Some cfg_info )
-      else None
-
 let rename t old2new =
-  if not (Hashtbl.is_empty t.execounts) then
-    Report.user_error "Rename of execounts is not implemented";
   Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
   Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
   let size = Hashtbl.length t.functions in
@@ -391,12 +324,8 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
-  let merge_execounts ~key:_ _a =
-    Report.user_error "Merge of cfg_info is not supported yet"
-  in
   Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc ~f:merge_addr2loc;
   Hashtbl.merge_into ~src:src.functions ~dst:dst.functions ~f:merge_functions;
-  Hashtbl.merge_into ~src:src.execounts ~dst:dst.execounts ~f:merge_execounts;
   Crcs.merge_into ~src:src.crcs ~dst:dst.crcs crc_config
 
 module Merge = Merge.Make (struct

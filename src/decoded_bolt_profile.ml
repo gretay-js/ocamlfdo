@@ -219,7 +219,8 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
           print_branch ~chan b);
   Out_channel.close chan
 
-let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
+let save_fallthrough (p : Aggregated_decoded_profile.t)
+    (lp : Linearid_profile.t) ~filename =
   let id2name = Aggregated_decoded_profile.id2name p in
   if !verbose then
     printf
@@ -229,7 +230,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
   let chan = Out_channel.create filename in
   (* For each function, print inferred fallthrough edges. *)
   Hashtbl.iter p.functions ~f:(fun func ->
-      match Hashtbl.find p.execounts func.id with
+      match Hashtbl.find lp.execounts func.id with
       | Some cfg_info when func.has_linearids ->
           Hashtbl.iter cfg_info ~f:(fun bi ->
               List.iter bi.branches ~f:(fun b ->

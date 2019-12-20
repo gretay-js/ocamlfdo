@@ -117,7 +117,8 @@ let write t ~filename =
 
 (* For each function, check its execounts and collect inferred fallthrough
    edges. *)
-let fallthroughs locations (p : Aggregated_decoded_profile.t) id2name =
+let fallthroughs locations (p : Aggregated_decoded_profile.t)
+    (lp : Linearid_profile.t) id2name =
   (* Try to get the raw address in the original binary. We could try to
      create Loc.t with it. Create Bolt_loc.t with it directly because it is
      only used for debugging to generating bolt fdata. *)
@@ -136,7 +137,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) id2name =
         }
   in
   Hashtbl.fold p.functions ~init:[] ~f:(fun ~key:_ ~data:func acc ->
-      match Hashtbl.find p.execounts func.id with
+      match Hashtbl.find lp.execounts func.id with
       | Some cfg_info when func.has_linearids ->
           (* This is expensive because we need to scan the entire original
              binary to find the function. *)
@@ -165,8 +166,8 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t) id2name =
       | _ -> acc)
 
 (* Make and fold using init and f *)
-let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
-    locations ~init ~f =
+let mk (p : Aggregated_decoded_profile.t) (lp : Linearid_profile.t)
+    (agg : Aggregated_perf_profile.t) locations ~init ~f =
   let id2name = Aggregated_decoded_profile.id2name p in
   let get_bolt_loc addr =
     let loc = Hashtbl.find_exn p.addr2loc addr in
@@ -197,34 +198,34 @@ let mk (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
         let b = { Bolt_branch.src; dst; mis; count } in
         append_if_valid acc b)
   in
-  let ft = fallthroughs locations p id2name in
+  let ft = fallthroughs locations p lp id2name in
   if !verbose then (
     printf "fallthroughs:\n";
     List.iter ft ~f:(Bolt_branch.print ~chan:Out_channel.stdout);
     printf "\n" );
   List.fold ft ~init:t ~f:append_if_valid
 
-let create (p : Aggregated_decoded_profile.t)
+let create (p : Aggregated_decoded_profile.t) (lp : Linearid_profile.t)
     (agg : Aggregated_perf_profile.t) locations =
-  mk p agg locations ~init:[] ~f:(fun acc b -> b :: acc)
+  mk p lp agg locations ~init:[] ~f:(fun acc b -> b :: acc)
 
 (* If [t] uses too much memory and we don't need it other than for printing,
    then we can print during [mk] instead of "append_if" above *)
-let save p agg locations ~filename =
+let save p lp agg locations ~filename =
   if !verbose then
     printf
       "Writing preliminary aggregated decoded profile in bolt form to %s\n"
       filename;
   let chan = Out_channel.create filename in
-  mk p agg locations ~init:() ~f:(fun _ b -> Bolt_branch.print ~chan b);
+  mk p lp agg locations ~init:() ~f:(fun _ b -> Bolt_branch.print ~chan b);
   Out_channel.close chan
 
 (* If [t] uses too much memory and we don't need it other than for printing,
    then we can print during [mk] instead of "append_if" above *)
-let save_fallthrough p locations ~filename =
+let save_fallthrough p lp locations ~filename =
   if !verbose then
     printf "Writing fallthroughs profile in bolt form to %s\n" filename;
   let chan = Out_channel.create filename in
-  mk p (Aggregated_perf_profile.empty ()) locations ~init:() ~f:(fun _ b ->
-      Bolt_branch.print ~chan b);
+  mk p lp (Aggregated_perf_profile.empty ()) locations ~init:()
+    ~f:(fun _ b -> Bolt_branch.print ~chan b);
   Out_channel.close chan
