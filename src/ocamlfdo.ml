@@ -548,4 +548,9 @@ let main_command =
 
 let () =
   set_verbose false;
-  Command.run main_command
+  let version =
+    match Build_info.V1.version () with
+    | None -> "n/a"
+    | Some v -> Build_info.V1.Version.to_string v
+  in
+  Command.run ~version main_command

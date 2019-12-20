@@ -223,7 +223,6 @@ let read filename =
         Report.user_error "Cannot parse aggregated decoded profile file %s"
           filename
   in
-
   if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
   t
 

@@ -9,7 +9,9 @@
         parsexp_io
         shexp.process
         ocamlcfg
-        re2)
+        re2
+        dune-build-info
+        )
  (preprocess (pps ppx_jane)))
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))
