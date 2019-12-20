@@ -289,7 +289,7 @@ let resolve_function_containing t ~program_counter =
             List.iter syms ~f:(fun sym ->
                 let start = Owee_elf.Symbol_table.Symbol.value sym in
                 let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
-                let finish = Addr.( + ) start size in
+                let finish = Raw_addr.( + ) start size in
                 let name =
                   match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
                   | None -> "?noname?"
@@ -306,7 +306,7 @@ let resolve_function_containing t ~program_counter =
             | sym :: tail ->
                 let start = Owee_elf.Symbol_table.Symbol.value sym in
                 let size = Owee_elf.Symbol_table.Symbol.size_in_bytes sym in
-                let finish = Addr.( + ) start size in
+                let finish = Raw_addr.( + ) start size in
                 if !verbose then
                   Printf.printf
                     "Find func sym: start=0x%Lx finish=0x%Lx pc=0x%Lx\n"

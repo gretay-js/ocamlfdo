@@ -11,7 +11,7 @@ type rel =
 [@@deriving compare, sexp, hash, equal]
 
 type t =
-  { addr : Addr.t;
+  { addr : Raw_addr.t;
     (* Raw address in the original binary *)
     rel : rel option;
     (* Containing function info and relative offset *)
@@ -32,7 +32,7 @@ let merge t1 t2 =
       !"Cannot merge locations %s:\n%{sexp:t}\n%{sexp:t}\n"
       msg t1 t2
   in
-  if not (Addr.equal t1.addr t2.addr) then fail "for different addresses";
+  if not (Raw_addr.equal t1.addr t2.addr) then fail "for different addresses";
   let rel =
     match (t1.rel, t2.rel) with
     | None, None -> None

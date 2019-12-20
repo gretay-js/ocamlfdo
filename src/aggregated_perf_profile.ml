@@ -4,11 +4,11 @@ let verbose = ref false
 
 module P = struct
   (* Pair of addresses *)
-  type t = Addr.t * Addr.t [@@deriving compare, hash, sexp]
+  type t = Raw_addr.t * Raw_addr.t [@@deriving compare, hash, sexp]
 end
 
 type t =
-  { instructions : Execount.t Hashtbl.M(Addr).t;
+  { instructions : Execount.t Hashtbl.M(Raw_addr).t;
     branches : Execount.t Hashtbl.M(P).t;
         (** number of times the branch was taken. *)
     mispredicts : Execount.t Hashtbl.M(P).t;
@@ -23,7 +23,7 @@ type t =
 [@@deriving sexp]
 
 let empty () =
-  { instructions = Hashtbl.create (module Addr);
+  { instructions = Hashtbl.create (module Raw_addr);
     branches = Hashtbl.create (module P);
     mispredicts = Hashtbl.create (module P);
     traces = Hashtbl.create (module P);

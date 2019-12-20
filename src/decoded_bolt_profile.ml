@@ -2,26 +2,27 @@ open Core
 
 let verbose = ref true
 
-type loc = {
-  (* function name *)
-  name : string;
-  (* offset from function start *)
-  offset : int;
-  (* id decode from debug info *)
-  id : int option;
-  (* raw address, only computed if we found the symbol with name in the
-     binary. used for creating aggregated_decoded_profile from bolt_profile.
-     it's not necessary but we currently require Loc.t to have address. *)
-  addr : Addr.t option;
-}
+type loc =
+  { (* function name *)
+    name : string;
+    (* offset from function start *)
+    offset : int;
+    (* id decode from debug info *)
+    id : int option;
+    (* raw address, only computed if we found the symbol with name in the
+       binary. used for creating aggregated_decoded_profile from
+       bolt_profile. it's not necessary but we currently require Loc.t to
+       have address. *)
+    addr : Raw_addr.t option
+  }
 [@@deriving sexp]
 
-type branch = {
-  src : loc option;
-  dst : loc option;
-  count : Execount.t;
-  mis : Execount.t;
-}
+type branch =
+  { src : loc option;
+    dst : loc option;
+    count : Execount.t;
+    mis : Execount.t
+  }
 [@@deriving sexp]
 
 type t = branch list [@@deriving sexp]
@@ -52,8 +53,8 @@ let print_branch ~chan b =
   (* OCaml entry functions are marked as "reduce_size" and not "fast". We do
      not annotated them with linear ids and we do not compute CFG for them.
      Therefore, we cannot compute fallthrough for them. This mismatch is
-     harder to detect using diff, so we mark these entries with a star at
-     the end of the output. We mark with two stars entries that start with
+     harder to detect using diff, so we mark these entries with a star at the
+     end of the output. We mark with two stars entries that start with
      "caml_" and typically belong to the ocaml runtime. *)
   let print_notes = false in
   let entry_note =
@@ -104,7 +105,7 @@ let create locations ~filename =
   Elf_locations.find_functions locations functions;
 
   (* Collect all addresses *)
-  let addresses = Hashtbl.create ~size:len (module Addr) in
+  let addresses = Hashtbl.create ~size:len (module Raw_addr) in
   let add bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()
@@ -140,17 +141,15 @@ let create locations ~filename =
             let dbg = Hashtbl.find_exn addresses program_counter in
             match dbg with
             | None ->
-                Some
-                  { name; id = None; offset; addr = Some program_counter }
+                Some { name; id = None; offset; addr = Some program_counter }
             | Some dbg ->
                 if Filenames.compare Linear ~expected:name ~actual:dbg.file
                 then
                   Some
-                    {
-                      name;
+                    { name;
                       id = Some dbg.line;
                       offset;
-                      addr = Some program_counter;
+                      addr = Some program_counter
                     }
                 else
                   Some
@@ -183,8 +182,8 @@ let export t =
       | _ -> ());
   agg
 
-let save (p : Aggregated_decoded_profile.t)
-    (agg : Aggregated_perf_profile.t) ~filename =
+let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
+    ~filename =
   if !verbose then
     printf
       "Writing fallthrough from aggregated decoded profile in decoded bolt \
@@ -236,20 +235,18 @@ let save_fallthrough (p : Aggregated_decoded_profile.t) ~filename =
                     let mis = b.mispredicts in
                     let src =
                       Some
-                        {
-                          name = func.name;
+                        { name = func.name;
                           id = Some bi.terminator_id;
                           offset = 0;
-                          addr = None;
+                          addr = None
                         }
                     in
                     let dst =
                       Some
-                        {
-                          name = func.name;
+                        { name = func.name;
                           id = b.target_id;
                           offset = 0;
-                          addr = None;
+                          addr = None
                         }
                     in
                     let b = { src; dst; mis; count } in

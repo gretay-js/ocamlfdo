@@ -1,15 +1,15 @@
 open Core
 
-type 'a interval = {
-  l : Addr.t;
-  r : Addr.t;
-  v : 'a;
-}
+type 'a interval =
+  { l : Raw_addr.t;
+    r : Raw_addr.t;
+    v : 'a
+  }
 
 (* Interval's lower bound is the key. *)
-type 'a t = 'a interval Map.M(Addr).t
+type 'a t = 'a interval Map.M(Raw_addr).t
 
-let empty = Map.empty (module Addr)
+let empty = Map.empty (module Raw_addr)
 
 let _verbose = true
 
@@ -17,7 +17,7 @@ let enclosing t a =
   match Map.closest_key t `Less_or_equal_to a with
   | None -> None
   | Some (_, interval) ->
-      let open Addr in
+      let open Raw_addr in
       assert (interval.l <= a);
       if a < interval.r then Some interval else None
 
@@ -35,7 +35,7 @@ let disjoint t i =
     match Map.closest_key t `Less_or_equal_to i.l with
     | None -> true
     | Some (_, below) ->
-        let open Addr in
+        let open Raw_addr in
         assert (below.l <= i.l);
         if below.r <= i.l then true else false
   in
@@ -43,7 +43,7 @@ let disjoint t i =
     match Map.closest_key t `Greater_than i.l with
     | None -> true
     | Some (_, above) ->
-        let open Addr in
+        let open Raw_addr in
         assert (i.l <= above.l);
         if i.r <= above.l then true else false
   in
@@ -51,7 +51,7 @@ let disjoint t i =
 
 let insert t interval =
   (* Non-empty intervals only *)
-  assert Int64.(interval.l < interval.r);
+  assert (Int64.(interval.l < interval.r));
 
   (* Check that the new interval is disjoint from all existing intervals in
      [t] *)

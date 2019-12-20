@@ -4,11 +4,11 @@
 
    The interval's start is closed and interval's end is open: [i.l,i.r) *)
 
-type 'a interval = {
-  l : Addr.t;
-  r : Addr.t;
-  v : 'a;
-}
+type 'a interval =
+  { l : Raw_addr.t;
+    r : Raw_addr.t;
+    v : 'a
+  }
 
 type 'a t
 
@@ -16,4 +16,4 @@ val empty : 'a t
 
 val insert : 'a t -> 'a interval -> 'a t
 
-val enclosing : 'a t -> Addr.t -> 'a interval option
+val enclosing : 'a t -> Raw_addr.t -> 'a interval option

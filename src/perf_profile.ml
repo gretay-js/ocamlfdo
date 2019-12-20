@@ -15,8 +15,8 @@ let mispredicted = function
   | _ -> false
 
 type br =
-  { from_addr : Addr.t;
-    to_addr : Addr.t;
+  { from_addr : Raw_addr.t;
+    to_addr : Raw_addr.t;
     mispredict : mispredict_flag;
     index : int
         (* Position on the stack, with 0 being the most recent branch. This
@@ -26,7 +26,7 @@ type br =
 [@@deriving compare, sexp]
 
 type sample =
-  { ip : Addr.t;
+  { ip : Raw_addr.t;
     (* instruction pointer where the sample was taken *)
     brstack : br list (* branch stack is the last branch record (LBR) *)
   }
@@ -83,8 +83,8 @@ let hex s = if String.is_prefix ~prefix:"0x" s then s else "0x" ^ s
 type mmap =
   { pid : int;
     name : string;
-    base : Addr.t;
-    size : Addr.t
+    base : Raw_addr.t;
+    size : Raw_addr.t
   }
 
 type row =
@@ -118,8 +118,8 @@ let row_to_sample ~keep_pid row =
               (* parse the important info *)
               match String.split_on_chars pos ~on:['['; '('; ')'] with
               | [base; size] ->
-                  let base = Addr.of_string base in
-                  let size = Addr.of_string size in
+                  let base = Raw_addr.of_string base in
+                  let size = Raw_addr.of_string size in
                   Mmap { pid; name; base; size }
               | _ -> Report.user_error "Unexpected format" )
             else Unknown

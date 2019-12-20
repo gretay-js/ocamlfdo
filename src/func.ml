@@ -6,8 +6,8 @@ type t =
     (* Name of the function symbol *)
     name : string;
     (* Raw start address of the function in original binary *)
-    start : Addr.t;
-    finish : Addr.t;
+    start : Raw_addr.t;
+    finish : Raw_addr.t;
     (* Preliminary execution count *)
     mutable count : Execount.t;
     (* Does the function have any linearids? *)
@@ -46,7 +46,8 @@ let merge t1 t2 ~crc_config ~ignore_buildid =
     not
       ( t1.id = t2.id
       && String.equal t1.name t2.name
-      && ( (Addr.equal t1.start t2.start && Addr.equal t1.finish t2.finish)
+      && ( Raw_addr.equal t1.start t2.start
+           && Raw_addr.equal t1.finish t2.finish
          || ignore_buildid ) )
   then
     Report.user_error

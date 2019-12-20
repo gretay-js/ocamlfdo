@@ -9,7 +9,7 @@ let verbose = ref true
 
 type t =
   { (* map raw addresses to locations *)
-    addr2loc : Loc.t Hashtbl.M(Addr).t;
+    addr2loc : Loc.t Hashtbl.M(Raw_addr).t;
     (* map func name to func id *)
     name2id : int Hashtbl.M(String).t;
     (* map func id to func info *)
@@ -31,7 +31,7 @@ type t =
 [@@deriving sexp]
 
 let mk size crcs buildid =
-  { addr2loc = Hashtbl.create ~size (module Addr);
+  { addr2loc = Hashtbl.create ~size (module Raw_addr);
     name2id = Hashtbl.create (module String);
     functions = Hashtbl.create (module Int);
     execounts = Hashtbl.create (module Int);
@@ -108,8 +108,8 @@ let get_func_id t ~name ~start ~finish =
       let func = Hashtbl.find_exn t.functions id in
       assert (func.id = id);
       assert (String.equal func.name name);
-      assert (Addr.equal func.start start);
-      assert (Addr.equal func.finish finish);
+      assert (Raw_addr.equal func.start start);
+      assert (Raw_addr.equal func.finish finish);
       func.id
 
 let decode_addr t addr interval dbg =
@@ -129,7 +129,7 @@ let decode_addr t addr interval dbg =
           match Int64.(to_int (addr - start)) with
           | None ->
               Report.user_error "Offset too big: 0x%Lx"
-                Addr.(addr - start)
+                Raw_addr.(addr - start)
                 ()
           | Some offset ->
               assert (offset >= 0);
@@ -169,7 +169,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   let size =
     Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
   in
-  let addresses = Hashtbl.create ~size (module Addr) in
+  let addresses = Hashtbl.create ~size (module Raw_addr) in
   let add key =
     if not (Hashtbl.mem addresses key) then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
