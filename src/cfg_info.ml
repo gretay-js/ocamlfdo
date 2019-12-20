@@ -13,6 +13,8 @@ type blocks = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
 type t =
   { cl : CL.t;
     func : Func.t;
+    mutable malformed_traces : Execount.t;
+        (** number of fallthrough traces that didn't correspond to the cfg *)
     blocks : blocks;
     id_to_label : Cfg_label.t Hashtbl.M(Int).t
         (** Map id of instruction to label of the block that contains the
@@ -20,6 +22,8 @@ type t =
   }
 
 let blocks t = t.blocks
+
+let malformed_traces t = t.malformed_traces
 
 let compute_id_to_label t =
   let f label block =
@@ -36,6 +40,7 @@ let create cl func =
   let t =
     { cl;
       func;
+      malformed_traces = 0L;
       blocks = Hashtbl.create (module Cfg_label);
       id_to_label = Hashtbl.create (module Cfg_label)
     }
@@ -59,9 +64,9 @@ let terminator_to_string (t : Cfg.terminator) =
   | Branch s -> sprintf "Branch with %d successors" (List.length s)
   | Switch s -> sprintf "Switch with %d successors" (Array.length s)
 
-let mal (func : Func.t) count =
+let mal t count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
-  func.malformed_traces <- Int64.(func.malformed_traces + count)
+  t.malformed_traces <- Int64.(t.malformed_traces + count)
 
 let first_id (block : BB.t) =
   match BB.body block with
@@ -463,7 +468,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
     (* printf !"%{sexp:t}\n" t.blocks *)
   with Malformed_fallthrough_trace ->
     (* If the trace is malformed, don't add counts *)
-    mal t.func count
+    mal t count
 
 let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
   (* both locations must be in this function *)
@@ -496,14 +501,14 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
               "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot map \
                to_loc or from_loc to cfg blocks.\n"
               count from_loc.addr to_loc.addr;
-          mal t.func count )
+          mal t count )
   | _ ->
       if !verbose then
         printf
           "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:to and from \
            function is not the same or not known.\n"
           count from_loc.addr to_loc.addr;
-      mal t.func count
+      mal t count
 
 let record_ip t ~loc ~data:count =
   match get_block t loc with

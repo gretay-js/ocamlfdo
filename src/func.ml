@@ -10,8 +10,6 @@ type t =
     mutable count : Execount.t;
     (* Does the function have any linearids? *)
     mutable has_linearids : bool;
-    (* number of fallthrough traces that didn't correspond to the cfg *)
-    mutable malformed_traces : Execount.t;
     (* Counters that refer to this function, uses raw addresses. *)
     (* CR-soon gyorsh: This can be dropped after cfg_count is constructed, to
        save memory. *)
@@ -25,18 +23,8 @@ let mk ~id ~start ~finish =
     finish;
     has_linearids = false;
     count = 0L;
-    malformed_traces = 0L;
     agg = Aggregated_perf_profile.empty ()
   }
-
-(* Descending order of execution counts (reverse order of compare).Tie
-   breaker using id. Slower than id but more stable w.r.t. changes in perf
-   data and ocamlfdo, because ids are an artifact of the way ocamlfdo reads
-   and decodes locations. Change to tie breaker using id if speed becomes a
-   problem. *)
-let compare f1 f2 =
-  let res = Int64.compare f2.count f1.count in
-  if res = 0 then Int.compare f1.id f2.id else res
 
 let merge t1 t2 ~crc_config ~ignore_buildid =
   if
@@ -55,7 +43,6 @@ let merge t1 t2 ~crc_config ~ignore_buildid =
     finish = t1.finish;
     has_linearids = t1.has_linearids || t2.has_linearids;
     count = Execount.(t1.count + t2.count);
-    malformed_traces = Execount.(t1.malformed_traces + t2.malformed_traces);
     agg =
       Aggregated_perf_profile.Merge.merge t1.agg t2.agg ~crc_config
         ~ignore_buildid

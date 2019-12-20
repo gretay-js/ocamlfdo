@@ -232,18 +232,32 @@ let write t filename =
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
 
+(* CR-soon gyorsh: how often do we need to create it? is it worth storing it
+   as a field of [t]. It can be computed after the profile is decoded (i.e.,
+   need not be on the fly). *)
 let id2name t =
   Hashtbl.to_alist t.name2id
   |> List.Assoc.inverse
   |> Map.of_alist_exn (module Int)
 
+(* Sort functions using preliminary function-level execution counts in
+   descending order. *)
 let top_functions t =
-  (* Sort functions using preliminary function-level execution counts in
-     descending order. *)
-  let sorted = List.sort (Hashtbl.data t.functions) ~compare:Func.compare in
-  (* reverse the mapping: from name2id to id2name *)
   let id2name = id2name t in
-  let fl = List.map sorted ~f:(fun func -> Map.find_exn id2name func.id) in
+  let name func = Map.find_exn id2name func.id in
+  let compare f1 f2 =
+    (* Descending order of execution counts, i.e., reverse order of int
+       compare. *)
+    let res = Int64.compare f2.count f1.count in
+    (* Tie breaker using names. Slower than id but more stable w.r.t. changes
+       in perf data and ocamlfdo, because ids are an artifact of the way
+       ocamlfdo reads and decodes locations. Change to tie breaker using id
+       if speed becomes a problem. *)
+    if res = 0 then String.compare (name f1) (name f2) else res
+  in
+  let sorted = List.sort (Hashtbl.data t.functions) ~compare in
+  (* reverse the mapping: from name2id to id2name *)
+  let fl = List.map sorted ~f:name in
   fl
 
 (* Translate linear ids of this function's locations to cfg labels within
@@ -268,13 +282,13 @@ let create_cfg_info t func cl =
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
     in
+    let m = Cfg_info.malformed_traces i in
     let ratio =
-      if Int64.(total_traces > 0L) then
-        Int64.(func.malformed_traces * 100L / total_traces)
+      if Int64.(total_traces > 0L) then Int64.(m * 100L / total_traces)
       else 0L
     in
-    printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n"
-      func.malformed_traces total_traces ratio );
+    printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n" m total_traces
+      ratio );
 
   (* Associate branch counts with basic blocks *)
   Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->

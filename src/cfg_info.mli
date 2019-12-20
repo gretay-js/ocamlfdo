@@ -23,3 +23,5 @@ val record_branch :
   unit
 
 val verbose : bool ref
+
+val malformed_traces : t -> Execount.t
