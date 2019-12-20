@@ -153,7 +153,7 @@ let decode_addr t addr interval dbg =
                 (* Set has_linearids of this function *)
                 let func = Hashtbl.find_exn t.functions id in
                 func.has_linearids <- true;
-                Some dbg )
+                Some dbg.line )
               else None
         in
         if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;

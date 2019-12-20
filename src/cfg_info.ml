@@ -129,9 +129,7 @@ let record t block ~count =
   let b = get_block_info t block in
   Block_info.add b ~count
 
-let get_linearid (loc : Loc.t) =
-  let dbg = Option.value_exn loc.dbg in
-  dbg.line
+let get_linearid (loc : Loc.t) = Option.value_exn loc.dbg
 
 (* Find basic instruction whose id=[linearid] in [block] *)
 let _get_basic_instr linearid (block : BB.t) =
@@ -162,17 +160,17 @@ let get_block t (loc : Loc.t) =
           rel.id rel.offset );
       None
   | Some dbg -> (
-      match id_to_label t dbg.line with
+      match id_to_label t dbg with
       | None ->
-          Report.user_error "No cfg label for linearid %d in %s" dbg.line
-            dbg.file ()
+          Report.user_error "No cfg label for linearid %d in %s" dbg
+            t.func.name ()
       | Some label -> (
           match Cfg.get_block (CL.cfg t.cl) label with
           | Some block -> Some block
           | None ->
               Report.user_error
                 "Can't find cfg basic block labeled %d for linearid %d in %s\n"
-                label dbg.line dbg.file () ) )
+                label dbg t.func.name () ) )
 
 let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
   let from_block = get_block t from_loc in
@@ -486,10 +484,8 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
               "trace (from_addr=0x%Lx,to_addr=0x%Lx)=> \
                (from_linid=%d,to_linid=%d)=> (from_block=%d,to_block=%d)\n"
               from_loc.addr to_loc.addr
-              (let from_dbg = Option.value_exn from_loc.dbg in
-               from_dbg.line)
-              (let to_dbg = Option.value_exn to_loc.dbg in
-               to_dbg.line)
+              (Option.value_exn from_loc.dbg)
+              (Option.value_exn to_loc.dbg)
               (BB.start from_block) (BB.start to_block);
           compute_fallthrough_execounts t (BB.start from_block)
             (BB.start to_block) count

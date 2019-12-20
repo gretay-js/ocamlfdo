@@ -14,8 +14,8 @@ type t =
   { addr : Raw_addr.t;
     (* Raw address in the original binary *)
     rel : rel option;
-    (* Containing function info and relative offset *)
-    dbg : Dbg.t option
+    (* debug info: linearid *)
+    dbg : int option
   }
 [@@deriving sexp, compare, equal]
 
@@ -49,7 +49,7 @@ let merge t1 t2 =
   in
   let dbg =
     Option.merge t1.dbg t2.dbg ~f:(fun d1 d2 ->
-        if not (Dbg.equal d1 d2) then fail "with mismatched debug info";
+        if not (d1 = d2) then fail "with mismatched debug info";
         d1)
   in
   { addr = t1.addr; rel; dbg }

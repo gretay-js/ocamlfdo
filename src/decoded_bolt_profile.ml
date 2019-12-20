@@ -192,11 +192,7 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
   let chan = Out_channel.create filename in
   let get_loc addr =
     let loc = Hashtbl.find_exn p.addr2loc addr in
-    let id =
-      match loc.dbg with
-      | None -> None
-      | Some dbg -> Some dbg.line
-    in
+    let id = loc.dbg in
     match loc.rel with
     | None -> None
     | Some rel ->
