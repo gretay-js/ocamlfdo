@@ -6,7 +6,7 @@ let extension = "fdo.org"
 
 let last_id = ref 0
 
-let names = Hashtbl.create (module String)
+let names = String.Table.create ()
 
 let save_names = false
 

@@ -6,7 +6,7 @@ module Kind = struct
   type t =
     | Func
     | Unit
-  [@@deriving sexp, equal]
+  [@@deriving sexp, equal, bin_io]
 
   let all = [Func; Unit]
 
@@ -32,14 +32,14 @@ module Crc = struct
     { kind : Kind.t;
       crc : Md5.t
     }
-  [@@deriving sexp, equal]
+  [@@deriving sexp, equal, bin_io]
 
   let of_string kind hex =
     let crc = Md5.of_hex_exn hex in
     { kind = Kind.of_string_exn kind; crc }
 end
 
-type tbl = Crc.t Hashtbl.M(String).t [@@deriving sexp]
+type tbl = Crc.t String.Table.t [@@deriving sexp, bin_io]
 (** map name to the corresponding Crc *)
 
 type action =
@@ -59,8 +59,7 @@ type t =
 
 let tbl t = t.acc
 
-let mk action config =
-  { action; acc = Hashtbl.create (module String); config }
+let mk action config = { action; acc = String.Table.create (); config }
 
 let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
   (* Check *)

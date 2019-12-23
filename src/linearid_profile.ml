@@ -10,10 +10,10 @@ type t =
     (* logically it should be defined inside Func.t but it creates a cyclic
        dependency between . The advantage of the current design is smaller
        space that a Func takes if it doesn't have a cfg_info *)
-    execounts : Cfg_info.blocks Hashtbl.M(Int).t
+    execounts : Cfg_info.blocks Int.Table.t
   }
 
-let mk () = { execounts = Hashtbl.create (module Int) }
+let mk () = { execounts = Int.Table.create () }
 
 let add t id info = Hashtbl.add_exn t.execounts ~key:id ~data:info
 

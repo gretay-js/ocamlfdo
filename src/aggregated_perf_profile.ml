@@ -2,31 +2,36 @@ open Core
 
 let verbose = ref false
 
-module P = struct
-  (* Pair of addresses *)
-  type t = Raw_addr.t * Raw_addr.t [@@deriving compare, hash, sexp]
+(* Pair of addresses *)
+module Raw_address_pair = struct
+  module T = struct
+    type t = Raw_addr.t * Raw_addr.t [@@deriving compare, hash, sexp, bin_io]
+  end
+
+  include T
+  include Hashable.Make_binable (T)
 end
 
 type t =
-  { instructions : Execount.t Hashtbl.M(Raw_addr).t;
-    branches : Execount.t Hashtbl.M(P).t;
+  { instructions : Execount.t Raw_addr.Table.t;
+    branches : Execount.t Raw_address_pair.Table.t;
         (** number of times the branch was taken. *)
-    mispredicts : Execount.t Hashtbl.M(P).t;
+    mispredicts : Execount.t Raw_address_pair.Table.t;
         (** number of times the branch was mispredicted: branch target
             mispredicted or branch direction was mispredicted. *)
-    traces : Execount.t Hashtbl.M(P).t;
+    traces : Execount.t Raw_address_pair.Table.t;
         (** execution count: number of times the trace was taken. *)
     mutable buildid : string option
         (** identifier of the relevant unit (i.e., binary's buildid or
             function's crc in the future), if known. *)
   }
-[@@deriving sexp]
+[@@deriving sexp, bin_io]
 
 let empty () =
-  { instructions = Hashtbl.create (module Raw_addr);
-    branches = Hashtbl.create (module P);
-    mispredicts = Hashtbl.create (module P);
-    traces = Hashtbl.create (module P);
+  { instructions = Raw_addr.Table.create ();
+    branches = Raw_address_pair.Table.create ();
+    mispredicts = Raw_address_pair.Table.create ();
+    traces = Raw_address_pair.Table.create ();
     buildid = None
   }
 

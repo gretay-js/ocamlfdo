@@ -15,7 +15,7 @@ type t =
        save memory. *)
     agg : Aggregated_perf_profile.t
   }
-[@@deriving sexp]
+[@@deriving sexp, bin_io]
 
 let mk ~id ~start ~finish =
   { id;

@@ -14,7 +14,7 @@ type t =
     mutable fun_misses : int;
     mutable intervals_hits : int;
     mutable intervals_misses : int;
-    inverse : Elf_addr.t Hashtbl.M(Int).t Hashtbl.M(String).t
+    inverse : Elf_addr.t Int.Table.t String.Table.t
   }
 
 let verbose = ref true
@@ -31,7 +31,7 @@ let create ~elf_executable =
   let _header, sections = Owee_elf.read_elf map in
   let resolved = Hashtbl.create (module Elf_addr) in
   let resolved_fun = Hashtbl.create (module Elf_addr) in
-  let inverse = Hashtbl.create (module String) in
+  let inverse = String.Table.create () in
   let resolved_fun_intervals = Intervals.empty in
   let strtab = Owee_elf.find_string_table map sections in
   let symtab = Owee_elf.find_symbol_table map sections in
@@ -161,7 +161,7 @@ let find_range t ~start ~finish ~fill_gaps ~with_inverse cur prev =
                 if !verbose then
                   Printf.printf "creating a new func table for %s %d\n"
                     filename line;
-                let tbl = Hashtbl.create (module Int) in
+                let tbl = Int.Table.create () in
                 Hashtbl.set t.inverse ~key:filename ~data:tbl;
                 tbl
             | Some tbl ->

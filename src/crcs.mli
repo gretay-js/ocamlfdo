@@ -6,7 +6,7 @@ module Crc : sig
   type t [@@deriving sexp, equal]
 end
 
-type tbl [@@deriving sexp]
+type tbl [@@deriving sexp, bin_io]
 (** map name to Crc *)
 
 (** What to do with the table *)

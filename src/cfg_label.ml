@@ -3,4 +3,4 @@
    use sexp. We use sexp to convert to/from file. *)
 open Core
 
-type t = int [@@deriving compare, sexp, hash, equal]
+type t = int [@@deriving compare, sexp, hash, equal, bin_io]

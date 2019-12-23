@@ -11,6 +11,7 @@
         ocamlcfg
         re2
         dune-build-info
+        bin_prot
         )
  (preprocess (pps ppx_jane)))
 

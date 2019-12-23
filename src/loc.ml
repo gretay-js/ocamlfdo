@@ -8,7 +8,7 @@ type rel =
     (* cfg label of the block containing this location *)
     label : Cfg_label.t option
   }
-[@@deriving compare, sexp, hash, equal]
+[@@deriving compare, sexp, hash, equal, bin_io]
 
 type t =
   { addr : Raw_addr.t;
@@ -17,7 +17,7 @@ type t =
     (* debug info: linearid *)
     dbg : int option
   }
-[@@deriving sexp, compare, equal]
+[@@deriving sexp, compare, equal, bin_io]
 
 let rename t ~old2new =
   match t.rel with

@@ -89,7 +89,7 @@ let create locations ~filename =
   (* Resolving dwarf functions and address is slow, so we batch it. *)
   (* Collect all function names *)
   let len = List.length bolt_profile in
-  let functions = Hashtbl.create ~size:len (module String) in
+  let functions = String.Table.create ~size:len () in
   let add_name bolt_loc =
     match Bolt_profile.Bolt_loc.get_sym bolt_loc with
     | None -> ()

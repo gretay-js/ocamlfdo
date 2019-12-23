@@ -7,13 +7,15 @@ module Cfg = Ocamlcfg.Cfg
 
 let verbose = ref true
 
+let magic_number = "ocamlfdo001"
+
 type t =
   { (* map raw addresses to locations *)
-    addr2loc : Loc.t Hashtbl.M(Raw_addr).t;
+    addr2loc : Loc.t Raw_addr.Table.t;
     (* map func name to func id *)
-    name2id : int Hashtbl.M(String).t;
+    name2id : int String.Table.t;
     (* map func id to func info *)
-    functions : Func.t Hashtbl.M(Int).t;
+    functions : Func.t Int.Table.t;
     (* map name of compilation unit or function to its md5 digest. Currently
        contains only crcs of linear IR. Not using Caml.Digest.t because it
        does not have sexp. Not using Core's Digest because digests generated
@@ -22,12 +24,12 @@ type t =
     (* buildid of the executable, if known *)
     mutable buildid : string option
   }
-[@@deriving sexp]
+[@@deriving sexp, bin_io]
 
 let mk size crcs buildid =
-  { addr2loc = Hashtbl.create ~size (module Raw_addr);
-    name2id = Hashtbl.create (module String);
-    functions = Hashtbl.create (module Int);
+  { addr2loc = Raw_addr.Table.create ~size ();
+    name2id = String.Table.create ();
+    functions = Int.Table.create ();
     crcs;
     buildid
   }
@@ -161,7 +163,7 @@ let create locations (agg : Aggregated_perf_profile.t) =
   let size =
     Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
   in
-  let addresses = Hashtbl.create ~size (module Raw_addr) in
+  let addresses = Raw_addr.Table.create ~size () in
   let add key =
     if not (Hashtbl.mem addresses key) then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
@@ -257,7 +259,7 @@ let rename t old2new =
   Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
   Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
   let size = Hashtbl.length t.functions in
-  let functions = Hashtbl.create ~size (module Int) in
+  let functions = Int.Table.create ~size () in
   Hashtbl.iteri old2new ~f:(fun ~key:id ~data:newid ->
       let func = Hashtbl.find_exn t.functions id in
       Hashtbl.set functions ~key:newid ~data:{ func with id = newid });
@@ -291,9 +293,7 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
   let fresh = ref (Hashtbl.length dst.name2id) in
-  let old2new =
-    Hashtbl.create ~size:(Hashtbl.length src.name2id) (module Int)
-  in
+  let old2new = Int.Table.create ~size:(Hashtbl.length src.name2id) () in
   let merge_name2id ~key:_ a b =
     let newid =
       match b with
