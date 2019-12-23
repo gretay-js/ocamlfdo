@@ -227,6 +227,36 @@ let write t filename =
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
 
+let write_shape oc =
+  let d = Bin_prot.Shape.(eval_to_digest bin_shape_t |> Digest.to_md5) in
+  Md5.output_blocking d oc
+
+let read_and_check_shape ic =
+  let d = Md5.input_blocking ic in
+  let open Bin_prot.Shape in
+  if not (0 = Digest.compare (eval_to_digest bin_shape_t) (Digest.of_md5 d))
+  then
+    Report.user_error ~hint:(Some Report.Hint.Old_profile)
+      "Incompatible format of profile file."
+
+let write_bin t filename =
+  try
+    Out_channel.with_file filename ~f:(fun oc ->
+        write_shape oc;
+        let buf = Bin_prot.Utils.bin_dump ~header:true bin_writer_t t in
+        Bigstring.really_output oc buf)
+  with e ->
+    Report.user_error ~exn:(Some e) "Failed to write profile to %s" filename
+
+let read_bin filename =
+  try
+    In_channel.with_file filename ~f:(fun ic ->
+        read_and_check_shape ic;
+        let read buf ~pos ~len = Bigstring.really_input ic ~pos ~len buf in
+        Bin_prot.Utils.bin_read_stream ~read bin_reader_t)
+  with e ->
+    Report.user_error ~exn:(Some e) "Failed to read profile from %s" filename
+
 (* CR-soon gyorsh: how often do we need to create it? is it worth storing it
    as a field of [t]. It can be computed after the profile is decoded (i.e.,
    need not be on the fly). *)
