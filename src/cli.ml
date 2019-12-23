@@ -217,6 +217,8 @@ let anon_files =
   Command.Param.(
     anon (non_empty_sequence_as_list ("input" %: Filename.arg_type)))
 
+let anon_file = Command.Param.(anon ("input" %: Filename.arg_type))
+
 let flag_reorder_blocks =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
   RB.mk "-reorder-blocks"
@@ -526,7 +528,7 @@ let linker_script_command =
               ~linker_script_hot ~profile_filename ~reorder_functions
               ~check:(not force)))
 
-let print_command =
+let to_sexp_command =
   Command.basic ~summary:"Print decoded profile as sexp to stdout."
     Command.Let_syntax.(
       let%map v = flag_v
@@ -534,7 +536,30 @@ let print_command =
       and profile_filename = Commonflag.(required flag_profile_filename) in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> print_profile profile_filename)
+      fun () -> Aggregated_decoded_profile.to_sexp profile_filename)
+
+let of_sexp_command =
+  Command.basic
+    ~summary:"Read sexp of decoded profile and save in binary format."
+    ~readme:(fun () ->
+      "Read decoded profile given as sexp in the input file.\n\
+       Write the profile in binary format using bin_prot to the output file.\n\
+      \      ")
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and input_filename = anon_file
+      and output_filename = Commonflag.(required flag_output_filename) in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () ->
+        Aggregated_decoded_profile.of_sexp ~input_filename ~output_filename)
+
+let profile_command =
+  Command.group ~summary:"Utilities for manipulating decoded profiles."
+    [ ("to-sexp", to_sexp_command);
+      ("of-sexp", of_sexp_command);
+      ("merge", merge_command) ]
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
@@ -550,8 +575,7 @@ let main_command =
       ("linker-script", linker_script_command);
       ("compile", compile_command);
       ("check", check_command);
-      ("merge", merge_command);
-      ("print", print_command) ]
+      ("profile", profile_command) ]
 
 let run ?version ?build_info () =
   set_verbose false;

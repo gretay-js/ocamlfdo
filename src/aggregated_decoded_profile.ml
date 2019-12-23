@@ -257,6 +257,14 @@ let read_bin filename =
   with e ->
     Report.user_error ~exn:(Some e) "Failed to read profile from %s" filename
 
+let to_sexp filename =
+  let t = read_bin filename in
+  Printf.printf !"%{sexp:t}" t
+
+let of_sexp ~input_filename ~output_filename =
+  let t = read input_filename in
+  write_bin t output_filename
+
 (* CR-soon gyorsh: how often do we need to create it? is it worth storing it
    as a field of [t]. It can be computed after the profile is decoded (i.e.,
    need not be on the fly). *)
