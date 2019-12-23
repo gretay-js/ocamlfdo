@@ -65,6 +65,11 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
     ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
     ~read_aggregated_perf_profile =
+  let tmp ext =
+    Filename.chop_extension
+      (Option.value output_filename ~default:binary_filename)
+    ^ ".tmp" ^ ext
+  in
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
     if read_aggregated_perf_profile then
@@ -78,11 +83,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
             Perf_profile.read_and_aggregate perf_profile_filename
               binary_filename ignore_buildid expected_pids)
       in
-      ( if write_aggregated_profile then
-        let agg_filename =
-          Option.value output_filename ~default:(binary_filename ^ ".tmp.agg")
-        in
-        Aggregated_perf_profile.write aggr_perf_profile agg_filename );
+      if write_aggregated_profile then
+        Aggregated_perf_profile.write aggr_perf_profile (tmp ".agg");
       aggr_perf_profile
   in
   let locations =
@@ -93,11 +95,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     Profile.record_call ~accumulate:true "decode" (fun () ->
         Aggregated_decoded_profile.create locations aggr_perf_profile)
   in
-  ( if write_aggregated_profile then
-    let dec_filename =
-      Option.value output_filename ~default:(binary_filename ^ ".tmp.agg_dec")
-    in
-    Aggregated_decoded_profile.write agg_dec_profile dec_filename );
+  if write_aggregated_profile then
+    Aggregated_decoded_profile.write agg_dec_profile (tmp ".agg_dec");
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
   let output_filename =

@@ -363,9 +363,9 @@ module Merge = Merge.Make (struct
 
   let merge_into = merge_into
 
-  let read = read
+  let read = read_bin
 
-  let write = write
+  let write = write_bin
 
   let approx_size t = Hashtbl.length t.addr2loc + Hashtbl.length t.name2id
 end)
