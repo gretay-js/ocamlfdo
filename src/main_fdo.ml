@@ -63,7 +63,7 @@ let load_locations binary_filename =
 
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
-    ~ignore_buildid ~expected_pids ~check ~write_aggregated_perf_profile
+    ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
     ~read_aggregated_perf_profile =
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
@@ -78,7 +78,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
             Perf_profile.read_and_aggregate perf_profile_filename
               binary_filename ignore_buildid expected_pids)
       in
-      ( if write_aggregated_perf_profile then
+      ( if write_aggregated_profile then
         let agg_filename =
           Option.value output_filename ~default:(binary_filename ^ ".tmp.agg")
         in
@@ -89,17 +89,22 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     Profile.record ~accumulate:true "load_elf_debug" load_locations
       binary_filename
   in
-  let linearid_profile =
+  let agg_dec_profile =
     Profile.record_call ~accumulate:true "decode" (fun () ->
         Aggregated_decoded_profile.create locations aggr_perf_profile)
   in
+  ( if write_aggregated_profile then
+    let dec_filename =
+      Option.value output_filename ~default:(binary_filename ^ ".tmp.agg_dec")
+    in
+    Aggregated_decoded_profile.write agg_dec_profile dec_filename );
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
   let output_filename =
     Option.value output_filename ~default:(binary_filename ^ ".fdo-profile")
     (* dirname ^ "/fdo-profile" *)
   in
-  Aggregated_decoded_profile.write linearid_profile output_filename;
+  Aggregated_decoded_profile.write_bin agg_dec_profile output_filename;
 
   ( if write_linker_script_hot then
     let filename =
@@ -107,7 +112,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
         ~default:(binary_filename ^ ".linker-script-hot")
     in
     Profile.record_call ~accumulate:true "linker_script_hot" (fun () ->
-        Linker_script.write_hot filename ~linearid_profile ~reorder_functions
+        Linker_script.write_hot filename agg_dec_profile ~reorder_functions
           ~check) );
   ()
 
@@ -203,7 +208,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     | Some filename ->
         let agg =
           Profile.record ~accumulate:true "read_fdo_profile"
-            Aggregated_decoded_profile.read filename
+            Aggregated_decoded_profile.read_bin filename
         in
         Some agg
   in

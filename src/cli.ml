@@ -80,7 +80,7 @@ module Commonflag = struct
       aliases = []
     }
 
-  let flag_linearid_profile_filename =
+  let flag_profile_filename =
     { name = "-fdo-profile"; doc = "filename decoded profile"; aliases = [] }
 
   let flag_output_filename =
@@ -146,7 +146,7 @@ let flag_write_linker_script_hot =
     flag "-write-linker-script-hot" no_arg
       ~doc:" write hot functions layout for linker script to a file")
 
-let flag_write_aggregated_perf_profile =
+let flag_write_aggregated_profile =
   Command.Param.(
     flag "-write-aggregated" no_arg
       ~doc:" write counters aggregated from perf profile (not decoded)")
@@ -293,7 +293,7 @@ let decode_command =
       and linker_script_hot_filename =
         Commonflag.(optional flag_linker_script_hot_filename)
       and write_linker_script_hot = flag_write_linker_script_hot
-      and write_aggregated_perf_profile = flag_write_aggregated_perf_profile
+      and write_aggregated_profile = flag_write_aggregated_profile
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
       and ignore_buildid = flag_ignore_buildid
       and expected_pids = flag_expected_pids
@@ -302,7 +302,7 @@ let decode_command =
       if v then set_verbose true;
       if q then set_verbose false;
       if !verbose then (
-        if write_aggregated_perf_profile && read_aggregated_perf_profile then
+        if write_aggregated_profile && read_aggregated_perf_profile then
           printf
             "Ignoring -write-agreggated. Incompatible with -read-aggregated.\n";
         if not write_linker_script_hot then
@@ -315,7 +315,7 @@ let decode_command =
             decode ~binary_filename ~perf_profile_filename ~reorder_functions
               ~linker_script_hot_filename ~output_filename
               ~write_linker_script_hot ~ignore_buildid ~expected_pids
-              ~check:(not force) ~write_aggregated_perf_profile
+              ~check:(not force) ~write_aggregated_profile
               ~read_aggregated_perf_profile);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
@@ -339,7 +339,7 @@ let opt_command =
       let%map v = flag_v
       and q = flag_q
       and extra_debug = flag_extra_debug
-      and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
+      and fdo_profile = Commonflag.(optional flag_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
       and crc_config = flag_crc_config
@@ -414,7 +414,7 @@ let compile_command =
       and q = flag_q
       and extra_debug = flag_extra_debug
       and auto = flag_auto
-      and fdo_profile = Commonflag.(optional flag_linearid_profile_filename)
+      and fdo_profile = Commonflag.(optional flag_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
       and crc_config = flag_crc_config
@@ -508,15 +508,12 @@ let linker_script_command =
         Commonflag.(optional flag_linker_script_template_filename)
       and linker_script_hot =
         Commonflag.(optional flag_linker_script_hot_filename)
-      and linearid_profile_filename =
-        Commonflag.(optional flag_linearid_profile_filename)
+      and profile_filename = Commonflag.(optional flag_profile_filename)
       and reorder_functions = flag_reorder_functions
       and force = flag_force in
       if v then set_verbose true;
       if q then set_verbose false;
-      if
-        Option.is_some linearid_profile_filename
-        && Option.is_some linker_script_hot
+      if Option.is_some profile_filename && Option.is_some linker_script_hot
       then
         raise
           (Failure
@@ -528,8 +525,8 @@ let linker_script_command =
       fun () ->
         Profile.record_call "linker_script" (fun () ->
             Linker_script.write ~output_filename ~linker_script_template
-              ~linker_script_hot ~linearid_profile_filename
-              ~reorder_functions ~check:(not force)))
+              ~linker_script_hot ~profile_filename ~reorder_functions
+              ~check:(not force)))
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"

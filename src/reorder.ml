@@ -79,12 +79,12 @@ let apply ~algo cl =
   | Random random_state -> reorder_random cl ~random_state
   | Profile p -> reorder_profile cl p
 
-let hot_functions ~linearid_profile ~reorder_functions =
+let hot_functions profile ~reorder_functions =
   (* Create linker script fragment with hot functions *)
   let open Config_reorder.Reorder_functions in
   match reorder_functions with
   | No -> []
-  | Execounts -> Aggregated_decoded_profile.top_functions linearid_profile
+  | Execounts -> Aggregated_decoded_profile.top_functions profile
   | Hot_clusters ->
       (* Do we ever need the cfg to decide on function order? *)
       failwith "Not implemented"

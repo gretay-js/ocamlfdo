@@ -3,19 +3,20 @@ open Core
 let verbose = ref true
 
 let print_hot oc ~functions ~check =
-  (* Function section names for ocaml functions are prefixed with
-     .text.caml. but function section names for C functions have just .text.
-     prefix, including C and assembly functions from ocaml runtime. We guess
-     from the function symbol whether it is an ocaml or a C function, based
-     on the naming conventions used by ocaml compiler code generation. This
-     is an implicit dependency that might silently break if the naming
-     convention changes. *)
+  (* Function section names for ocaml functions are prefixed with .text.caml.
+     but function section names for C functions have just .text. prefix,
+     including C and assembly functions from ocaml runtime. We guess from the
+     function symbol whether it is an ocaml or a C function, based on the
+     naming conventions used by ocaml compiler code generation. This is an
+     implicit dependency that might silently break if the naming convention
+     changes. *)
   let ocaml_pattern =
     Re2.create_exn
       "caml[A-Z][A-Za-z0-9_]*__(entry|([a-z_][A-Za-z0-9$_]*_[0-9]*))"
   in
   let section_name n = fprintf oc "*(.text.%s)\n" n in
   let ocaml_section_name n = fprintf oc "*(.text.caml.%s)\n" n in
+
   (* Function symbols from ocaml are always global (so far), but function
      symbols from C can be local, for example if defined as static. Linker
      script cannot refer to local symbols, so we cannot print an assert in
@@ -52,7 +53,9 @@ let print_hot oc ~functions ~check =
   in
   let print_section n = function
     | true -> ocaml_section_name n
-    | false -> section_name n; ocaml_section_name n
+    | false ->
+        section_name n;
+        ocaml_section_name n
   in
   let print name =
     let is_ocaml = Re2.matches ocaml_pattern name in
@@ -64,15 +67,13 @@ let print_hot oc ~functions ~check =
      look at the layout. *)
   List.iter functions ~f:print
 
-let write_hot filename ~linearid_profile ~reorder_functions ~check =
+let write_hot filename profile ~reorder_functions ~check =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
-  let functions =
-    Reorder.hot_functions ~linearid_profile ~reorder_functions
-  in
+  let functions = Reorder.hot_functions profile ~reorder_functions in
   Out_channel.with_file filename ~f:(print_hot ~functions ~check)
 
 let write ~output_filename ~linker_script_template ~linker_script_hot
-    ~linearid_profile_filename ~reorder_functions ~check =
+    ~profile_filename ~reorder_functions ~check =
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
@@ -85,7 +86,7 @@ let write ~output_filename ~linker_script_template ~linker_script_hot
     printf "Template %s\n" template );
 
   let print_hot oc =
-    match (linker_script_hot, linearid_profile_filename) with
+    match (linker_script_hot, profile_filename) with
     | None, None ->
         if (* just remove the marker *)
            !verbose then
@@ -99,10 +100,8 @@ let write ~output_filename ~linker_script_template ~linker_script_hot
     | None, Some filename ->
         if !verbose then
           printf "Hot function layout from profile %s\n" filename;
-        let linearid_profile = Aggregated_decoded_profile.read filename in
-        let functions =
-          Reorder.hot_functions ~linearid_profile ~reorder_functions
-        in
+        let profile = Aggregated_decoded_profile.read_bin filename in
+        let functions = Reorder.hot_functions profile ~reorder_functions in
         print_hot oc ~functions ~check
     | Some _, Some _ -> assert false
   in
@@ -111,7 +110,6 @@ let write ~output_filename ~linker_script_template ~linker_script_hot
         ~f:
           (In_channel.iter_lines ~f:(fun line ->
                if
-                 String.equal (String.strip line)
-                   "INCLUDE linker-script-hot"
+                 String.equal (String.strip line) "INCLUDE linker-script-hot"
                then print_hot oc
                else Out_channel.fprintf oc "%s\n" line)))
