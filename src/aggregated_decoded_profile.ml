@@ -153,7 +153,8 @@ let decode_addr t addr interval dbg =
         if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
         { addr; rel; dbg }
   in
-  Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
+  if Option.is_some loc.rel then
+    Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
 let create locations (agg : Aggregated_perf_profile.t) =
   if !verbose then printf "Decoding perf profile.\n";
