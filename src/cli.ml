@@ -515,10 +515,8 @@ let linker_script_command =
       if q then set_verbose false;
       if Option.is_some profile_filename && Option.is_some linker_script_hot
       then
-        raise
-          (Failure
-             "Please provide at most one of -fdo-profile and \
-              -linker-script-hot");
+        Report.user_error
+          "Please provide at most one of -fdo-profile and -linker-script-hot";
       if !verbose && Option.is_some linker_script_hot then
         printf
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
@@ -527,6 +525,16 @@ let linker_script_command =
             Linker_script.write ~output_filename ~linker_script_template
               ~linker_script_hot ~profile_filename ~reorder_functions
               ~check:(not force)))
+
+let print_command =
+  Command.basic ~summary:"Print decoded profile as sexp to stdout."
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and profile_filename = Commonflag.(required flag_profile_filename) in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () -> print_profile profile_filename)
 
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
@@ -542,7 +550,8 @@ let main_command =
       ("linker-script", linker_script_command);
       ("compile", compile_command);
       ("check", check_command);
-      ("merge", merge_command) ]
+      ("merge", merge_command);
+      ("print", print_command) ]
 
 let run ?version ?build_info () =
   set_verbose false;

@@ -116,6 +116,10 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
           ~check) );
   ()
 
+let print_profile filename =
+  let p = Aggregated_decoded_profile.read_bin filename in
+  Printf.printf !"%{sexp:Aggregated_decoded_profile.t}" p
+
 exception Not_equal_reg_array
 
 let reg_array_equal ra1 ra2 =
