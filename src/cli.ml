@@ -36,7 +36,9 @@ end
 
 module AltFlag (M : Alt) = struct
   let of_string s =
-    List.find_exn M.all ~f:(fun t -> String.equal s (M.to_string t))
+    match List.find M.all ~f:(fun t -> String.equal s (M.to_string t)) with
+    | None -> failwith ("unknown option " ^ s)
+    | Some t -> t
 
   let alternatives heading =
     let names = List.map M.all ~f:M.to_string in
@@ -172,8 +174,6 @@ let flag_auto =
          splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
-exception Illegal_args of string
-
 (* CR-someday gyorsh: this is just boolean combination of func and unit. Is
    there a cleaner way to define it as cmdline options? *)
 let flag_crc_config =
@@ -194,22 +194,17 @@ let flag_crc_config =
       flag "-no-md5" no_arg
         ~doc:
           " turn off -md5-unit and -md5-fun generation\n\
-          \   (overrides other md5 options)."
+          \   (overrides -md5-* options)."
     and on_mismatch =
       let module RB = AltFlag (Crcs.On_mismatch) in
-      RB.mk "-on-md5-mismatch"
-        ~doc:"control the behavior when md5 mismatch occurs"
+      RB.mk "-on-md5-mismatch" ~doc:"what happens when md5 mismatch occurs"
     in
     if no_crc then { Crcs.unit = false; func = false; on_mismatch }
     else if (unit_crc && func_crc) || all_crc then
       { Crcs.unit = true; func = true; on_mismatch }
     else if unit_crc then { Crcs.unit = true; func = false; on_mismatch }
     else if func_crc then { Crcs.unit = false; func = true; on_mismatch }
-    else
-      raise
-        (Illegal_args
-           "Please specify at least one of -md5 -md5-unit -md5-fun -no-md5. \n\
-            Use -md5-mismatch to control the behavior of md5 mismatch"))
+    else failwith "don't know you")
 
 let flag_timings =
   Command.Param.(
