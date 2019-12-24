@@ -37,7 +37,7 @@ end
 module AltFlag (M : Alt) = struct
   let of_string s =
     match List.find M.all ~f:(fun t -> String.equal s (M.to_string t)) with
-    | None -> failwith ("unknown option " ^ s)
+    | None -> failwith ("unknown option argument" ^ s)
     | Some t -> t
 
   let alternatives heading =
@@ -197,14 +197,19 @@ let flag_crc_config =
           \   (overrides -md5-* options)."
     and on_mismatch =
       let module RB = AltFlag (Crcs.On_mismatch) in
-      RB.mk "-on-md5-mismatch" ~doc:"what happens when md5 mismatch occurs"
+      RB.mk "-on-md5-mismatch" ~doc:"action taken when md5 mismatch occurs"
     in
     if no_crc then { Crcs.unit = false; func = false; on_mismatch }
     else if (unit_crc && func_crc) || all_crc then
       { Crcs.unit = true; func = true; on_mismatch }
     else if unit_crc then { Crcs.unit = true; func = false; on_mismatch }
     else if func_crc then { Crcs.unit = false; func = true; on_mismatch }
-    else failwith "don't know you")
+    else
+      failwith
+        "Please specify at least one of -md5 -md5-unit -md5-fun -no-md5.\n\
+         Use -md5-mismatch to control the behavior taken when unit or \
+         function's md5 saved in the profile does not match md5 of the \
+         compiled code.")
 
 let flag_timings =
   Command.Param.(

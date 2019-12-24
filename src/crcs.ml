@@ -196,20 +196,31 @@ let merge_into ~src ~dst config =
     match b with
     | None ->
         (* If one of the CRC is missing, we can't check it, so require
-           -no-md5 option *)
+           "-on-md5-mismatch skip" option. It is a mismatch only if the
+           appropriate config kind is enabled. *)
         let fail =
           (Kind.equal a.kind Unit && config.unit)
           || (Kind.equal a.kind Func && config.func)
         in
-        if fail then
-          Report.user_error
-            !"Merge aggregated decoded profiles: one profile is missing crc \
-              for %s,\n\
-              another profile has\n\
-              %{sexp:Crc.t}\n"
-            key a
+        if mismatch then (
+          let msg =
+            sprintf
+              !"Merge aggregated decoded profiles: one profile is missing \
+                crc for %s,\n\
+                another profile has\n\
+                %{sexp:Crc.t}\n"
+              key a
+          in
+          match config.on_mismatch with
+          | Fail -> Report.user_error msg
+          | Skip ->
+              if !verbose then printf msg;
+              Hashtbl.Remove
+          | Use_anyway ->
+              if !verbsose then printf msg;
+              Hashtbl.Set_to a )
         else Hashtbl.Set_to a
-    | Some b ->
+    | Some b -> (
         if Crc.equal a b then Hashtbl.Set_to b
         else
           let fail =
@@ -218,20 +229,26 @@ let merge_into ~src ~dst config =
                || (Kind.equal a.kind Unit && config.unit)
                || (Kind.equal a.kind Func && config.func) )
           in
-          if fail then
-            Report.user_error
+          let msg =
+            sprintf
               !"Merge aggregated decoded profiles: mismatched crcs for %s:\n\
                 %{sexp:Crc.t}\n\
                 %{sexp:Crc.t}\n"
               key a b
-          else (
-            if !verbose then
-              Printf.printf
-                !"Merge aggregated decoded profiles: mismatched crcs for %s:\n\
-                  %{sexp:Crc.t}\n\
-                  %{sexp:Crc.t}\n"
-                key a b;
-            Hashtbl.Remove )
-  in
+          in
+          match config.on_mismatch with
+          | Fail ->
+              if fail then Report.user_error msg else Printif.printf msg
+          | Skip ->
+              if !verbose then Printf.printf msg;
 
+              Hashtbl.Remove
+          | Use_anyway ->
+              if !verbose then
+                Printf.printf msg
+                ^ "Removing anyway.\n\
+                   Otherwise the result depends on the order in which \
+                   profile files are given to merge.";
+              Hashtbl.Remove )
+  in
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs
