@@ -1,21 +1,16 @@
 open Core
 
 type rel =
-  { (* Unique id of the containing function symbol *)
-    id : int;
-    (* Offset from the start of the function *)
-    offset : int;
-    (* cfg label of the block containing this location *)
+  { id : int;  (** Unique id of the containing function symbol *)
+    offset : int;  (** Offset from the start of the function *)
     label : Cfg_label.t option
+        (** cfg label of the block containing this location *)
   }
 [@@deriving compare, sexp, hash, equal, bin_io]
 
 type t =
-  { (* addr : Raw_addr.t;
-     * (* Raw address in the original binary *) *)
-    rel : rel option;
-    (* debug info: linearid *)
-    dbg : int option
+  { rel : rel option;
+    dbg : int option  (** debug info: linearid *)
   }
 [@@deriving sexp, compare, equal, bin_io]
 

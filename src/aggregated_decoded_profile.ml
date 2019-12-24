@@ -37,8 +37,9 @@ let mk size crcs buildid =
 let get_func t addr =
   match Hashtbl.find t.addr2loc addr with
   | None ->
-      printf "Not found any cached location for address 0x%Lx\n" addr;
-      assert false
+      if !verbose then
+        printf "Not found any cached location for address 0x%Lx\n" addr;
+      None
   | Some loc -> (
       match loc.rel with
       | None -> None
