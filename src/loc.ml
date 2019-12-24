@@ -2,9 +2,7 @@ open Core
 
 type rel =
   { id : int;  (** Unique id of the containing function symbol *)
-    offset : int;  (** Offset from the start of the function *)
-    label : Cfg_label.t option
-        (** cfg label of the block containing this location *)
+    offset : int  (** Offset from the start of the function *)
   }
 [@@deriving compare, sexp, hash, equal, bin_io]
 
@@ -36,12 +34,7 @@ let merge t1 t2 =
     | Some r1, Some r2 ->
         if not (r1.id = r2.id && r1.offset = r2.offset) then
           fail "with mismatched function ids or offsets";
-        let label =
-          Option.merge r1.label r2.label ~f:(fun l1 l2 ->
-              if not (l1 = l2) then fail "with different cfg labels";
-              l1)
-        in
-        Some { r1 with label }
+        t1.rel
   in
   let dbg =
     Option.merge t1.dbg t2.dbg ~f:(fun d1 d2 ->

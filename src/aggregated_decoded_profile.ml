@@ -144,7 +144,7 @@ let decode_addr t addr interval dbg =
               offset
         in
         let id = get_func_id t ~name ~start ~finish in
-        let rel = Some { id; offset; label = None } in
+        let rel = Some { id; offset } in
         let dbg =
           match dbg with
           | None ->
