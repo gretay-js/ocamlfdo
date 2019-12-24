@@ -46,9 +46,25 @@ type action =
   | Create
   | Compare of tbl
 
+module On_mismatch = struct
+  type t =
+    | Fail
+    | Use_anyway
+    | Skip
+  [@@deriving enumerate]
+
+  let default = Fail
+
+  let to_string = function
+    | Fail -> "fail"
+    | Use_anyway -> "use-anyway"
+    | Skip -> "skip"
+end
+
 type config =
   { unit : bool;
-    func : bool
+    func : bool;
+    on_mismatch : On_mismatch.t
   }
 
 type t =

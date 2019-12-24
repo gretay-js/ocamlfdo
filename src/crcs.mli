@@ -14,9 +14,22 @@ type action =
   | Create  (** create a new table *)
   | Compare of tbl  (** compare to existing table *)
 
+module On_mismatch : sig
+  type t =
+    | Fail
+    | Use_anyway
+    | Skip
+  [@@deriving enumerate]
+
+  val to_string : t -> string
+
+  val default : t
+end
+
 type config =
   { unit : bool;
-    func : bool
+    func : bool;
+    on_mismatch : On_mismatch.t
   }
 (** User can define what crcs to create and compare. *)
 
