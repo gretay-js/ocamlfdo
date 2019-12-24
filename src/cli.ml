@@ -531,12 +531,10 @@ let linker_script_command =
 let to_sexp_command =
   Command.basic ~summary:"Print decoded profile as sexp to stdout."
     Command.Let_syntax.(
-      let%map v = flag_v
-      and q = flag_q
-      and profile_filename = Commonflag.(required flag_profile_filename) in
+      let%map v = flag_v and q = flag_q and input_filename = anon_file in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> Aggregated_decoded_profile.to_sexp profile_filename)
+      fun () -> Aggregated_decoded_profile.to_sexp input_filename)
 
 let of_sexp_command =
   Command.basic
