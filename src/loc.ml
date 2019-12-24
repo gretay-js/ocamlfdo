@@ -11,8 +11,8 @@ type rel =
 [@@deriving compare, sexp, hash, equal, bin_io]
 
 type t =
-  { addr : Raw_addr.t;
-    (* Raw address in the original binary *)
+  { (* addr : Raw_addr.t;
+     * (* Raw address in the original binary *) *)
     rel : rel option;
     (* debug info: linearid *)
     dbg : int option
@@ -32,7 +32,8 @@ let merge t1 t2 =
       !"Cannot merge locations %s:\n%{sexp:t}\n%{sexp:t}\n"
       msg t1 t2
   in
-  if not (Raw_addr.equal t1.addr t2.addr) then fail "for different addresses";
+  (* if not (Raw_addr.equal t1.addr t2.addr) then fail "for different
+     addresses"; *)
   let rel =
     match (t1.rel, t2.rel) with
     | None, None -> None
@@ -52,4 +53,4 @@ let merge t1 t2 =
         if not (d1 = d2) then fail "with mismatched debug info";
         d1)
   in
-  { addr = t1.addr; rel; dbg }
+  { rel; dbg }

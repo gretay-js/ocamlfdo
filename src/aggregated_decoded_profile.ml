@@ -47,6 +47,16 @@ let get_func t addr =
           let func = Hashtbl.find_exn t.functions id in
           Some func )
 
+(* Source or target addr of this branch does not belong to the binary and
+   usually to_addr cannot be target of jump because it is not a return from a
+   call instruction and not an entry function. Could it be a context switch? *)
+let track_branch (from_addr, to_addr) =
+  if Int64.(from_addr < 0L) || Int64.(to_addr < 0L) then (
+    if !verbose then
+      printf "ignore branch 0x%Lx -> 0x%Lx (addr < 0)\n" from_addr to_addr;
+    false )
+  else true
+
 (* Partition aggregated_perf to functions and calculate total execution
    counts of each function. Total execution count of a function is determined
    from the execution counts of samples contained in this function. It uses
@@ -79,15 +89,18 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       in
       let update_br func =
         func.count <- Int64.(func.count + data);
-        Hashtbl.add_exn func.agg.branches ~key ~data;
-        if Int64.(mispredicts > 0L) then
-          Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts
+        if track_branch key then (
+          Hashtbl.add_exn func.agg.branches ~key ~data;
+          if Int64.(mispredicts > 0L) then
+            Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts )
       in
       process key update_br);
   Hashtbl.iteri agg.traces ~f:(fun ~key ~data ->
-      (* traces don't contribute to func's total count because it is account
-         for in branches. *)
-      let update_tr func = Hashtbl.add_exn func.agg.traces ~key ~data in
+      (* traces don't contribute to func's total count because it is
+         accounted for in branches. *)
+      let update_tr func =
+        if track_branch key then Hashtbl.add_exn func.agg.traces ~key ~data
+      in
       process key update_tr)
 
 (* Find or add the function and return its id *)
@@ -113,7 +126,7 @@ let decode_addr t addr interval dbg =
     | None ->
         if !verbose then
           printf "Cannot find function symbol containing 0x%Lx\n" addr;
-        { addr; rel = None; dbg = None }
+        { rel = None; dbg = None }
     | Some interval ->
         let open Intervals in
         let name = interval.v in
@@ -151,7 +164,7 @@ let decode_addr t addr interval dbg =
               else None
         in
         if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
-        { addr; rel; dbg }
+        { rel; dbg }
   in
   if Option.is_some loc.rel then
     Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc

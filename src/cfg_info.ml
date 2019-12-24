@@ -161,8 +161,8 @@ let get_block t (loc : Loc.t) =
   | None ->
       ( if !verbose then
         let rel = Option.value_exn loc.rel in
-        printf "No linearid for 0x%Lx in func %d at offsets %d\n" loc.addr
-          rel.id rel.offset );
+        printf "No linearid for loc in func %d at offsets %d\n" rel.id
+          rel.offset );
       None
   | Some dbg -> (
       match id_to_label t dbg with
@@ -184,23 +184,16 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
   match (from_block, to_block) with
   | None, None ->
       if !verbose then
-        printf
-          "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map to \
-           CFG\n"
-          count from_loc.addr to_loc.addr
+        printf "Ignore intra branch count %Ld, can't map to CFG\n" count
   | Some from_block, None ->
       if !verbose then
-        printf
-          "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map \
-           target to CFG\n"
-          count from_loc.addr to_loc.addr;
+        printf "Ignore intra branch count %Ld, can't map target to CFG\n"
+          count;
       record t from_block ~count
   | None, Some to_block ->
       if !verbose then
-        printf
-          "Ignore intra branch count %Ld from 0x%Lx to 0x%Lx, can't map \
-           source to CFG\n"
-          count from_loc.addr to_loc.addr;
+        printf "Ignore intra branch count %Ld, can't map source to CFG\n"
+          count;
       record t to_block ~count
   | Some from_block, Some to_block ->
       record t from_block ~count;
@@ -212,10 +205,10 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
       let from_block_start = BB.start from_block in
       if !verbose then
         printf
-          "Intra branch count %Ld from 0x%Lx (id=%d,lbl=%d) to 0x%Lx \
+          "Intra branch count %Ld from (id=%d,lbl=%d) to \
            (id=%d,lbl=%d,first_id=%d)\n"
-          count from_loc.addr from_linearid from_block_start to_loc.addr
-          to_linearid to_block_start to_block_first_id;
+          count from_linearid from_block_start to_linearid to_block_start
+          to_block_first_id;
       let bi = get_block_info t from_block in
       let b =
         { Block_info.target = Some to_loc;
@@ -277,9 +270,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
   match get_block t from_loc with
   | None ->
       if !verbose then
-        printf
-          "Ignore inter branch count %Ld from 0x%Lx. Can't map to CFG.\n"
-          count from_loc.addr
+        printf "Ignore inter branch count %Ld. Can't map to CFG.\n" count
   | Some from_block ->
       record t from_block ~count;
 
@@ -295,10 +286,8 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
             (* can't branch outside the current function *)
             if !verbose then
               printf
-                "record_exit count=%Ld 0x%Lx->0x%Lx from_block.start=%d \
-                 terminator_id=%d.\n"
-                count from_loc.addr to_loc.addr (BB.start from_block)
-                terminator.id;
+                "record_exit count=%Ld from_block.start=%d terminator_id=%d.\n"
+                count (BB.start from_block) terminator.id;
             assert false
         | Tailcall (Func _) | Return | Raise _ ->
             let b =
@@ -315,7 +304,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
       else ( (* Call *)
              (* CR-someday gyorsh: record calls *) )
 
-let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts =
+let record_entry t (to_loc : Loc.t) count _mispredicts =
   (* Branch into this function from another function, which may be unknown.
      One of the following situations:
 
@@ -324,27 +313,14 @@ let record_entry t (from_loc : Loc.t) (to_loc : Loc.t) count _mispredicts =
      Return from call: branch target is a label after the call site.
 
      Exception handler: branch target is a trap handler. *)
-  if Int64.(from_loc.addr < 0L) then (
-    if
-      (* [from_loc.addr] of this branch does not belong to the binary and
-         usually to_addr cannot be target of jump because it is not a return
-         from a call instruction and not an entry function. Could it be a
-         context switch? *)
-      !verbose
-    then
-      printf "record_entry at 0x%Lx -> 0x%Lx (from_addr < 0)\n" from_loc.addr
-        to_loc.addr )
-  else
-    match get_block t to_loc with
-    | None ->
-        if !verbose then
-          printf
-            "Ignore inter branch count %Ld to 0x%Lx. Can't map to CFG.\n"
-            count to_loc.addr
-    | Some to_block ->
-        (* CR-someday gyorsh: find the corresponding instruction and update
-           its counters.*)
-        record t to_block ~count
+  match get_block t to_loc with
+  | None ->
+      if !verbose then
+        printf "Ignore inter branch count %Ld. Can't map to CFG.\n" count
+  | Some to_block ->
+      (* CR-someday gyorsh: find the corresponding instruction and update its
+         counters.*)
+      record t to_block ~count
 
 (* Depending on the settings of perf record and the corresponding CPU
    configuration, LBR may capture different kinds of branches, including
@@ -359,7 +335,7 @@ let record_branch t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count
   | Some from_rel, _ when from_rel.id = t.func.id ->
       record_exit t from_loc to_loc count mispredicts
   | _, Some to_rel when to_rel.id = t.func.id ->
-      record_entry t from_loc to_loc count mispredicts
+      record_entry t to_loc count mispredicts
   | _ -> assert false
 
 exception Malformed_fallthrough_trace
@@ -480,16 +456,14 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
         when BB.start from_block = BB.start to_block ->
           if !verbose then
             printf
-              "No fallthroughs in trace with count %Ld from 0x%Lx to \
-               0x%Lx:from_block = to_block\n"
-              count from_loc.addr to_loc.addr;
+              "No fallthroughs in trace with count %Ld:from_block = to_block\n"
+              count;
           record t from_block ~count
       | Some from_block, Some to_block ->
           if !verbose then
             printf
-              "trace (from_addr=0x%Lx,to_addr=0x%Lx)=> \
-               (from_linid=%d,to_linid=%d)=> (from_block=%d,to_block=%d)\n"
-              from_loc.addr to_loc.addr
+              "trace=> (from_linid=%d,to_linid=%d)=> \
+               (from_block=%d,to_block=%d)\n"
               (Option.value_exn from_loc.dbg)
               (Option.value_exn to_loc.dbg)
               (BB.start from_block) (BB.start to_block);
@@ -498,21 +472,20 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
       | _ ->
           if !verbose then
             printf
-              "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:cannot map \
-               to_loc or from_loc to cfg blocks.\n"
-              count from_loc.addr to_loc.addr;
+              "Ignoring trace with count %Ld:cannot map to_loc or from_loc \
+               to cfg blocks.\n"
+              count;
           mal t count )
   | _ ->
       if !verbose then
         printf
-          "Ignoring trace with count %Ld from 0x%Lx to 0x%Lx:to and from \
-           function is not the same or not known.\n"
-          count from_loc.addr to_loc.addr;
+          "Ignoring trace with count %Ld and from function is not the same \
+           or not known.\n"
+          count;
       mal t count
 
 let record_ip t ~loc ~data:count =
   match get_block t loc with
   | None ->
-      if !verbose then
-        printf "Ignore exec count at 0x%Lx\n, can't map to cfg\n" loc.addr
+      if !verbose then printf "Ignore exec count \n, can't map to cfg\n"
   | Some block -> record t block ~count

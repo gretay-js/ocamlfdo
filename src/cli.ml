@@ -215,9 +215,9 @@ let flag_timings =
 
 let anon_files =
   Command.Param.(
-    anon (non_empty_sequence_as_list ("input" %: Filename.arg_type)))
+    anon (non_empty_sequence_as_list ("FILENAME" %: Filename.arg_type)))
 
-let anon_file = Command.Param.(anon ("input" %: Filename.arg_type))
+let anon_file = Command.Param.(anon ("FILENAME" %: Filename.arg_type))
 
 let flag_reorder_blocks =
   let module RB = AltFlag (Config_reorder.Reorder_blocks) in
