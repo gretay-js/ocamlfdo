@@ -24,7 +24,7 @@ module Make (Profile : sig
   (** approximate sizes of [t] for merge *)
 
   val merge_into :
-    src:t -> dst:t -> crc_config:Crcs.config -> ignore_buildid:bool -> unit
+    src:t -> dst:t -> crc_config:Crcs.Config.t -> ignore_buildid:bool -> unit
   (** might mutate both [src] and [dst] *)
 end) =
 struct

@@ -198,6 +198,25 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels =
   print_linear "After" fnew;
   fnew
 
+let emit_crcs ui crcs =
+  let open Linear_format in
+  (* emit crc symbols *)
+  (* CR-someday gyorsh: emit into a separate data section, not interleaved
+     with normal data items. We need to add named data sections to Cmm. In
+     emit, change looks like this: D.section [".data.ocamlfdo.crcs"] (Some
+     "") [ "%note" ]; Not sure about the "note" but the goal is to make it
+     non-allocatable, so that it is not loa. *)
+  (* CR-someday gyorsh: can we use elf notes format instead of creating all
+     these useless symbols? D.section [".note.ocamlfdo"] (Some "") [ "%note"
+     ]; Can owee read notes sections? *)
+  let syms = Crcs.encode crcs in
+  let dl =
+    List.fold syms ~init:[] ~f:(fun items symbol ->
+        let open Cmm in
+        Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
+  in
+  ui.items <- ui.items @ [Data dl]
+
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =
   if report then Report.start ();
@@ -229,12 +248,15 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
             Reorder.Identity
         | Some profile -> Reorder.Profile profile )
   in
-  let crcs =
-    match profile with
-    | None -> Crcs.(mk Create crc_config)
-    | Some profile -> Crcs.(mk (Compare profile.crcs) crc_config)
-  in
   let process file =
+    (* CR-soon gyorsh: all crcs of previously processed files get printed for
+       each file. *)
+    let crcs =
+      match profile with
+      | None -> Crcs.(mk Create crc_config)
+      | Some profile -> Crcs.(mk (Compare profile.crcs) crc_config)
+    in
+
     (* CR-soon gyorsh: identify format based on the file extension and magic
        number. Only matters when fdo handles with more than one IR.
 
@@ -244,36 +266,27 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let open Linear_format in
     let ui, crc = restore file in
     let crc = Md5.of_hex_exn (Caml.Digest.to_hex crc) in
-    Crcs.add_unit crcs ~name:ui.unit_name crc ~file;
-    ui.items <-
-      List.map ui.items ~f:(function
-        | Func f ->
-            Crcs.add_fun crcs f ~file;
-            Func (transform f ~algo ~extra_debug ~preserve_orig_labels:false)
-        | Data dl -> Data dl);
-    ( if extra_debug then
-      (* emit crc symbols *)
-      (* CR-soon gyorsh: emit into a separate data section, not interleaved
-         with normal data items. We need to add named data sections to Cmm.
-         In emit, change looks like this: D.section [".data.ocamlfdo.crcs"]
-         (Some "") [ "%note" ]; Not sure about the "note" but the goal is to
-         make it non-allocatable, so that it is not loa. *)
-      (* CR-someday gyorsh: can we use elf notes format instead of creating
-         all these useless symbols? D.section [".note.ocamlfdo"] (Some "") [
-         "%note" ]; Can owee read notes sections? *)
-      let syms = Crcs.encode crcs in
-      let dl =
-        List.fold syms ~init:[] ~f:(fun items symbol ->
-            let open Cmm in
-            Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
+    ( if Crcs.add_unit crcs ~name:ui.unit_name crc ~file then
+      let new_items =
+        List.map ui.items ~f:(fun item ->
+            match item with
+            | Func f ->
+                if Crcs.add_fun crcs f ~file then
+                  Func
+                    (transform f ~algo ~extra_debug
+                       ~preserve_orig_labels:false)
+                else item
+            | Data dl -> Data dl)
       in
-      ui.items <- ui.items @ [Data dl] );
+      ui.items <- new_items );
+    if extra_debug then emit_crcs ui crcs;
     save out_filename ui
   in
   let process file =
     Profile.record_call ~accumulate:true "process" (fun () -> process file)
   in
   List.iter files ~f:process;
+  Crcs.Config.report crc_config;
   if report then Report.finish ();
   ()
 

@@ -174,42 +174,57 @@ let flag_auto =
          splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
-(* CR-someday gyorsh: this is just boolean combination of func and unit. Is
-   there a cleaner way to define it as cmdline options? *)
-let flag_crc_config =
+let flag_get_config =
   let open Command.Param in
+  (* CR-someday gyorsh: this is just boolean combination of func and unit. Is
+     there a cleaner way to define it as cmdline options? *)
+  let flag_no_crc =
+    flag "-no-md5" no_arg ~doc:" do not generate any -md5."
+    |> map ~f:(function
+         | true -> Some (Crcs.Config.mk ~func:false ~unit:false)
+         | false -> None)
+  in
+  let flag_all_crc =
+    let open Command.Param in
+    flag "-md5" no_arg
+      ~doc:
+        " use md5 to detect source changes at function and compilation unit \
+         level (implies both -md5-unit and -md5-fun)"
+    |> map ~f:(function
+         | true -> Some (Crcs.Config.mk ~func:true ~unit:true)
+         | false -> None)
+  in
+  let flag_unit_crc =
+    let open Command.Param in
+    flag "-md5-unit" no_arg
+      ~doc:" use md5 per compilation unit only to detect source changes"
+    |> map ~f:(function
+         | true -> Some (Crcs.Config.mk ~func:false ~unit:true)
+         | false -> None)
+  in
+  let flag_func_crc =
+    let open Command.Param in
+    flag "-md5-fun" no_arg
+      ~doc:" use md5 per function only to detect source changes"
+    |> map ~f:(function
+         | true -> Some (Crcs.Config.mk ~func:true ~unit:false)
+         | false -> None)
+  in
+  choose_one
+    [flag_unit_crc; flag_func_crc; flag_all_crc; flag_no_crc]
+    ~if_nothing_chosen:(Default_to (Crcs.Config.mk ~func:false ~unit:true))
+
+let flag_crc_config =
   Command.Let_syntax.(
-    let%map all_crc =
-      flag "-md5" no_arg
-        ~doc:
-          " use md5 to detect source changes at function and compilation \
-           unit level (implies both -md5-unit and -md5-fun)"
-    and unit_crc =
-      flag "-md5-unit" no_arg
-        ~doc:" use md5 per compilation unit only to detect source changes"
-    and func_crc =
-      flag "-md5-fun" no_arg
-        ~doc:" use md5 per function only to detect source changes"
-    and no_crc =
-      flag "-no-md5" no_arg
-        ~doc:
-          " turn off -md5-unit and -md5-fun generation\n\
-          \   (overrides -md5-* options)."
+    let%map config = flag_get_config
     and on_mismatch =
-      let module RB = AltFlag (Crcs.On_mismatch) in
-      RB.mk "-on-md5-mismatch" ~doc:"action taken when md5 mismatch occurs"
+      let module RB = AltFlag (Crcs.On_error) in
+      RB.mk "-on-md5-mismatch" ~doc:" action taken when md5 mismatch occurs"
+    and on_missing =
+      let module RB = AltFlag (Crcs.On_error) in
+      RB.mk "-on-md5-missing" ~doc:" action taken when md5 is missing "
     in
-    if no_crc then { Crcs.unit = false; func = false; on_mismatch }
-    else if (unit_crc && func_crc) || all_crc then
-      { Crcs.unit = true; func = true; on_mismatch }
-    else if unit_crc then { Crcs.unit = true; func = false; on_mismatch }
-    else if func_crc then { Crcs.unit = false; func = true; on_mismatch }
-    else
-      failwith
-        "Please specify at least one of -md5 -md5-unit -md5-fun -no-md5.\n\
-         Use -md5-mismatch to control the behavior taken when unit or \
-         function's md5 saved in the profile does not match md5 of the \
-         compiled code.")
+    config ~on_mismatch ~on_missing)
 
 let flag_timings =
   Command.Param.(

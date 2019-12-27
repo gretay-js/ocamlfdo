@@ -14,6 +14,10 @@ module Kind = struct
     | Unit -> "u"
     | Func -> "f"
 
+  let to_string_hum = function
+    | Unit -> "compilation unit"
+    | Func -> "function"
+
   exception Parse_error of string
 
   let of_string_exn s =
@@ -46,12 +50,14 @@ type action =
   | Create
   | Compare of tbl
 
-module On_mismatch = struct
+module On_error = struct
   type t =
     | Fail
+    | Skip (* apply profile only to things with matching crcs *)
     | Use_anyway
-    | Skip
-  [@@deriving enumerate]
+  (* ignore crc and apply profile whenever name matches. it makes sense if
+     the transformation does not use profile, for example, random reordering. *)
+  [@@deriving enumerate, equal]
 
   let default = Fail
 
@@ -61,60 +67,126 @@ module On_mismatch = struct
     | Skip -> "skip"
 end
 
-type config =
-  { unit : bool;
-    func : bool;
-    on_mismatch : On_mismatch.t
-  }
+module Stats = struct
+  type t =
+    { mutable mismatch : int;
+      mutable missing : int;
+      (* ignored or skipped *)
+      mutable total : int;
+      kind : Kind.t;
+      enabled : bool;
+      on_mismatch : On_error.t;
+      on_missing : On_error.t
+    }
+
+  let mk ~enabled kind ~on_missing ~on_mismatch =
+    { mismatch = 0;
+      missing = 0;
+      total = 0;
+      kind;
+      enabled;
+      on_missing;
+      on_mismatch
+    }
+
+  let inc_missing t =
+    t.total <- t.total + 1;
+    t.missing <- t.missing + 1
+
+  let inc_mismatch t =
+    t.total <- t.total + 1;
+    t.missing <- t.missing + 1
+
+  let record t = t.total <- t.total + 1
+
+  let percent part total =
+    if total > 0 then Float.(100. *. (of_int part /. of_int total)) else 0.
+
+  let report_field t v =
+    if v > 0 && t.total > 0 then
+      Printf.printf "Mismatched %d %ss out of %d (%.3f%%) md5" v
+        (Kind.to_string_hum t.kind)
+        t.total (percent v t.total)
+
+  let report t =
+    report_field t t.missing;
+    report_field t t.mismatch
+end
+
+module Config = struct
+  (* CR-soon gyorsh: separate on_mismatch to be per unit and per function?
+     Per function does not superceed per unit, if only data part of the unit
+     changed, then unit crc will be different, all but func crc will be the
+     same. *)
+  (* CR-soon gyorsh: this is ugly, everything appears twice, how to avoid it? *)
+  type t =
+    { unit : Stats.t;
+      func : Stats.t
+    }
+
+  let mk ~on_mismatch ~on_missing ~func ~unit =
+    { unit = Stats.mk ~enabled:unit Unit ~on_missing ~on_mismatch;
+      func = Stats.mk ~enabled:func Func ~on_missing ~on_mismatch
+    }
+
+  let report t =
+    Stats.report t.unit;
+    Stats.report t.func
+
+  let record t = function
+    | Kind.Unit -> Stats.record t.unit
+    | Kind.Func -> Stats.record t.func
+
+  (* result in the case of skip depends on both unit and func settings *)
+  let handle on_error ~msg ~skip =
+    match on_error with
+    | On_error.Fail -> Report.user_error "%s\n" msg
+    | On_error.Use_anyway -> true
+    | On_error.Skip -> skip
+
+  let handle_mismatch t ~msg (kind : Kind.t) =
+    match kind with
+    | Unit ->
+        Stats.inc_mismatch t.unit;
+        handle t.unit.on_mismatch ~msg ~skip:t.unit.enabled
+    | Func ->
+        Stats.inc_mismatch t.func;
+        handle t.func.on_mismatch ~msg ~skip:false
+
+  let handle_missing t ~msg (kind : Kind.t) =
+    match kind with
+    | Unit ->
+        Stats.inc_missing t.unit;
+        handle t.unit.on_missing ~msg ~skip:t.unit.enabled
+    | Func ->
+        Stats.inc_missing t.func;
+        handle t.func.on_missing ~msg ~skip:false
+end
 
 type t =
   { acc : tbl;
     action : action;
-    config : config
+    config : Config.t
   }
 
 let tbl t = t.acc
 
 let mk action config = { action; acc = String.Table.create (); config }
 
-let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
-  (* Check *)
-  ( match t.action with
-  | Create -> ()
-  | Compare tbl ->
-      Hashtbl.find_and_call tbl name
-        ~if_found:(fun old_crc ->
-          if not (Crc.equal old_crc crc) then
-            Report.user_error
-              !"Linear IR for %s from file %s does not match the version of \
-                this IR used for creating the profiled binary.\n\
-                old crc: %{sexp:Crc.t}\n\
-                new crc: %{sexp:Crc.t}\n"
-              name file old_crc crc)
-        ~if_not_found:(fun name ->
-          if !verbose then
-            Printf.printf
-              !"Linear IR for %s from file %s was not used for creating the \
-                profiled binary.\n\
-                new crc: %{sexp:Crc.t}\n"
-              name file crc) );
-
+let add ?(error_on_duplicate = true) tbl ~name crc ~file =
   (* Add to accumulator *)
   let dup old_crc =
     if Crc.equal old_crc crc then
-      if error_on_duplicate then
-        Report.user_error
+      let msg =
+        Printf.sprintf
           !"Duplicate! Linear IR for %s from file %s has already been \
             processed.\n\
-            crc: %{sexp:Crc.t}"
+            crc: %{sexp:Crc.t}\n"
           name file crc
+      in
+      if error_on_duplicate then Report.user_error "%s\n" msg
       else (
-        if !verbose then
-          Printf.printf
-            !"Duplicate! Linear IR for %s from file %s has already been \
-              processed.\n\
-              crc: %{sexp:Crc.t}\n"
-            name file crc;
+        if !verbose then print_endline msg;
         old_crc )
     else
       Report.user_error
@@ -123,18 +195,65 @@ let check_and_add ?(error_on_duplicate = true) t ~name crc ~file =
           new crc: %{sexp:Crc.t}"
         name file old_crc crc
   in
-  Hashtbl.update t.acc name ~f:(function
+  Hashtbl.update tbl name ~f:(function
     | None -> crc
     | Some old_crc -> dup old_crc)
 
+let check tbl config ~name crc ~file =
+  (* Check and raise if mismatch or missing in the reference tbl. *)
+  Hashtbl.find_and_call tbl name
+    ~if_found:(fun old_crc ->
+      if Crc.equal old_crc crc then (
+        Config.record config crc.kind;
+        true )
+      else
+        let msg =
+          sprintf
+            !"Linear IR for %s from file %s does not match the version of \
+              this IR used for creating the profiled binary.\n\
+              old crc: %{sexp:Crc.t}\n\
+              new crc: %{sexp:Crc.t}\n"
+            name file old_crc crc
+        in
+        if !verbose then print_endline msg;
+        Config.handle_mismatch config ~msg crc.kind)
+    ~if_not_found:(fun name ->
+      (* If profiled binary didn't emit any crc or if the code we are
+         compiling was not linked into the original binary, e.g., new code or
+         was not needed, or function name changed. This should not be a
+         failure at this point, as there may be no profile for this function
+         at all, so it could claimed that the crc is not relevant. *)
+      let msg =
+        sprintf
+          !"Linear IR for %s from file %s was not used for creating the \
+            profiled binary.\n\
+            new crc: %{sexp:Crc.t}\n"
+          name file crc
+      in
+      if !verbose then print_endline msg;
+      Config.handle_missing config ~msg crc.kind)
+
+let check_and_add ?error_on_duplicate t ~name crc ~file =
+  (* The order is important here: always add, so that the optimized binaries
+     have correct, up-to-date, crcs. Then check and return true if and only
+     if the check passes. *)
+  add ?error_on_duplicate t.acc ~name crc ~file;
+  match t.action with
+  | Create -> true
+  | Compare tbl -> check tbl t.config ~name crc ~file
+
+(* CR-soon gyorsh: do we need crc of data? *)
 let add_unit t ~name crc ~file =
-  if t.config.unit then check_and_add t ~name { kind = Unit; crc } ~file
+  if t.config.unit.enabled then
+    check_and_add t ~name { kind = Unit; crc } ~file
+  else true
 
 let add_fun t f ~file =
-  if t.config.func then
+  if t.config.func.enabled then
     let name = f.Linear.fun_name in
     let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
     check_and_add t ~name { kind = Func; crc } ~file
+  else true
 
 (* Symbols in the binary with a special naming sceme to communite crc of the
    linear IR it was compiled from. This is used to ensure that the profile is
@@ -159,7 +278,10 @@ let mk_symbol name (crc : Crc.t) =
 
 (* Creates the symbol names and clears the accumulator *)
 let encode t =
-  if Hashtbl.is_empty t.acc || not (t.config.unit || t.config.func) then []
+  if
+    Hashtbl.is_empty t.acc
+    || not (t.config.unit.enabled || t.config.func.enabled)
+  then []
   else
     let items =
       Hashtbl.to_alist t.acc
@@ -188,21 +310,23 @@ let decode_and_add t s =
       (* CR-soon gyorsh: owee returns duplicate symbols, even though the
          symbol table has only one entry in the symbol table, because of the
          way owee iterates over symbols using interval tree. *)
-      check_and_add ~error_on_duplicate:false t ~name crc
-        ~file:"specified by -binary option"
+      assert (
+        check_and_add ~error_on_duplicate:false t ~name crc
+          ~file:"specified by -binary option" )
 
-let merge_into ~src ~dst config =
+let merge_into ~src ~dst (config : Config.t) =
   let merge_crcs ~key (a : Crc.t) b =
     match b with
     | None ->
         (* If one of the CRC is missing, we can't check it, so require
            "-on-md5-mismatch skip" option. It is a mismatch only if the
            appropriate config kind is enabled. *)
-        let fail =
-          (Kind.equal a.kind Unit && config.unit)
-          || (Kind.equal a.kind Func && config.func)
+        let enabled, on_missing =
+          match a.kind with
+          | Unit -> (config.unit.enabled, config.unit.on_missing)
+          | Func -> (config.func.enabled, config.func.on_missing)
         in
-        if mismatch then (
+        if enabled then (
           let msg =
             sprintf
               !"Merge aggregated decoded profiles: one profile is missing \
@@ -211,24 +335,18 @@ let merge_into ~src ~dst config =
                 %{sexp:Crc.t}\n"
               key a
           in
-          match config.on_mismatch with
-          | Fail -> Report.user_error msg
+          match on_missing with
+          | Fail -> Report.user_error "%s\n" msg
           | Skip ->
-              if !verbose then printf msg;
+              if !verbose then print_endline msg;
               Hashtbl.Remove
           | Use_anyway ->
-              if !verbsose then printf msg;
+              if !verbose then print_endline msg;
               Hashtbl.Set_to a )
         else Hashtbl.Set_to a
     | Some b -> (
         if Crc.equal a b then Hashtbl.Set_to b
         else
-          let fail =
-            (config.unit || config.func)
-            && ( (not (Kind.equal a.kind b.kind))
-               || (Kind.equal a.kind Unit && config.unit)
-               || (Kind.equal a.kind Func && config.func) )
-          in
           let msg =
             sprintf
               !"Merge aggregated decoded profiles: mismatched crcs for %s:\n\
@@ -236,19 +354,35 @@ let merge_into ~src ~dst config =
                 %{sexp:Crc.t}\n"
               key a b
           in
-          match config.on_mismatch with
-          | Fail ->
-              if fail then Report.user_error msg else Printif.printf msg
-          | Skip ->
-              if !verbose then Printf.printf msg;
 
-              Hashtbl.Remove
-          | Use_anyway ->
-              if !verbose then
-                Printf.printf msg
-                ^ "Removing anyway.\n\
-                   Otherwise the result depends on the order in which \
-                   profile files are given to merge.";
-              Hashtbl.Remove )
+          let f (c : Crc.t) =
+            match c.kind with
+            | Unit -> (config.unit.enabled, config.unit.on_mismatch)
+            | Func -> (config.func.enabled, config.func.on_mismatch)
+          in
+          let enabled, on_mismatch =
+            if Kind.equal a.kind b.kind then f a
+            else
+              let e_a, o_a = f a in
+              let e_b, o_b = f b in
+              assert (On_error.equal o_a o_b);
+              let enabled = e_a || e_b in
+              (enabled, if enabled then o_a else Fail)
+          in
+          if not enabled then Hashtbl.Remove
+          else
+            match on_mismatch with
+            | Fail -> Report.user_error "%s\n" msg
+            | Skip ->
+                if !verbose then print_endline msg;
+                Hashtbl.Remove
+            | Use_anyway ->
+                if !verbose then (
+                  print_endline msg;
+                  print_endline
+                    "Removing anyway.\n\
+                     Otherwise the result depends on the order in which \
+                     profile files are given to merge." );
+                Hashtbl.Remove )
   in
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs
