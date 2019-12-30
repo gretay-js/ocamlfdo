@@ -104,8 +104,9 @@ module Stats = struct
 
   let report_field t v =
     if v > 0 && t.total > 0 then
-      Printf.printf "Mismatched %d %ss out of %d (%.3f%%) md5" v
+      Printf.printf "Mismatched md5 in %d %s%s out of %d (%.3f%%)\n" v
         (Kind.to_string_hum t.kind)
+        (if v = 1 then "" else "s")
         t.total (percent v t.total)
 
   let report t =
@@ -153,14 +154,14 @@ module Config = struct
         Stats.inc_mismatch t.func;
         handle t.func.on_mismatch ~msg ~skip:false
 
-  let handle_missing t ~msg (kind : Kind.t) =
+  let handle_missing t ~msg (kind : Kind.t) ~part_match =
     match kind with
     | Unit ->
         Stats.inc_missing t.unit;
-        handle t.unit.on_missing ~msg ~skip:t.unit.enabled
+        handle t.unit.on_missing ~msg ~skip:t.unit.enabled ~part_match
     | Func ->
         Stats.inc_missing t.func;
-        handle t.func.on_missing ~msg ~skip:false
+        handle t.func.on_missing ~msg ~skip:false ~part_match
 end
 
 type t =
@@ -223,15 +224,25 @@ let check tbl config ~name crc ~file =
          was not needed, or function name changed. This should not be a
          failure at this point, as there may be no profile for this function
          at all, so it could claimed that the crc is not relevant. *)
+      let part_match =
+      match ki
+      let get_prefix s = String.rstrip ~drop:Char.is_digit s in
+      let prefix = String.rstrip ~drop:Char.is_digit name in
+      let match_prefix s = String.equals (get_prefix s) prefix in
+      let prefix_crcs = Hashtbl.filter tbl ~f:match_prefix |> Hashtbl.keys in
+      if (Hashtbl.keys prefix_crcs = 1 then
+        List.hd_exn prefix_crcs
+
       let msg =
         sprintf
           !"Linear IR for %s from file %s was not used for creating the \
             profiled binary.\n\
-            new crc: %{sexp:Crc.t}\n"
-          name file crc
+            new crc: %{sexp:Crc.t}\n\n\
+            possible matches:\n%{sexp:Hashtbl.t}"
+          name file crc prefix_crcs
       in
       if !verbose then print_endline msg;
-      Config.handle_missing config ~msg crc.kind)
+      Config.handle_missing config ~msg crc.kind ~part_match)
 
 let check_and_add ?error_on_duplicate t ~name crc ~file =
   (* The order is important here: always add, so that the optimized binaries

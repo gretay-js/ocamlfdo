@@ -219,10 +219,10 @@ let flag_crc_config =
     let%map config = flag_get_config
     and on_mismatch =
       let module RB = AltFlag (Crcs.On_error) in
-      RB.mk "-on-md5-mismatch" ~doc:" action taken when md5 mismatch occurs"
+      RB.mk "-on-md5-mismatch" ~doc:"action taken when md5 mismatch occurs"
     and on_missing =
       let module RB = AltFlag (Crcs.On_error) in
-      RB.mk "-on-md5-missing" ~doc:" action taken when md5 is missing "
+      RB.mk "-on-md5-missing" ~doc:"action taken when md5 is missing "
     in
     config ~on_mismatch ~on_missing)
 
