@@ -159,12 +159,14 @@ module Config = struct
     | Unit ->
         Level.inc_missing t.unit;
         handle t.unit.on_missing ~msg ~skip:t.func.enabled
-    | Func ->
+    | Func -> (
         Level.inc_missing t.func;
-        if handle t.func.on_missing ~msg ~skip:false then
-          if List.is_empty near_matches then true
-          else raise (Near_match near_matches)
-        else false
+        match t.func.on_missing with
+        | Fail -> Report.user_error "%s\n" msg
+        | Use_anyway ->
+            if List.is_empty near_matches then true
+            else raise (Near_match near_matches)
+        | Skip -> false )
 end
 
 type t =
