@@ -121,12 +121,14 @@ module Config = struct
   (* CR-soon gyorsh: this is ugly, everything appears twice, how to avoid it? *)
   type t =
     { unit : Level.t;
-      func : Level.t
+      func : Level.t;
+      ignore_dbg : bool
     }
 
-  let mk ~on_mismatch ~on_missing ~func ~unit =
+  let mk ~on_mismatch ~on_missing ~func ~unit ~ignore_dbg =
     { unit = Level.mk ~enabled:unit Unit ~on_missing ~on_mismatch;
-      func = Level.mk ~enabled:func Func ~on_missing ~on_mismatch
+      func = Level.mk ~enabled:func Func ~on_missing ~on_mismatch;
+      ignore_dbg
     }
 
   let report t =
@@ -260,14 +262,22 @@ let check_and_add ?error_on_duplicate t ~name crc ~file =
   | Compare tbl -> check tbl t.config ~name crc ~file
 
 (* CR-soon gyorsh: do we need crc of data? *)
-let add_unit t ~name crc ~file =
+let add_unit t (ui : Linear_format.linear_unit_info) ~hex ~file =
   if t.config.unit.enabled then
+    let name = ui.unit_name in
+    let crc =
+      if t.config.ignore_dbg then
+        let ui = Remove_dbg.unit ui in
+        Md5.digest_bytes (Marshal.to_bytes ui [])
+      else Md5.of_hex_exn hex
+    in
     check_and_add t ~name { kind = Unit; crc } ~file
   else true
 
 let add_fun t f ~file =
   if t.config.func.enabled then
     let name = f.Linear.fun_name in
+    let f = if t.config.ignore_dbg then Remove_dbg.fundecl f else f in
     let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
     check_and_add t ~name { kind = Func; crc } ~file
   else true

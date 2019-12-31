@@ -223,8 +223,13 @@ let flag_crc_config =
     and on_missing =
       let module RB = AltFlag (Crcs.On_error) in
       RB.mk "-on-md5-missing" ~doc:"action taken when md5 is missing "
+    and ignore_dbg =
+      Command.Param.(
+        flag "-md5-ignore-debug"
+          (optional_with_default true bool)
+          ~doc:" ignore debug info when creating md5")
     in
-    config ~on_mismatch ~on_missing)
+    config ~on_mismatch ~on_missing ~ignore_dbg)
 
 let flag_timings =
   Command.Param.(
@@ -316,6 +321,7 @@ let decode_command =
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
       and ignore_buildid = flag_ignore_buildid
       and expected_pids = flag_expected_pids
+      and crc_config = flag_crc_config
       and force = flag_force
       and timings = flag_timings in
       if v then set_verbose true;
@@ -335,7 +341,7 @@ let decode_command =
               ~linker_script_hot_filename ~output_filename
               ~write_linker_script_hot ~ignore_buildid ~expected_pids
               ~check:(not force) ~write_aggregated_profile
-              ~read_aggregated_perf_profile);
+              ~read_aggregated_perf_profile ~crc_config);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 

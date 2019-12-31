@@ -170,7 +170,7 @@ let decode_addr t addr interval dbg =
   if Option.is_some loc.rel then
     Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
 
-let create locations (agg : Aggregated_perf_profile.t) =
+let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   if !verbose then printf "Decoding perf profile.\n";
   (* Collect all addresses that need decoding. Mispredicts and traces use the
      same addresses as branches, so no need to add them *)
@@ -200,9 +200,6 @@ let create locations (agg : Aggregated_perf_profile.t) =
   Elf_locations.resolve_all locations addresses;
   (* set config to all true to decode all symbols from the binary and store
      in the profile, even if the user chooses to ignore them later. *)
-  let crc_config =
-    Crcs.Config.mk ~unit:true ~func:true ~on_mismatch:Fail ~on_missing:Fail
-  in
   let crcs = Crcs.(mk Create crc_config) in
   Elf_locations.iter_symbols locations ~f:(Crcs.decode_and_add crcs);
   let t = mk len (Crcs.tbl crcs) agg.buildid in

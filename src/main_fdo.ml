@@ -2,6 +2,8 @@ open Core
 open Core.Poly
 module CL = Ocamlcfg.Cfg_with_layout
 module CP = Ocamlcfg.Passes
+module AD = Aggregated_decoded_profile
+module A = Aggregated_perf_profile
 
 let verbosity_level = 20
 
@@ -64,7 +66,7 @@ let load_locations binary_filename =
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
     ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
-    ~read_aggregated_perf_profile =
+    ~read_aggregated_perf_profile ~crc_config =
   let tmp ext =
     Filename.chop_extension
       (Option.value output_filename ~default:binary_filename)
@@ -74,8 +76,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   let aggr_perf_profile =
     if read_aggregated_perf_profile then
       (* read pre-aggregated file, useful for debugging of decode *)
-      Profile.record ~accumulate:true "read_aggregated"
-        Aggregated_perf_profile.read perf_profile_filename
+      Profile.record ~accumulate:true "read_aggregated" A.read
+        perf_profile_filename
     else
       (* aggregate from perf.data *)
       let aggr_perf_profile =
@@ -83,8 +85,7 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
             Perf_profile.read_and_aggregate perf_profile_filename
               binary_filename ignore_buildid expected_pids)
       in
-      if write_aggregated_profile then
-        Aggregated_perf_profile.write aggr_perf_profile (tmp ".agg");
+      if write_aggregated_profile then A.write aggr_perf_profile (tmp ".agg");
       aggr_perf_profile
   in
   let locations =
@@ -93,17 +94,16 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   in
   let agg_dec_profile =
     Profile.record_call ~accumulate:true "decode" (fun () ->
-        Aggregated_decoded_profile.create locations aggr_perf_profile)
+        AD.create locations aggr_perf_profile ~crc_config)
   in
-  if write_aggregated_profile then
-    Aggregated_decoded_profile.write agg_dec_profile (tmp ".agg_dec");
+  if write_aggregated_profile then AD.write agg_dec_profile (tmp ".agg_dec");
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
   let output_filename =
     Option.value output_filename ~default:(binary_filename ^ ".fdo-profile")
     (* dirname ^ "/fdo-profile" *)
   in
-  Aggregated_decoded_profile.write_bin agg_dec_profile output_filename;
+  AD.write_bin agg_dec_profile output_filename;
 
   ( if write_linker_script_hot then
     let filename =
@@ -225,8 +225,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     | None -> None
     | Some filename ->
         let agg =
-          Profile.record ~accumulate:true "read_fdo_profile"
-            Aggregated_decoded_profile.read_bin filename
+          Profile.record ~accumulate:true "read_fdo_profile" AD.read_bin
+            filename
         in
         Some agg
   in
@@ -265,8 +265,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let out_filename = Filenames.make_fdo file in
     let open Linear_format in
     let ui, crc = restore file in
-    let crc = Md5.of_hex_exn (Caml.Digest.to_hex crc) in
-    ( if Crcs.add_unit crcs ~name:ui.unit_name crc ~file then
+    ( if Crcs.add_unit crcs ui ~hex:(Caml.Digest.to_hex crc) ~file then
       let new_items =
         List.map ui.items ~f:(fun item ->
             match item with
@@ -298,11 +297,9 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
 let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
     ~output_filename =
   if read_aggregated_perf_profile then
-    Aggregated_perf_profile.Merge.merge_files files ~crc_config
-      ~ignore_buildid ~output_filename
+    A.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
   else
-    Aggregated_decoded_profile.Merge.merge_files files ~crc_config
-      ~ignore_buildid ~output_filename
+    AD.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
 
 let check files =
   let open Linear_format in
