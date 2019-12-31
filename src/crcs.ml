@@ -111,21 +111,6 @@ module Level = struct
   let report t =
     report_field t t.missing;
     report_field t t.mismatch
-
-  (* [skip] is the result in the case of skip *)
-  let handle (on_error : On_error.t) ~msg ~skip =
-    match on_error with
-    | Fail -> Report.user_error "%s\n" msg
-    | Use_anyway -> true
-    | Skip -> skip
-
-  let handle_mismatch t ~msg ~skip =
-    inc_mismatch t;
-    handle t.on_mismatch ~msg ~skip
-
-  let handle_missing t ~msg ~skip =
-    inc_missing t;
-    handle t.on_missing ~msg ~skip
 end
 
 module Config = struct
@@ -152,17 +137,31 @@ module Config = struct
     | Kind.Unit -> Level.record t.unit
     | Kind.Func -> Level.record t.func
 
+  (* [skip] is the result in the case of skip *)
+  let handle (on_error : On_error.t) ~msg ~skip =
+    match on_error with
+    | Fail -> Report.user_error "%s\n" msg
+    | Use_anyway -> true
+    | Skip -> skip
+
   (* result in the case of skip depends on both unit and func settings. *)
   let handle_mismatch t ~msg (kind : Kind.t) =
     match kind with
-    | Unit -> Level.handle_mismatch t.unit ~msg ~skip:t.func.enabled
-    | Func -> Level.handle_mismatch t.func ~msg ~skip:false
+    | Unit ->
+        Level.inc_mismatch t.unit;
+        handle t.unit.on_mismatch ~msg ~skip:t.func.enabled
+    | Func ->
+        Level.inc_mismatch t.func;
+        handle t.unit.on_mismatch ~msg ~skip:false
 
   let handle_missing t ~msg (kind : Kind.t) ~near_matches =
     match kind with
-    | Unit -> Level.handle_missing t.unit ~msg ~skip:t.func.enabled
+    | Unit ->
+        Level.inc_missing t.unit;
+        handle t.unit.on_missing ~msg ~skip:t.func.enabled
     | Func ->
-        if Level.handle_missing t.func ~msg ~skip:false then
+        Level.inc_missing t.func;
+        if handle t.func.on_missing ~msg ~skip:false then
           if List.is_empty near_matches then true
           else raise (Near_match near_matches)
         else false
