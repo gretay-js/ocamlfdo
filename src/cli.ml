@@ -379,7 +379,7 @@ let opt_command =
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
-let check_command =
+let check_linear2cfg_command =
   Command.basic
     ~summary:
       "Check that transformation from Linear IR to CFG and back is identity."
@@ -489,6 +489,36 @@ let compile_command =
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 
+let check_function_order_command =
+  Command.basic ~summary:"Check function reordering"
+    ~readme:(fun () ->
+      {| Given a binary and an fdo profile, check that the layout
+         of hot functions in the binary matches the profile.
+
+      Using 'ocamlfdo linker-script' we can generate a linker script
+      with assertions that fail at link time if functions symbols aren't found
+      in the hot segment as expected. These assertion are not very expressive.
+      For example, they cannot be used to check the exact order of function
+      symbols and find local function symbols. Assertions may not
+      be available on other platforms and with other template linker scripts.
+
+      It is possible to generate linker script without assertions,
+      and then check function order on the resulting binary using 'nm -n'
+      manually, or use this command for a more friendly output.
+      |})
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and profile_filename = Commonflag.(required flag_profile_filename)
+      and reorder_functions = flag_reorder_functions
+      and binary_filename = Commonflag.(required flag_binary_filename)
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () ->
+        check_function_order ~binary_filename ~profile_filename
+          ~reorder_functions
+    )
+
 let linker_script_command =
   Command.basic
     ~summary:
@@ -575,6 +605,11 @@ let of_sexp_command =
       if q then set_verbose false;
       fun () ->
         Aggregated_decoded_profile.of_sexp ~input_filename ~output_filename)
+
+let check_command =
+  Command.group ~summary:"Validation utilities."
+    [ ("linear2cfg", check_linear2cfg_command);
+      ("function-order", check_function_order_command) ]
 
 let profile_command =
   Command.group ~summary:"Utilities for manipulating decoded profiles."
