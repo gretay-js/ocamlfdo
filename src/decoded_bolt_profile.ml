@@ -182,6 +182,11 @@ let export t =
       | _ -> ());
   agg
 
+let find_exn id2name id =
+  let res = Map.find_exn id2name id in
+  assert (List.length res = 1);
+  List.hd_exn res
+
 let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
     ~filename =
   if !verbose then
@@ -199,7 +204,7 @@ let save (p : Aggregated_decoded_profile.t) (agg : Aggregated_perf_profile.t)
     | Some rel ->
         let func = Hashtbl.find_exn p.functions rel.id in
         Some
-          { name = Map.find_exn id2name func.id;
+          { name = find_exn id2name func.id;
             offset = rel.offset;
             id;
             addr = None
@@ -239,7 +244,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t)
                     let mis = b.mispredicts in
                     let src =
                       Some
-                        { name = Map.find_exn id2name func.id;
+                        { name = find_exn id2name func.id;
                           id = Some bi.terminator_id;
                           offset = 0;
                           addr = None
@@ -247,7 +252,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t)
                     in
                     let dst =
                       Some
-                        { name = Map.find_exn id2name func.id;
+                        { name = find_exn id2name func.id;
                           id = b.target_id;
                           offset = 0;
                           addr = None

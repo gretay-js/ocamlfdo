@@ -38,6 +38,14 @@ struct
     Profile.merge_into ~src ~dst ~crc_config ~ignore_buildid;
     dst
 
+  (* CR-someday gyorsh: stable result, not influenced by the order in which
+     the files are provided in the command line. The problem is that we would
+     need to hold all of these profiles in memory at the same time, or read
+     and parse them twice, to calculate their measurements. Alternatively, we
+     can ensure that merge is symmetric. Currently, it is not but only in one
+     way: the ids of functions. This is chosen for efficiency: to avoid
+     allocating larger than necessary hashtbles and traversing larger than
+     necessary. *)
   let merge_files files ~crc_config ~ignore_buildid ~output_filename =
     let profile =
       match files with

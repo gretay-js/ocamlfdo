@@ -284,17 +284,27 @@ let of_sexp ~input_filename ~output_filename =
 
 (* CR-soon gyorsh: how often do we need to create it? is it worth storing it
    as a field of [t]. It can be computed after the profile is decoded (i.e.,
-   need not be on the fly). *)
+   need not be on the fly).
+
+   CR-soon gyorsh: for partial profile reuse, we considered adding the new
+   function names to name2id mapping, with the id of the old function. This
+   can cause id2name become a multiset. Check that profile reuse does not
+   confuse all uses of id2name in particular hot function list is generated
+   correctly, with multiple and warnings disabled perhaps?
+
+   Alternative is to split function names into a pair of name and index. *)
 let id2name t =
   Hashtbl.to_alist t.name2id
   |> List.Assoc.inverse
-  |> Map.of_alist_exn (module Int)
+  |> Map.of_alist_multi (module Int)
+  (* sort for stability of function ordering *)
+  |> Map.map ~f:(fun l -> List.sort l ~compare:String.compare)
 
 (* Sort functions using preliminary function-level execution counts in
    descending order. *)
 let top_functions t =
   let id2name = id2name t in
-  let name func = Map.find_exn id2name func.id in
+  let names func = Map.find_exn id2name func.id in
   let compare f1 f2 =
     (* Descending order of execution counts, i.e., reverse order of int
        compare. *)
@@ -303,12 +313,12 @@ let top_functions t =
        in perf data and ocamlfdo, because ids are an artifact of the way
        ocamlfdo reads and decodes locations. Change to tie breaker using id
        if speed becomes a problem. *)
-    if res = 0 then String.compare (name f1) (name f2) else res
+    if res = 0 then List.compare String.compare (names f1) (names f2)
+    else res
   in
   let sorted = List.sort (Hashtbl.data t.functions) ~compare in
-  (* reverse the mapping: from name2id to id2name *)
-  let fl = List.map sorted ~f:name in
-  fl
+  (* reverse the mapping: from functions to names *)
+  List.concat_map sorted ~f:names
 
 let rename t old2new =
   Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
@@ -321,12 +331,19 @@ let rename t old2new =
   assert (Hashtbl.length functions = size);
   { t with functions }
 
-(* CR-soon gyorsh: use information from t.crcs when merging functions.
-   WARNING: modifies the input profiles inplace, to avoid allocations.
+type patch =
+  { from : int;
+    newid : int
+  }
+[@@deriving sexp]
 
-   If crc checks are disabled (-no-md5 command line option), then a mismatch
-   in crcs is reported in verbose and then we can do one of the following
-   alternatives:
+(* CR-soon gyorsh: use information from t.crcs when merging functions.
+   WARNING: modifies the input profiles inplace in memory, to avoid
+   allocations. Does not modify the files.
+
+   If crc checks are disabled (-on-md5-mismatch command line option), then a
+   mismatch in crcs is reported in verbose and then we can do one of the
+   following alternatives:
 
    1) ignore the mismatch: functions are considered identical for the purpose
    of merging their execution counts. 2) keep both copies of the function,
@@ -341,30 +358,66 @@ let rename t old2new =
 
    When ignoring buildid and crcs, it is possible to merge profiles from
    binaries that differ only in addresses, for example, profiles collected
-   from different layouts of the same code. *)
+   from different layouts of the same code, as long as two versions of the
+   function they don't overlap. That is, no basic block reordering. hmm. *)
 let merge_into ~src ~dst ~crc_config ~ignore_buildid =
   dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
   (* refresh ids of function in src, so as not to clash with dst: if func is
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
-  let fresh = ref (Hashtbl.length dst.name2id) in
+  let last = ref (Hashtbl.length dst.name2id) in
+  let fresh () =
+    let res = !last in
+    last := !last + 1;
+    res
+  in
   let old2new = Int.Table.create ~size:(Hashtbl.length src.name2id) () in
-  let merge_name2id ~key:_ a b =
+  let patches = ref [] in
+  let merge_name2id ~key a b =
+    let id = Hashtbl.find old2new a in
+    if Option.is_some id && !verbose then
+      (* Two different names mapped to the same id in src. currently cannot
+         happen in profiles saved to file. Handle it here anyway, to ensure
+         all possible agg_dec_profiles are handled correctly. *)
+      Printf.printf
+        "Duplicate use of id. Different function names\n\
+        \               mapped to the same id by profile. One of them is \
+         %s, original id is %d, mapped to new id %d.\n"
+        key a (Option.value_exn id);
     let newid =
-      match b with
-      | None ->
-          let newid = !fresh in
-          fresh := !fresh + 1;
-          newid
-      | Some b -> b
+      match (id, b) with
+      | None, None -> fresh ()
+      | Some id, None -> id
+      | None, Some b -> b
+      | Some id, Some b ->
+          if not (b = id) then (
+            if !verbose then
+              Printf.printf "patching old2new for old id %d from %d to %d" a
+                id b;
+            patches := { from = id; newid = b } :: !patches );
+          b
     in
-    Hashtbl.add_exn old2new ~key:a ~data:newid;
+    Hashtbl.set old2new ~key:a ~data:newid;
     Hashtbl.Set_to newid
   in
   if !verbose then (
     Printf.printf !"src:\n%{sexp:(string, int) Hashtbl.t}\n" src.name2id;
     Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
   Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
+  ( if not (List.is_empty !patches) then
+      (* patch dst.name2id: needed if two names in src mapped to the same id. *)
+      (* CR-soon gyorsh: this is completely untested. *)
+      if !verbose then (
+        Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
+        Printf.printf
+          !"dst before patch:\n%{sexp:(string, int) Hashtbl.t}\n"
+          dst.name2id );
+    let id2name = id2name dst in
+    List.iter !patches ~f:(fun { from; newid } ->
+        let names = Map.find_exn id2name from in
+        assert (List.length names > 0);
+        List.iter names ~f:(fun name ->
+            Hashtbl.set dst.name2id ~key:name ~data:newid)) );
   if !verbose then
     Printf.printf !"old2new:\n%{sexp:(int, int) Hashtbl.t}\n" old2new;
   let src = rename src old2new in

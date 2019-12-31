@@ -115,6 +115,11 @@ let write t ~filename =
   List.iter t ~f:Bolt_branch.(print ~chan);
   Out_channel.close chan
 
+let find_exn id2name id =
+  let res = Map.find_exn id2name id in
+  assert (List.length res = 1);
+  List.hd_exn res
+
 (* For each function, check its execounts and collect inferred fallthrough
    edges. *)
 let fallthroughs locations (p : Aggregated_decoded_profile.t)
@@ -127,7 +132,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t)
     Elf_locations.to_address locations { file; line }
   in
   let make_bolt_loc (func : Func.t) linearid =
-    let func_name = Map.find_exn id2name func.id in
+    let func_name = find_exn id2name func.id in
     match inverse func_name linearid with
     | None -> Bolt_loc.unknown
     | Some addr ->
@@ -158,7 +163,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t)
                       printf
                         "Found fallthrough in %s at linearids %d->%d \
                          count=%Ld\n"
-                        (Map.find_exn id2name func.id)
+                        (find_exn id2name func.id)
                         src_id dst_id count;
                     let boltb = { Bolt_branch.src; dst; count; mis } in
                     boltb :: acc )
@@ -175,7 +180,7 @@ let mk (p : Aggregated_decoded_profile.t) (lp : Linearid_profile.t)
     | None -> Bolt_loc.unknown
     | Some rel ->
         { kind = Symbol;
-          name = Map.find_exn id2name rel.id;
+          name = find_exn id2name rel.id;
           offset = rel.offset
         }
   in

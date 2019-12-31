@@ -50,13 +50,13 @@ type action =
   | Create
   | Compare of tbl
 
+exception Near_match of string list
+
 module On_error = struct
   type t =
     | Fail
-    | Skip (* apply profile only to things with matching crcs *)
+    | Skip
     | Use_anyway
-  (* ignore crc and apply profile whenever name matches. it makes sense if
-     the transformation does not use profile, for example, random reordering. *)
   [@@deriving enumerate, equal]
 
   let default = Fail
@@ -67,11 +67,10 @@ module On_error = struct
     | Skip -> "skip"
 end
 
-module Stats = struct
+module Level = struct
   type t =
     { mutable mismatch : int;
       mutable missing : int;
-      (* ignored or skipped *)
       mutable total : int;
       kind : Kind.t;
       enabled : bool;
@@ -95,7 +94,7 @@ module Stats = struct
 
   let inc_mismatch t =
     t.total <- t.total + 1;
-    t.missing <- t.missing + 1
+    t.mismatch <- t.mismatch + 1
 
   let record t = t.total <- t.total + 1
 
@@ -112,6 +111,21 @@ module Stats = struct
   let report t =
     report_field t t.missing;
     report_field t t.mismatch
+
+  (* [skip] is the result in the case of skip *)
+  let handle (on_error : On_error.t) ~msg ~skip =
+    match on_error with
+    | Fail -> Report.user_error "%s\n" msg
+    | Use_anyway -> true
+    | Skip -> skip
+
+  let handle_mismatch t ~msg ~skip =
+    inc_mismatch t;
+    handle t.on_mismatch ~msg ~skip
+
+  let handle_missing t ~msg ~skip =
+    inc_missing t;
+    handle t.on_missing ~msg ~skip
 end
 
 module Config = struct
@@ -121,47 +135,37 @@ module Config = struct
      same. *)
   (* CR-soon gyorsh: this is ugly, everything appears twice, how to avoid it? *)
   type t =
-    { unit : Stats.t;
-      func : Stats.t
+    { unit : Level.t;
+      func : Level.t
     }
 
   let mk ~on_mismatch ~on_missing ~func ~unit =
-    { unit = Stats.mk ~enabled:unit Unit ~on_missing ~on_mismatch;
-      func = Stats.mk ~enabled:func Func ~on_missing ~on_mismatch
+    { unit = Level.mk ~enabled:unit Unit ~on_missing ~on_mismatch;
+      func = Level.mk ~enabled:func Func ~on_missing ~on_mismatch
     }
 
   let report t =
-    Stats.report t.unit;
-    Stats.report t.func
+    Level.report t.unit;
+    Level.report t.func
 
   let record t = function
-    | Kind.Unit -> Stats.record t.unit
-    | Kind.Func -> Stats.record t.func
+    | Kind.Unit -> Level.record t.unit
+    | Kind.Func -> Level.record t.func
 
-  (* result in the case of skip depends on both unit and func settings *)
-  let handle on_error ~msg ~skip =
-    match on_error with
-    | On_error.Fail -> Report.user_error "%s\n" msg
-    | On_error.Use_anyway -> true
-    | On_error.Skip -> skip
-
+  (* result in the case of skip depends on both unit and func settings. *)
   let handle_mismatch t ~msg (kind : Kind.t) =
     match kind with
-    | Unit ->
-        Stats.inc_mismatch t.unit;
-        handle t.unit.on_mismatch ~msg ~skip:t.unit.enabled
-    | Func ->
-        Stats.inc_mismatch t.func;
-        handle t.func.on_mismatch ~msg ~skip:false
+    | Unit -> Level.handle_mismatch t.unit ~msg ~skip:t.func.enabled
+    | Func -> Level.handle_mismatch t.func ~msg ~skip:false
 
-  let handle_missing t ~msg (kind : Kind.t) ~part_match =
+  let handle_missing t ~msg (kind : Kind.t) ~near_matches =
     match kind with
-    | Unit ->
-        Stats.inc_missing t.unit;
-        handle t.unit.on_missing ~msg ~skip:t.unit.enabled ~part_match
+    | Unit -> Level.handle_missing t.unit ~msg ~skip:t.func.enabled
     | Func ->
-        Stats.inc_missing t.func;
-        handle t.func.on_missing ~msg ~skip:false ~part_match
+        if Level.handle_missing t.func ~msg ~skip:false then
+          if List.is_empty near_matches then true
+          else raise (Near_match near_matches)
+        else false
 end
 
 type t =
@@ -224,25 +228,26 @@ let check tbl config ~name crc ~file =
          was not needed, or function name changed. This should not be a
          failure at this point, as there may be no profile for this function
          at all, so it could claimed that the crc is not relevant. *)
-      let part_match =
-      match ki
-      let get_prefix s = String.rstrip ~drop:Char.is_digit s in
-      let prefix = String.rstrip ~drop:Char.is_digit name in
-      let match_prefix s = String.equals (get_prefix s) prefix in
-      let prefix_crcs = Hashtbl.filter tbl ~f:match_prefix |> Hashtbl.keys in
-      if (Hashtbl.keys prefix_crcs = 1 then
-        List.hd_exn prefix_crcs
-
+      let near_matches =
+        match crc.kind with
+        | Unit -> []
+        | Func ->
+            let get_prefix s = String.rstrip ~drop:Char.is_digit s in
+            let prefix = get_prefix name in
+            let match_prefix s = String.equal (get_prefix s) prefix in
+            Hashtbl.filter_keys tbl ~f:match_prefix |> Hashtbl.keys
+      in
       let msg =
         sprintf
           !"Linear IR for %s from file %s was not used for creating the \
             profiled binary.\n\
             new crc: %{sexp:Crc.t}\n\n\
-            possible matches:\n%{sexp:Hashtbl.t}"
-          name file crc prefix_crcs
+            near matches:\n\
+            %{sexp:string List.t}"
+          name file crc near_matches
       in
       if !verbose then print_endline msg;
-      Config.handle_missing config ~msg crc.kind ~part_match)
+      Config.handle_missing config ~msg crc.kind ~near_matches)
 
 let check_and_add ?error_on_duplicate t ~name crc ~file =
   (* The order is important here: always add, so that the optimized binaries

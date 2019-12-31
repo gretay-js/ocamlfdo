@@ -72,20 +72,27 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
    is not worth it as it does not take very long to compute it, and it may
    not be useful if the target binary is rebuild with different heuristics. *)
 
-let create_cfg_info (p : Aggregated_decoded_profile.t) name cl =
-  match Hashtbl.find p.name2id name with
-  | None ->
-      if !verbose then printf "Not found profile for %s with cfg.\n" name;
-      None
-  | Some id ->
-      let func = Hashtbl.find_exn p.functions id in
-      if Int64.(func.count > 0L) && func.has_linearids then (
-        if !verbose then (
-          printf "compute_cfg_execounts for %s\n" name;
-          CL.print_dot cl "execount" );
-        let cfg_info =
-          Profile.record_call ~accumulate:true "cfg_info" (fun () ->
-              create_cfg_info p func cl)
-        in
-        Some cfg_info )
-      else None
+exception Found of Cfg_info.blocks
+
+let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
+    =
+  try
+    let f s =
+      match Hashtbl.find p.name2id s with
+      | None -> ()
+      | Some id ->
+          let func = Hashtbl.find_exn p.functions id in
+          if Int64.(func.count > 0L) && func.has_linearids then (
+            if !verbose then (
+              printf "compute_cfg_execounts for %s\n" name;
+              CL.print_dot cl "execount" );
+            let cfg_info =
+              Profile.record_call ~accumulate:true "cfg_info" (fun () ->
+                  create_cfg_info p func cl)
+            in
+            raise (Found cfg_info) )
+    in
+    List.iter ~f (name :: alternatives);
+    if !verbose then printf "Not found profile info for %s with cfg.\n" name;
+    None
+  with Found cfg_info -> Some cfg_info

@@ -5,7 +5,7 @@ type reorder_algo =
   | Random of Core.Random.State.t
   | Profile of Aggregated_decoded_profile.t
 
-val apply : algo:reorder_algo -> CL.t -> CL.t
+val apply : algo:reorder_algo -> CL.t -> alternatives:string list -> CL.t
 
 val verbose : bool ref
 

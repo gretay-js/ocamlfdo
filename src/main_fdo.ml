@@ -173,7 +173,7 @@ let check_equal f new_body =
    dce. It probably doesn't matter for the final layout, if the heuristics
    are reasonable w.r.t. cold code, then dead is just very cold, but having
    less code to deal with when computing layout will be more efficient. *)
-let transform f ~algo ~extra_debug ~preserve_orig_labels =
+let transform f ~algo ~extra_debug ~preserve_orig_labels ~alternatives =
   print_linear "Before" f;
   let cfg =
     Profile.record_call ~accumulate:true "linear_to_cfg" (fun () ->
@@ -189,7 +189,7 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels =
         CP.add_extra_debug (CL.cfg cfg) ~file) );
   let new_cfg =
     Profile.record_call ~accumulate:true "reorder" (fun () ->
-        Reorder.apply ~algo cfg)
+        Reorder.apply ~algo cfg ~alternatives)
   in
   let new_body =
     Profile.record ~accumulate:true "cfg_to_linear" CL.to_linear new_cfg
@@ -270,13 +270,18 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
       let new_items =
         List.map ui.items ~f:(fun item ->
             match item with
-            | Func f ->
-                if Crcs.add_fun crcs f ~file then
+            | Data dl -> Data dl
+            | Func f -> (
+                let transform ~alternatives =
                   Func
                     (transform f ~algo ~extra_debug
-                       ~preserve_orig_labels:false)
-                else item
-            | Data dl -> Data dl)
+                       ~preserve_orig_labels:false ~alternatives)
+                in
+                match Crcs.add_fun crcs f ~file with
+                | false -> item
+                | true -> transform ~alternatives:[]
+                | exception Crcs.Near_match alternatives ->
+                    transform ~alternatives ))
       in
       ui.items <- new_items );
     if extra_debug then emit_crcs ui crcs;
@@ -305,7 +310,7 @@ let check files =
     | Func f ->
         let fnew =
           transform f ~algo:Reorder.Identity ~extra_debug:false
-            ~preserve_orig_labels:true
+            ~preserve_orig_labels:true ~alternatives:[]
         in
         check_equal f fnew.fun_body
     | Data _ -> ()

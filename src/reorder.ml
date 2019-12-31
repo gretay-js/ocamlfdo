@@ -63,13 +63,13 @@ let reorder_opt cfg_info cl =
   CL.set_layout cl new_cfg_layout;
   cl
 
-let reorder_profile cl p =
+let reorder_profile cl p ~alternatives =
   let name = C.fun_name (CL.cfg cl) in
-  match Linearid_profile.create_cfg_info p name cl with
+  match Linearid_profile.create_cfg_info p name cl ~alternatives with
   | None -> cl
   | Some cfg_info -> reorder_opt cfg_info cl
 
-let apply ~algo cl =
+let apply ~algo cl ~alternatives =
   match algo with
   | Identity ->
       if !verbose then (
@@ -77,7 +77,7 @@ let apply ~algo cl =
         print_list "layout" (CL.layout cl) );
       cl
   | Random random_state -> reorder_random cl ~random_state
-  | Profile p -> reorder_profile cl p
+  | Profile p -> reorder_profile cl p ~alternatives
 
 let hot_functions profile ~reorder_functions =
   (* Create linker script fragment with hot functions *)

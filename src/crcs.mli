@@ -14,11 +14,17 @@ type action =
   | Create  (** create a new table *)
   | Compare of tbl  (** compare to existing table *)
 
+exception Near_match of string list
+
 module On_error : sig
   type t =
     | Fail
-    | Skip
+    | Skip (* apply profile only to things with matching crcs *)
     | Use_anyway
+  (* ignore crc and apply profile whenever name matches. it makes sense if
+     the transformation does not use profile, for example, random reordering,
+     or if the change in crcs was due to compilation in a slightly different
+     environment and not material code change. *)
   [@@deriving enumerate, equal]
 
   val to_string : t -> string
