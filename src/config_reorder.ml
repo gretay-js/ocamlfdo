@@ -18,6 +18,7 @@ module Reorder_functions = struct
     | No
     | Execounts
     | Hot_clusters
+    | Random
   [@@deriving enumerate]
 
   let default = Execounts
@@ -26,4 +27,5 @@ module Reorder_functions = struct
     | No -> "no"
     | Execounts -> "execution-counts"
     | Hot_clusters -> "hot-clusters"
+    | Random -> "random"
 end

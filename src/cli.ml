@@ -135,6 +135,12 @@ let flag_expected_pids =
         "pids include samples only from these pids, specified as a \
          comma-separated list of integers")
 
+let flag_seed =
+  Command.Param.(
+    flag "-seed"
+      (optional int)
+      ~doc:"int seed for some transformation that use random")
+
 let flag_ignore_buildid =
   Command.Param.(
     flag "-ignore-buildid" no_arg
@@ -309,6 +315,7 @@ let decode_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
+      and seed = flag_seed
       and binary_filename = Commonflag.(required flag_binary_filename)
       and perf_profile_filename =
         Commonflag.(required flag_perf_profile_filename)
@@ -326,6 +333,7 @@ let decode_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
+      make_random_state seed;
       if !verbose then (
         if write_aggregated_profile && read_aggregated_perf_profile then
           printf
@@ -363,6 +371,7 @@ let opt_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
+      and seed = flag_seed
       and extra_debug = flag_extra_debug
       and fdo_profile = Commonflag.(optional flag_profile_filename)
       and reorder_blocks = flag_reorder_blocks
@@ -372,6 +381,7 @@ let opt_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
+      make_random_state seed;
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
@@ -438,6 +448,7 @@ let compile_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
+      and seed = flag_seed
       and extra_debug = flag_extra_debug
       and auto = flag_auto
       and fdo_profile = Commonflag.(optional flag_profile_filename)
@@ -451,7 +462,7 @@ let compile_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
-
+      make_random_state seed;
       let fdo =
         if auto then
           match fdo_profile with
@@ -516,12 +527,14 @@ let check_function_order_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
+      and seed = flag_seed
       and profile_filename = Commonflag.(required flag_profile_filename)
       and reorder_functions = flag_reorder_functions
       and binary_filename = Commonflag.(required flag_binary_filename)
       and output_filename = Commonflag.(optional flag_output_filename) in
       if v then set_verbose true;
       if q then set_verbose false;
+      make_random_state seed;
       fun () ->
         Linker_script.check_function_order ~binary_filename ~profile_filename
           ~reorder_functions ~output_filename)
@@ -565,6 +578,7 @@ let linker_script_command =
     Command.Let_syntax.(
       let%map v = flag_v
       and q = flag_q
+      and seed = flag_seed
       and output_filename = Commonflag.(optional flag_output_filename)
       and linker_script_template =
         Commonflag.(optional flag_linker_script_template_filename)
@@ -575,6 +589,7 @@ let linker_script_command =
       and force = flag_force in
       if v then set_verbose true;
       if q then set_verbose false;
+      make_random_state seed;
       if Option.is_some profile_filename && Option.is_some linker_script_hot
       then
         Report.user_error

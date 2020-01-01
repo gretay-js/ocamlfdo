@@ -15,6 +15,7 @@ module Reorder_functions : sig
     | No
     | Execounts
     | Hot_clusters
+    | Random
   [@@deriving enumerate]
 
   val to_string : t -> string

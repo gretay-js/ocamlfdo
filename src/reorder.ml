@@ -85,6 +85,6 @@ let hot_functions profile ~reorder_functions =
   match reorder_functions with
   | No -> []
   | Execounts -> Aggregated_decoded_profile.top_functions profile
-  | Hot_clusters ->
+  | Hot_clusters | Random ->
       (* Do we ever need the cfg to decide on function order? *)
       failwith "Not implemented"

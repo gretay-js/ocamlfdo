@@ -212,6 +212,11 @@ let emit_crcs ui crcs =
   in
   ui.items <- ui.items @ [Data dl]
 
+let make_random_state seed =
+  match seed with
+  | None -> Random.self_init ()
+  | Some seed -> Random.init seed
+
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =
   if report then Report.start ();
@@ -229,7 +234,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let open Config_reorder.Reorder_blocks in
     match reorder_blocks with
     | No -> Reorder.Identity
-    | Random -> Reorder.Random (Random.State.make_self_init ())
+    | Random -> Reorder.Random Random.State.default
     | Opt -> (
         match profile with
         | None ->
