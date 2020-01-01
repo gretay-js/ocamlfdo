@@ -215,8 +215,8 @@ let check tbl config ~name crc ~file =
       else
         let msg =
           sprintf
-            !"Linear IR for %s from file %s does not match the version of \
-              this IR used for creating the profiled binary.\n\
+            !"Linear IR for %s from file %s does not match the IR used for \
+              creating the profiled binary.\n\
               old crc: %{sexp:Crc.t}\n\
               new crc: %{sexp:Crc.t}\n"
             name file old_crc crc

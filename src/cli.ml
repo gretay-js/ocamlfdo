@@ -227,7 +227,7 @@ let flag_crc_config =
       Command.Param.(
         flag "-md5-ignore-debug"
           (optional_with_default true bool)
-          ~doc:" ignore debug info when creating md5")
+          ~doc:"bool ignore debug info when creating md5")
     in
     config ~on_mismatch ~on_missing ~ignore_dbg)
 

@@ -1,6 +1,9 @@
 open Core
 
-let instr (i : Linear.instruction) = { i with dbg = Debuginfo.none }
+let rec instr (i : Linear.instruction) =
+  match i.desc with
+  | Lend -> { i with dbg = Debuginfo.none }
+  | _ -> { i with dbg = Debuginfo.none; next = instr i.next }
 
 let fundecl (f : Linear.fundecl) =
   { f with fun_dbg = Debuginfo.none; fun_body = instr f.fun_body }
