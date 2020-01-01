@@ -412,9 +412,17 @@ let find_functions t functions =
               | false -> () ) )
       | _ -> ())
 
+let is_function_symbol sym =
+  let open Owee_elf.Symbol_table.Symbol in
+  match Owee_elf.Symbol_table.Symbol.type_attribute sym with
+  | Func -> true
+  | Notype | Object | Section | File | Common | TLS | GNU_ifunc | Other _ ->
+      false
+
 let iter_symbols t ~f =
   Owee_elf.Symbol_table.iter t.symtab ~f:(fun s ->
-      let open Owee_elf.Symbol_table.Symbol in
-      match name s t.strtab with
-      | None -> ()
-      | Some sn -> f sn (value s))
+      if is_function_symbol s then
+        let open Owee_elf.Symbol_table.Symbol in
+        match name s t.strtab with
+        | None -> ()
+        | Some sn -> f sn (value s))

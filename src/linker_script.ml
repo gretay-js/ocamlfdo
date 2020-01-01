@@ -3,6 +3,10 @@ module AD = Aggregated_decoded_profile
 
 let verbose = ref true
 
+let hot_begin = "caml_hot__code_begin"
+
+let hot_end = "caml_hot__code_end"
+
 let print_hot oc ~functions ~check =
   (* Function section names for ocaml functions are prefixed with .text.caml.
      but function section names for C functions have just .text. prefix,
@@ -36,17 +40,12 @@ let print_hot oc ~functions ~check =
        \""
   in
   let cond n =
-    fprintf oc
-      "ASSERT (DEFINED(%s)?(caml_hot__code_begin <= %s) && (%s <= \
-       caml_hot__code_end):1, \n\
-       %s);\n"
-      n n n (msg n)
+    fprintf oc "ASSERT (DEFINED(%s)?(%s <= %s) && (%s <= %s):1, \n%s);\n" n
+      hot_begin n n hot_end (msg n)
   in
   let ocaml_cond n =
-    fprintf oc
-      "ASSERT ((caml_hot__code_begin <= %s) && (%s <= caml_hot__code_end), \n\
-       %s);\n"
-      n n (msg n)
+    fprintf oc "ASSERT ((%s <= %s) && (%s <= %s), \n%s);\n" hot_begin n n
+      hot_end (msg n)
   in
   let print_check n = function
     | true -> ocaml_cond n
@@ -68,10 +67,13 @@ let print_hot oc ~functions ~check =
      look at the layout. *)
   List.iter functions ~f:print
 
-let write_hot filename profile ~reorder_functions ~check =
+let save_hot filename functions ~check =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
-  let functions = Reorder.hot_functions profile ~reorder_functions in
   Out_channel.with_file filename ~f:(print_hot ~functions ~check)
+
+let write_hot filename profile ~reorder_functions ~check =
+  let functions = Reorder.hot_functions profile ~reorder_functions in
+  save_hot filename functions ~check
 
 let write ~output_filename ~linker_script_template ~linker_script_hot
     ~profile_filename ~reorder_functions ~check =
@@ -143,8 +145,6 @@ let check_function_order ~binary_filename ~profile_filename
   let profile = AD.read_bin profile_filename in
   let hot = Reorder.hot_functions profile ~reorder_functions in
   (* Find addresses of all the function in the expected layout. *)
-  let hot_begin = "caml_hot__code_begin" in
-  let hot_end = "caml_hot__code_end" in
   let expected = (hot_begin :: hot) @ [hot_end] in
   let len = List.length expected in
   let name2addr = String.Table.create ~size:len () in
@@ -287,3 +287,15 @@ let check_function_order ~binary_filename ~profile_filename
         let file2 = save "actual" actual in
         Ppxlib_print_diff.print ~file1 ~file2 ();
         exit (-1) )
+
+let randomize_function_order ~binary_filename ~output_filename ~check =
+  let locations = Elf_locations.create ~elf_executable:binary_filename in
+  let layout = ref [] in
+  Elf_locations.iter_symbols locations ~f:(fun name _ ->
+      layout := name :: !layout);
+  let layout = List.permute !layout in
+  let output_filename =
+    Option.value output_filename
+      ~default:(binary_filename ^ ".linker-script-hot")
+  in
+  save_hot output_filename layout ~check

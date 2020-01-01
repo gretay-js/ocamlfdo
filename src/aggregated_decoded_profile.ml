@@ -298,6 +298,8 @@ let id2name t =
   (* sort for stability of function ordering *)
   |> Map.map ~f:(fun l -> List.sort l ~compare:String.compare)
 
+let all_functions t = Hashtbl.keys t.name2id
+
 (* Sort functions using preliminary function-level execution counts in
    descending order. *)
 let top_functions t =

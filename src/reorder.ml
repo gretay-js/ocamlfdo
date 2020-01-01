@@ -2,7 +2,7 @@ open Core
 open Core.Poly
 module C = Ocamlcfg.Cfg
 module CL = Ocamlcfg.Cfg_with_layout
-
+module AD = Aggregated_decoded_profile
 let verbose = ref false
 
 let validate = ref false
@@ -10,7 +10,7 @@ let validate = ref false
 type reorder_algo =
   | Identity
   | Random of Random.State.t
-  | Profile of Aggregated_decoded_profile.t
+  | Profile of AD.t
 
 let print_list msg l = Report.log (sprintf !"%s: %{sexp:int list}\n" msg l)
 
@@ -84,7 +84,8 @@ let hot_functions profile ~reorder_functions =
   let open Config_reorder.Reorder_functions in
   match reorder_functions with
   | No -> []
-  | Execounts -> Aggregated_decoded_profile.top_functions profile
-  | Hot_clusters | Random ->
+  | Execounts -> AD.top_functions profile
+  | Random -> List.permute (AD.all_functions profile)
+  | Hot_clusters ->
       (* Do we ever need the cfg to decide on function order? *)
       failwith "Not implemented"

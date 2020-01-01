@@ -137,8 +137,7 @@ let flag_expected_pids =
 
 let flag_seed =
   Command.Param.(
-    flag "-seed"
-      (optional int)
+    flag "-seed" (optional int)
       ~doc:"int seed for some transformation that use random")
 
 let flag_ignore_buildid =
@@ -539,6 +538,27 @@ let check_function_order_command =
         Linker_script.check_function_order ~binary_filename ~profile_filename
           ~reorder_functions ~output_filename)
 
+let randomize_function_order_command =
+  Command.basic ~summary:"Randomize layout of all functions"
+    ~readme:(fun () ->
+      {| Generate a linker script fragment with random layout of all
+        functions from the binary. The output can be used with
+        'ocamlfdo linker-script' as an argument to -linker-script-hot option.
+      |})
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and seed = flag_seed
+      and binary_filename = Commonflag.(required flag_binary_filename)
+      and output_filename = Commonflag.(optional flag_output_filename)
+      and force = flag_force in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      make_random_state seed;
+      fun () ->
+        Linker_script.randomize_function_order ~binary_filename
+          ~output_filename ~check:(not force))
+
 let linker_script_command =
   Command.basic
     ~summary:
@@ -639,6 +659,21 @@ let profile_command =
       ("of-sexp", of_sexp_command);
       ("merge", merge_command) ]
 
+let bolt_command =
+  Command.group ~summary:"BOLT vs. OCamlFDO. NOT IMPLEMENTED."
+    ~readme:(fun () ->
+      "Well, actually, it is implemented and we used it with an older \
+       version of BOLT,\n\
+       but it is not tested with the latest BOLT, and so the functionality\n\
+       which is present in the tool isn't expose to the users at the moment.")
+    []
+
+let misc_command =
+  Command.group
+    ~summary:"Experimental commands and testing/debuging utilities"
+    [ ("randomize-function-layout", randomize_function_order_command);
+      ("bolt", bolt_command) ]
+
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
     ~readme:(fun () ->
@@ -653,7 +688,8 @@ let main_command =
       ("linker-script", linker_script_command);
       ("compile", compile_command);
       ("check", check_command);
-      ("profile", profile_command) ]
+      ("profile", profile_command);
+      ("misc", misc_command) ]
 
 let run ?version ?build_info () =
   set_verbose false;
