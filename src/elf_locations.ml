@@ -417,4 +417,4 @@ let iter_symbols t ~f =
       let open Owee_elf.Symbol_table.Symbol in
       match name s t.strtab with
       | None -> ()
-      | Some sn -> f sn)
+      | Some sn -> f sn (value s))

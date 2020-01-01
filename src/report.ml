@@ -50,6 +50,9 @@ let filename = sprintf "summary.%s" extension
 
 let enabled = ref false
 
+let percent part total =
+  if total > 0 then Float.(100. *. (of_int part /. of_int total)) else 0.
+
 let log msg =
   if !verbose then printf "%s" msg;
   if !enabled then

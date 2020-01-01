@@ -58,50 +58,6 @@ let write_reorder_report (f : Linear.fundecl) c newf newc =
     report_cfg ~name "Before-Reorder" c;
     report_cfg ~name "After-Reorder" newc )
 
-let load_locations binary_filename =
-  let elf_locations = Elf_locations.create ~elf_executable:binary_filename in
-  if !verbose then Elf_locations.print_dwarf elf_locations;
-  elf_locations
-
-let check_function_order ~binary_filename ~profile_filename
-    ~reorder_functions =
-  let locations = load_locations binary_filename in
-  let profile = AD.read_bin profile_filename in
-  let hot = Reorder.hot_functions profile ~reorder_functions in
-  let hot_code_begin = "caml...." in
-  let hot_code_end = "caml..." in
-  let all = List.concat [hot_code_begin; hot; hot_code_end] in
-  let len = List.length all in
-  let name2addr = String.Table.create ~size:len () in
-  List.iter all ~f:(fun name ->
-      match Hashtbl.add name2addr ~key:name ~data:None with
-      | `Duplicate ->
-          Report.user_error
-            "Function %s appears more than once in hot layout.\n" name
-      | `Ok -> ());
-  Elf_locations.find_functions locations name2addr;
-  List.fold all ~init:{ last = None; missing = 0 } ~f:(fun name acc ->
-      match Hashtbl.find_exn name2addr name with
-      | None ->
-          if !verbose then "Missing in hot block: %s" name;
-          { acc with missing = acc.missing + 1 }
-      | Some f -> (
-          match last with
-          | None -> { acc with last = f.finish }
-          | Some addr ->
-              if Int64.(acc.last <= addr) then { acc with last = f.finish }
-              else if !verbose then "Hot layout %s at 0xLx" name addr;
-              (* CR gyorsh: just check that addresses are sorted, and if they
-                 are not print them all twice: expected and actual layout,
-                 and run patdiff on them. how do we do it programmatically?
-
-                 also need to check that no other functions appear in
-                 between. an easy check would be with addresses being
-                 adjacent, up to some small diff, but that's not robust
-                 against function alignment changes and other padding. Find
-                 out how to do it with owee. *)
-              { acc with last = f.finish; missing = acc.missing + 1 } ))
-
 let decode ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
     ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
@@ -128,8 +84,8 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
       aggr_perf_profile
   in
   let locations =
-    Profile.record ~accumulate:true "load_elf_debug" load_locations
-      binary_filename
+    Profile.record_call ~accumulate:true "load_elf_debug" (fun () ->
+        Elf_locations.create ~elf_executable:binary_filename)
   in
   let agg_dec_profile =
     Profile.record_call ~accumulate:true "decode" (fun () ->
@@ -296,8 +252,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
       | Some profile -> Crcs.(mk (Compare profile.crcs) crc_config)
     in
 
-    (* CR-soon gyorsh: identify format based on the file extension and magic
-       number. Only matters when fdo handles with more than one IR.
+    (* CR-someday gyorsh: identify format based on the file extension and
+       magic number. Only matters when fdo handles with more than one IR.
 
        CR-someday gyorsh: 4.11 will have a nicer interface to magic numbers,
        use it. *)

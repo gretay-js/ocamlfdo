@@ -13,6 +13,7 @@
         re2
         dune-build-info
         bin_prot
+        ppxlib.print_diff
         )
  (preprocess (pps ppx_jane)))
 

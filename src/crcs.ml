@@ -98,15 +98,13 @@ module Level = struct
 
   let record t = t.total <- t.total + 1
 
-  let percent part total =
-    if total > 0 then Float.(100. *. (of_int part /. of_int total)) else 0.
-
   let report_field t v =
     if v > 0 && t.total > 0 then
       Printf.printf "Mismatched md5 in %d %s%s out of %d (%.3f%%)\n" v
         (Kind.to_string_hum t.kind)
         (if v = 1 then "" else "s")
-        t.total (percent v t.total)
+        t.total
+        (Report.percent v t.total)
 
   let report t =
     report_field t t.missing;
