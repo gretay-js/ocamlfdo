@@ -98,17 +98,17 @@ module Level = struct
 
   let record t = t.total <- t.total + 1
 
-  let report_field t v =
+  let report_field t v msg =
     if v > 0 && t.total > 0 then
-      Printf.printf "Mismatched md5 in %d %s%s out of %d (%.3f%%)\n" v
+      Printf.printf "%s md5 in %d %s%s out of %d (%.3f%%)\n" msg v
         (Kind.to_string_hum t.kind)
         (if v = 1 then "" else "s")
         t.total
         (Report.percent v t.total)
 
   let report t =
-    report_field t t.missing;
-    report_field t t.mismatch
+    report_field t t.missing "Missing";
+    report_field t t.mismatch "Mismatch"
 end
 
 module Config = struct
