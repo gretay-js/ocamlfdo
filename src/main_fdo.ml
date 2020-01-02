@@ -227,8 +227,14 @@ let make_random_state seed files =
       match files with
       | [] -> Random.init seed
       | _ ->
-          Random.full_init
-            (Array.of_list (seed :: List.map files ~f:Hashtbl.hash)) )
+          let hashes =
+            (* sort to make the initialization deterministic, regardless of
+               the order in which the files are passed on command line, in
+               the case there is more than one file. *)
+            List.sort ~compare:String.compare files
+            |> List.map ~f:Hashtbl.hash
+          in
+          Random.full_init (Array.of_list (seed :: hashes)) )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =
