@@ -292,7 +292,7 @@ let randomize_function_order ~binary_filename ~output_filename ~check =
   let locations = Elf_locations.create ~elf_executable:binary_filename in
   let layout = ref [] in
   Elf_locations.iter_symbols locations ~f:(fun name _ ->
-      layout := name :: !layout);
+      if not (String.contains name '@') then layout := name :: !layout);
   let layout = List.permute !layout in
   let output_filename =
     Option.value output_filename
