@@ -97,24 +97,6 @@ let resolve_from_dwarf t ~f =
       in
       aux ()
 
-let reset_cache t =
-  let report msg h m =
-    let hits = float_of_int h in
-    let misses = float_of_int m in
-    let ratio =
-      Float.(if misses +. hits > 0. then hits /. (misses +. hits) else 0.)
-    in
-    Printf.printf "Cache %s: hit=%d, miss=%d, hit/(miss+hit)=%.3f\n" msg h m
-      ratio
-  in
-  if !verbose then (
-    report "loc" t.hits t.misses;
-    report "fun" t.fun_hits t.fun_misses );
-  Hashtbl.clear t.resolved;
-  t.hits <- 0;
-  t.misses <- 0;
-  Hashtbl.clear t.inverse
-
 let print cur _ =
   match cur.filename with
   | None -> ()
@@ -419,9 +401,9 @@ let is_function_symbol sym =
   | Notype | Object | Section | File | Common | TLS | GNU_ifunc | Other _ ->
       false
 
-let iter_symbols t ~f =
+let iter_symbols ~func t ~f =
   Owee_elf.Symbol_table.iter t.symtab ~f:(fun s ->
-      if is_function_symbol s then
+      if Bool.equal func (is_function_symbol s) then
         let open Owee_elf.Symbol_table.Symbol in
         match name s t.strtab with
         | None -> ()

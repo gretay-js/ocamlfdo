@@ -193,7 +193,7 @@ let check_function_order ~binary_filename ~profile_filename
       let is_in_hot addr =
         Raw_addr.(hot_begin_addr <= addr && addr <= hot_end_addr)
       in
-      Elf_locations.iter_symbols locations ~f:(fun name start ->
+      Elf_locations.iter_symbols locations ~func:true ~f:(fun name start ->
           if is_in_hot start then
             Raw_addr.Table.update addr2name start ~f:(function
               | None -> [name]
@@ -291,7 +291,7 @@ let check_function_order ~binary_filename ~profile_filename
 let randomize_function_order ~binary_filename ~output_filename ~check =
   let locations = Elf_locations.create ~elf_executable:binary_filename in
   let layout = ref [] in
-  Elf_locations.iter_symbols locations ~f:(fun name _ ->
+  Elf_locations.iter_symbols locations ~func:true ~f:(fun name _ ->
       if not (String.contains name '@') then layout := name :: !layout);
   let layout = List.permute !layout in
   let output_filename =

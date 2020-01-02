@@ -201,7 +201,7 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   (* set config to all true to decode all symbols from the binary and store
      in the profile, even if the user chooses to ignore them later. *)
   let crcs = Crcs.(mk Create crc_config) in
-  Elf_locations.iter_symbols locations ~f:(fun name _ ->
+  Elf_locations.iter_symbols locations ~func:false ~f:(fun name _ ->
       Crcs.decode_and_add crcs name);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)

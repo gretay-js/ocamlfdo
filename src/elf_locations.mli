@@ -20,11 +20,10 @@ val print_dwarf : t -> unit
 
 val to_address : t -> Dbg.t -> Raw_addr.t option
 
-(* reset caches that store addresses, but not the function symbols cache *)
-val reset_cache : t -> unit
-
-(* Iterate over the symbols and apply the function [f] to their names. It
-   hides the details of symbol representation in the underlying ELF library. *)
-val iter_symbols : t -> f:(string -> Raw_addr.t -> unit) -> unit
+val iter_symbols : func:bool -> t -> f:(string -> Raw_addr.t -> unit) -> unit
+(** Iterate over the symbols and apply the function [f] to their names. It
+    hides the details of symbol representation in the underlying ELF library.
+    When [func] is true, iterate over function symbols only. When [func] is
+    false, skip function symbols only. *)
 
 val verbose : bool ref
