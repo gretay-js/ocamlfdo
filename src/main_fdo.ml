@@ -212,10 +212,23 @@ let emit_crcs ui crcs =
   in
   ui.items <- ui.items @ [Data dl]
 
-let make_random_state seed =
+(* Build systems call 'ocamlfdo opt' on a single file. When -seed is used for
+   random block layout, the same permutation will be applied to layout of all
+   functions that appear in the same source order (first function, second
+   function, etc) in different compilation units, because the random state
+   will be reinitialized from the beginning on each call to 'ocamlfdo opt'.
+   To circumvent it while still having deterministic builds for a given
+   -seed, regardless of the order the build system calls it, we use hash of
+   the file names as an additional seed. *)
+let make_random_state seed files =
   match seed with
   | None -> Random.self_init ()
-  | Some seed -> Random.init seed
+  | Some seed -> (
+      match files with
+      | [] -> Random.init seed
+      | _ ->
+          Random.full_init
+            (Array.of_list (seed :: List.map files ~f:Hashtbl.hash)) )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =

@@ -332,7 +332,7 @@ let decode_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed [];
       if !verbose then (
         if write_aggregated_profile && read_aggregated_perf_profile then
           printf
@@ -380,7 +380,7 @@ let opt_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed files;
       fun () ->
         Profile.record_call "opt" (fun () ->
             optimize files ~fdo_profile ~reorder_blocks ~extra_debug
@@ -461,7 +461,7 @@ let compile_command =
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed [];
       let fdo =
         if auto then
           match fdo_profile with
@@ -533,7 +533,7 @@ let check_function_order_command =
       and output_filename = Commonflag.(optional flag_output_filename) in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed [];
       fun () ->
         Linker_script.check_function_order ~binary_filename ~profile_filename
           ~reorder_functions ~output_filename)
@@ -554,7 +554,7 @@ let randomize_function_order_command =
       and force = flag_force in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed [];
       fun () ->
         Linker_script.randomize_function_order ~binary_filename
           ~output_filename ~check:(not force))
@@ -609,7 +609,7 @@ let linker_script_command =
       and force = flag_force in
       if v then set_verbose true;
       if q then set_verbose false;
-      make_random_state seed;
+      make_random_state seed [];
       if Option.is_some profile_filename && Option.is_some linker_script_hot
       then
         Report.user_error
