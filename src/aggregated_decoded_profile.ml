@@ -317,6 +317,10 @@ let top_functions t =
     else res
   in
   let sorted = List.sort (Hashtbl.data t.functions) ~compare in
+  if !verbose then (
+    Printf.printf "Top functions sorted by execution counters:\n";
+    List.iter sorted ~f:(fun f ->
+        Printf.printf !"%Ld %{sexp:string List.t}\n" f.count (names f)) );
   (* reverse the mapping: from functions to names *)
   List.concat_map sorted ~f:names
 
