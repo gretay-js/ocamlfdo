@@ -316,8 +316,7 @@ let decode_command =
       and q = flag_q
       and seed = flag_seed
       and binary_filename = Commonflag.(required flag_binary_filename)
-      and perf_profile_filename =
-        Commonflag.(required flag_perf_profile_filename)
+      and files = anon_files
       and reorder_functions = flag_reorder_functions
       and output_filename = Commonflag.(optional flag_output_filename)
       and linker_script_hot_filename =
@@ -344,7 +343,7 @@ let decode_command =
              to reorder.\n" );
       fun () ->
         Profile.record_call "decode" (fun () ->
-            decode ~binary_filename ~perf_profile_filename ~reorder_functions
+            decode files ~binary_filename ~reorder_functions
               ~linker_script_hot_filename ~output_filename
               ~write_linker_script_hot ~ignore_buildid ~expected_pids
               ~check:(not force) ~write_aggregated_profile

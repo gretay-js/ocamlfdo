@@ -58,15 +58,18 @@ let write_reorder_report (f : Linear.fundecl) c newf newc =
     report_cfg ~name "Before-Reorder" c;
     report_cfg ~name "After-Reorder" newc )
 
-let decode ~binary_filename ~perf_profile_filename ~reorder_functions
+let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
+    ~output_filename =
+  if read_aggregated_perf_profile then
+    A.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
+  else
+    AD.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
+
+let decode_file ~binary_filename ~perf_profile_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
     ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
     ~read_aggregated_perf_profile ~crc_config =
-  let tmp ext =
-    Filename.chop_extension
-      (Option.value output_filename ~default:binary_filename)
-    ^ ".tmp" ^ ext
-  in
+  let tmp ext = Filename.chop_extension output_filename ^ ".tmp" ^ ext in
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
     if read_aggregated_perf_profile then
@@ -94,10 +97,6 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
   if write_aggregated_profile then AD.write agg_dec_profile (tmp ".agg_dec");
   (* Save the profile to file. This does not include counts for inferred
      fallthroughs, which require CFG. *)
-  let output_filename =
-    Option.value output_filename ~default:(binary_filename ^ ".fdo-profile")
-    (* dirname ^ "/fdo-profile" *)
-  in
   AD.write_bin agg_dec_profile output_filename;
 
   ( if write_linker_script_hot then
@@ -109,6 +108,44 @@ let decode ~binary_filename ~perf_profile_filename ~reorder_functions
         Linker_script.write_hot filename agg_dec_profile ~reorder_functions
           ~check) );
   ()
+
+let decode files ~binary_filename ~reorder_functions
+    ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
+    ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
+    ~read_aggregated_perf_profile ~crc_config =
+  let output_filename =
+    Option.value output_filename ~default:(binary_filename ^ ".fdo-profile")
+    (* dirname ^ "/fdo-profile" *)
+  in
+  match files with
+  | [] -> if !verbose then Printf.printf "Missing input perf.data\n"
+  | [perf_profile_filename] ->
+      decode_file ~binary_filename ~perf_profile_filename ~reorder_functions
+        ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
+        ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
+        ~read_aggregated_perf_profile ~crc_config
+  | _ ->
+      let prefix = Filename.basename binary_filename in
+      let tmp_files =
+        List.map files ~f:(fun _ -> Filename.temp_file prefix ".fdo-profile")
+      in
+      List.iter2_exn files tmp_files ~f:(fun perf_profile_filename tmp ->
+          decode_file ~binary_filename ~perf_profile_filename
+            ~reorder_functions ~linker_script_hot_filename
+            ~output_filename:tmp ~write_linker_script_hot:false
+            ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
+            ~read_aggregated_perf_profile ~crc_config);
+      merge tmp_files ~read_aggregated_perf_profile:false ~crc_config
+        ~ignore_buildid ~output_filename;
+      if write_linker_script_hot then
+        let agg_dec_profile = AD.read output_filename in
+        let filename =
+          Option.value linker_script_hot_filename
+            ~default:(binary_filename ^ ".linker-script-hot")
+        in
+        Profile.record_call ~accumulate:true "linker_script_hot" (fun () ->
+            Linker_script.write_hot filename agg_dec_profile
+              ~reorder_functions ~check)
 
 exception Not_equal_reg_array
 
@@ -312,13 +349,6 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   Crcs.Config.report crc_config;
   if report then Report.finish ();
   ()
-
-let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
-    ~output_filename =
-  if read_aggregated_perf_profile then
-    A.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
-  else
-    AD.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
 
 let check files =
   let open Linear_format in
