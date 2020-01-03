@@ -248,11 +248,17 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
          *                target = Some loc?;
          *              } in
          * add_call cbi ~callsite ~callee *)
-        | Tailcall _ ->
+        | Tailcall (Self _) ->
             if !verbose then
               printf "Tailcall from linid=%d from_label=%d %Ld" from_linearid
                 from_block_start count;
-            Block_info.add_call bi ~callsite:from_loc ~callee:b
+            assert (
+              Cfg.fun_tailrec_entry_point_label (CL.cfg t.cl)
+              = to_block_start );
+            (* CR-someday gyorsh: count calls *)
+            (* Block_info.add_call bi ~callsite:from_loc ~callee:b; *)
+            Block_info.add_branch bi b
+        | Tailcall _ -> assert false
         | Raise _ ->
             (* target must be a handler block *)
             (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
@@ -492,3 +498,52 @@ let record_ip t ~loc ~data:count =
   | None ->
       if !verbose then printf "Ignore exec count \n, can't map to cfg\n"
   | Some block -> record t block ~count
+
+(** debug printing functions *)
+
+let dump_branch (b : Block_info.b) =
+  match b.target_label with
+  | None -> ()
+  | Some successor ->
+      if b.intra then
+        Printf.printf "(.L%d %s: %Ld%s)" successor
+          (if b.fallthrough then "ft" else "")
+          b.taken
+          ( if Execount.(b.mispredicts > 0L) then sprintf "%Ld" b.mispredicts
+          else "" )
+
+let dump_call t (c : Block_info.c) =
+  let rel =
+    match c.callsite.rel with
+    | Some rel -> rel
+    | None ->
+        Report.user_error "Malformed cfg_info for func %d: callsite missing"
+          t.func.id
+  in
+  if not (t.func.id = rel.id) then
+    Report.user_error
+      "Malformed cfg_info for func %d: callsite mismatch function id %d"
+      t.func.id rel.id;
+  match c.callsite.dbg with
+  | None ->
+      Report.user_error
+        "Malformed cfg_info for func %d: callsite without linear id at \
+         offset %d"
+        t.func.id rel.offset
+  | Some linearid ->
+      Printf.printf "\tcallsite %d: " linearid;
+      List.iter c.callees ~f:dump_branch
+
+let dump_block t label =
+  Printf.printf ".L%d: " label;
+  match Hashtbl.find t.blocks label with
+  | None -> Printf.printf "\n"
+  | Some b ->
+      Printf.printf "\n%Ld " b.count;
+      List.iter b.branches ~f:dump_branch;
+      List.iter b.calls ~f:(dump_call t)
+
+let dump t =
+  Printf.printf "Cfg info for func %d: %Ld" t.func.id t.func.count;
+  let layout = CL.layout t.cl in
+  List.iter layout ~f:(dump_block t)

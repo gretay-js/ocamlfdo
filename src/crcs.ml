@@ -108,7 +108,7 @@ module Level = struct
 
   let report t =
     report_field t t.missing "Missing";
-    report_field t t.mismatch "Mismatch"
+    report_field t t.mismatch "Mismatched"
 end
 
 module Config = struct

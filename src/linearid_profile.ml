@@ -57,6 +57,7 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
       Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
+  if !verbose then Cfg_info.dump i;
   Cfg_info.blocks i
 
 (* cfg_info can be saved to a file for later use. It is only useful for
@@ -83,9 +84,12 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
       | Some id ->
           let func = Hashtbl.find_exn p.functions id in
           if Int64.(func.count > 0L) && func.has_linearids then (
-            Report.logf "Found profile for function %s with %Ld samples %s"
+            Report.logf
+              "Found profile for function %s with %Ld samples %s (func id = \
+               %d)"
               name func.count
-              (if String.equal name s then "" else "using near match " ^ s);
+              (if String.equal name s then "" else "using near match " ^ s)
+              id;
             if !verbose then (
               printf "compute_cfg_execounts for %s\n" name;
               CL.print_dot cl "execount" );

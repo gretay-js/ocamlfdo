@@ -363,7 +363,6 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   in
   List.iter files ~f:process;
   Crcs.Config.report crc_config;
-  if report then Report.finish ();
   ()
 
 let check files =
