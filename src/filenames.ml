@@ -36,7 +36,7 @@ let compare t ~expected:func ~actual:file =
     List.find (suffix t) ~f:(fun suffix -> String.is_suffix file ~suffix)
   with
   | None ->
-      Report.log (sprintf "Ignoring %s in %s\n" func file);
+      Report.logf "Ignoring %s in %s\n" func file;
       false
   | Some suffix -> (
       match t with
@@ -48,7 +48,7 @@ let compare t ~expected:func ~actual:file =
              function name encoded as filename into our special dwarf info. *)
           match String.chop_suffix file ~suffix with
           | None ->
-              Report.log (sprintf "Ignoring %s in %s\n" func file);
+              Report.logf "Ignoring %s in %s\n" func file;
               false
           | Some func_dwarf ->
               if String.equal func_dwarf func then true

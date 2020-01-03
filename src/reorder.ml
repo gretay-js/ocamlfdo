@@ -3,6 +3,7 @@ open Core.Poly
 module C = Ocamlcfg.Cfg
 module CL = Ocamlcfg.Cfg_with_layout
 module AD = Aggregated_decoded_profile
+
 let verbose = ref false
 
 let validate = ref false
@@ -12,7 +13,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Profile of AD.t
 
-let print_list msg l = Report.log (sprintf !"%s: %{sexp:int list}\n" msg l)
+let print_list msg l = Report.logf !"%s: %{sexp:int list}\n" msg l
 
 (* All dead blocks should have been eliminated by earlier compiler stages,
    but the functionality for doing it is not fully-implemented yet, and some
@@ -23,7 +24,7 @@ let check cl new_cfg_layout =
   let orig_cfg_layout = CL.layout cl in
   let cfg = CL.cfg cl in
   if not (new_cfg_layout = orig_cfg_layout) then (
-    Report.log (sprintf "Reordered %s\n" (C.fun_name cfg));
+    Report.logf "Reordered %s\n" (C.fun_name cfg);
     print_list "orig" orig_cfg_layout;
     print_list "new " new_cfg_layout;
     if !validate then
@@ -72,9 +73,7 @@ let reorder_profile cl p ~alternatives =
 let apply ~algo cl ~alternatives =
   match algo with
   | Identity ->
-      if !verbose then (
-        printf "Don't reorder.\n";
-        print_list "layout" (CL.layout cl) );
+      if !verbose then print_list "Don't reorder layout" (CL.layout cl);
       cl
   | Random random_state -> reorder_random cl ~random_state
   | Profile p -> reorder_profile cl p ~alternatives

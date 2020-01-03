@@ -275,7 +275,13 @@ let make_random_state seed files =
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =
-  if report then Report.start ();
+  if report then (
+    Report.start ();
+    Report.logf
+      !"Optimizing %{sexp:string list}\n%s profile\nextra_debug=%b"
+      files
+      (Option.value fdo_profile ~default:" no")
+      extra_debug );
   let profile =
     match fdo_profile with
     | None -> None

@@ -53,6 +53,8 @@ let enabled = ref false
 let percent part total =
   if total > 0 then Float.(100. *. (of_int part /. of_int total)) else 0.
 
+let timestamp () = Time.to_string (Time.now ())
+
 let log msg =
   if !verbose then printf "%s" msg;
   if !enabled then
@@ -60,7 +62,11 @@ let log msg =
         Printf.fprintf oc "%s%s" msg
           (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
 
-let logf fmt = Format.kasprintf (fun msg -> log msg) ("@?" ^^ fmt ^^ "@.")
+let logf fmt =
+  Format.kasprintf
+    (fun msg -> log msg)
+    ("@?%s: " ^^ fmt ^^ "@.")
+    (timestamp ())
 
 let start () =
   if !verbose then printf "Creating summary file %s\n" filename;
