@@ -352,7 +352,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
 
 let check files =
   let open Linear_format in
-  let check_fun = function
+  let check_item = function
     | Func f ->
         let fnew =
           transform f ~algo:Reorder.Identity ~extra_debug:false
@@ -364,7 +364,34 @@ let check files =
   let process file =
     printf "Checking %s...\n" file;
     let ui, _ = restore file in
-    List.iter ui.items ~f:check_fun
+    List.iter ui.items ~f:check_item
+  in
+  List.iter files ~f:process
+
+let dump files =
+  let open Linear_format in
+  let dump_linear _oc ppf = function
+    | Func f -> Printlinear.fundecl ppf f
+    | Data dl -> Printcmm.data ppf dl
+  in
+  let dump_cfg oc _ppf = function
+    | Data _ -> ()
+    | Func f ->
+        let cl = CL.of_linear f ~preserve_orig_labels:false in
+        CL.print_dot cl "";
+        CL.print cl oc ""
+  in
+  let process file =
+    printf "Dumping %s...\n" file;
+    let ui, _ = restore file in
+    let dump_format ext dump_item =
+      let dump_filename = sprintf "%s.dump.%s" file ext in
+      Out_channel.with_file dump_filename ~f:(fun oc ->
+          let ppf = Format.formatter_of_out_channel oc in
+          List.iter ui.items ~f:(dump_item oc ppf))
+    in
+    dump_format "linear" dump_linear;
+    dump_format "cfg" dump_cfg
   in
   List.iter files ~f:process
 

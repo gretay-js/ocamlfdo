@@ -647,6 +647,14 @@ let of_sexp_command =
       fun () ->
         Aggregated_decoded_profile.of_sexp ~input_filename ~output_filename)
 
+let dump_command =
+  Command.basic ~summary:"Debug printout of Linear IR and CFG"
+    Command.Let_syntax.(
+      let%map v = flag_v and q = flag_q and files = anon_files in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () -> dump files)
+
 let check_command =
   Command.group ~summary:"Validation utilities."
     [ ("linear2cfg", check_linear2cfg_command);
@@ -671,6 +679,7 @@ let misc_command =
   Command.group
     ~summary:"Experimental commands and testing/debuging utilities"
     [ ("randomize-function-layout", randomize_function_order_command);
+      ("dump", dump_command);
       ("bolt", bolt_command) ]
 
 let main_command =
