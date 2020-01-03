@@ -141,8 +141,17 @@ module Config = struct
   let handle (on_error : On_error.t) ~msg ~skip =
     match on_error with
     | Fail -> Report.user_error "%s\n" msg
-    | Use_anyway -> true
-    | Skip -> skip
+    | Use_anyway ->
+        if !verbose then (
+          print_endline msg;
+          Printf.printf "Use anyway.\n" );
+        true
+    | Skip ->
+        if !verbose then (
+          print_endline msg;
+          if skip then Printf.printf "Skipping.\n"
+          else Printf.printf "Not skipping units.\n" );
+        skip
 
   (* result in the case of skip depends on both unit and func settings. *)
   let handle_mismatch t ~msg (kind : Kind.t) =
@@ -165,7 +174,13 @@ module Config = struct
         | Fail -> Report.user_error "%s\n" msg
         | Use_anyway ->
             if List.is_empty near_matches then true
-            else raise (Near_match near_matches)
+            else (
+              if !verbose then
+                Printf.printf
+                  !"Found %d near matches:\n%{sexp:string list}.\n"
+                  (List.length near_matches)
+                  near_matches;
+              raise (Near_match near_matches) )
         | Skip -> false )
 end
 
