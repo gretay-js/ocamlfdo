@@ -539,11 +539,40 @@ let dump_block t label =
   match Hashtbl.find t.blocks label with
   | None -> Printf.printf "\n"
   | Some b ->
-      Printf.printf "\n%Ld " b.count;
+      Printf.printf "%Ld " b.count;
       List.iter b.branches ~f:dump_branch;
-      List.iter b.calls ~f:(dump_call t)
+      List.iter b.calls ~f:(dump_call t);
+      Printf.printf "\n"
 
 let dump t =
-  Printf.printf "Cfg info for func %d: %Ld" t.func.id t.func.count;
+  Printf.printf "Cfg info for func %d: %Ld\n" t.func.id t.func.count;
   let layout = CL.layout t.cl in
   List.iter layout ~f:(dump_block t)
+
+let dump_dot t =
+  let annotate_block label =
+    match Hashtbl.find t.blocks label with
+    | None -> ""
+    | Some bi -> sprintf "%Ld" bi.count
+  in
+  let annotate_succ label succ =
+    match Hashtbl.find t.blocks label with
+    | None -> ""
+    | Some bi -> (
+        match
+          List.find bi.branches ~f:(fun b ->
+              match b.target_label with
+              | None -> false
+              | Some target -> target = succ)
+        with
+        | None -> ""
+        | Some b ->
+            assert b.intra;
+            Printf.sprintf "%s%Ld%s"
+              (if b.fallthrough then "ft\\r" else "")
+              b.taken
+              ( if Execount.(b.mispredicts > 0L) then
+                sprintf "\\rmis:%Ld" b.mispredicts
+              else "" ) )
+  in
+  CL.print_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ "annot"

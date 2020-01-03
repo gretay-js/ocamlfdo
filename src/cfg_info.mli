@@ -27,3 +27,5 @@ val verbose : bool ref
 val malformed_traces : t -> Execount.t
 
 val dump : t -> unit
+
+val dump_dot : t -> unit

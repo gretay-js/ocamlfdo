@@ -57,7 +57,9 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
       Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
-  if !verbose then Cfg_info.dump i;
+  if !verbose then (
+    Cfg_info.dump i;
+    Cfg_info.dump_dot i );
   Cfg_info.blocks i
 
 (* cfg_info can be saved to a file for later use. It is only useful for
