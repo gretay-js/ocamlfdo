@@ -1,22 +1,22 @@
 (* Adaptation of [1] to basic blocks, influenced by [2]. The use of LBR
    profile information for calculating basic-block level execution counts
-   used here is based on algorithms described in [3]. Collection and
-   decoding of profile information is inspired by [4].
+   used here is based on algorithms described in [3]. Collection and decoding
+   of profile information is inspired by [4].
 
    [1] Optimizing function placement for large-scale data-center
    applications. Guilherme Ottoni and Bertrand Maher. In Proceedings of the
    2017 International Symposium on Code Generation and Optimization (CGO
    2017).
 
-   [2] BOLT: A Practical Binary Optimizer for Data Centers and Beyond.
-   Maksim Panchenko, Rafael Auler, Bill Nell, and Guilherme Ottoni. In
-   Proceedings of 2019 International Symposium on Code Generation and
-   Optimization (CGO 2019).
+   [2] BOLT: A Practical Binary Optimizer for Data Centers and Beyond. Maksim
+   Panchenko, Rafael Auler, Bill Nell, and Guilherme Ottoni. In Proceedings
+   of 2019 International Symposium on Code Generation and Optimization (CGO
+   2019).
 
    [3] Taming Hardware Event Samples for Precise and Versatile Feedback
    Directed Optimizations. Dehao Chen, Neil Vachharajani, Robert Hundt,
-   Xinliang D. Li, Stéphane Eranian, Wenguang Chen, Weimin Zheng Published
-   in IEEE Transactions on Computers 2013
+   Xinliang D. Li, Stéphane Eranian, Wenguang Chen, Weimin Zheng Published in
+   IEEE Transactions on Computers 2013
 
    [4] AutoFDO: automatic feedback-directed optimization for warehouse-scale
    applications. Dehao Chen, David Xinliang Li, and Tipp Moseley. 2016. In
@@ -35,35 +35,31 @@ let entry_pos = 0
 (* Invariant: the weight of a cluster is the sum of the weights of the data
    it represents. *)
 (* Invariant: weights must be non-negative. *)
-(* Invariant: position of the cluster is the smallest position of any item
-   it represents. This is a heuristic, see [Note1] *)
-type 'd cluster = {
-  id : clusterid;
-  (* unique id of the cluster *)
-  pos : int;
-  (* the smallest, index in the original layout *)
-  weight : weight;
-  (* weight *)
-  items : 'd list;
-  (* data items represented by this cluster. *)
-  mutable can_be_merged : bool;
-}
+(* Invariant: position of the cluster is the smallest position of any item it
+   represents. This is a heuristic, see [Note1] *)
+type 'd cluster =
+  { id : clusterid;  (** unique id of the cluster *)
+    pos : int;  (** the smallest, index in the original layout *)
+    weight : weight;  (** weight *)
+    items : 'd list;  (** data items represented by this cluster. *)
+    mutable can_be_merged : bool
+  }
 
-type edge = {
-  src : clusterid;
-  dst : clusterid;
-  weight : weight;
-}
+type edge =
+  { src : clusterid;
+    dst : clusterid;
+    weight : weight
+  }
 [@@deriving compare]
 
 (* Directed graph whose nodes are clusters. *)
-type 'd t = {
-  next_id : clusterid;
-  (* used to create unique cluster ids *)
-  clusters : 'd cluster list;
-  edges : edge list;
-  original_layout : 'd list;
-}
+type 'd t =
+  { next_id : clusterid;
+    (* used to create unique cluster ids *)
+    clusters : 'd cluster list;
+    edges : edge list;
+    original_layout : 'd list
+  }
 
 let id_to_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
@@ -77,18 +73,18 @@ let init_layout original_layout execounts =
   let mk_node ~data ~weight ~pos ~id =
     assert (Int64.(weight >= 0L));
 
-    (* Cluster that contains the entry position of the original layout
-       cannot be merged *after* another cluster. *)
+    (* Cluster that contains the entry position of the original layout cannot
+       be merged *after* another cluster. *)
     let can_be_merged = not (pos = entry_pos) in
-    { id; weight; items = [ data ]; pos; can_be_merged }
+    { id; weight; items = [data]; pos; can_be_merged }
   in
   let mk_edge ~src ~dst ~weight =
     assert (Int64.(weight >= 0L));
     { src; dst; weight }
   in
-  (* Initialize each block in its own cluster: cluster id is block's
-     position in the original layout, data is block label, weight is block's
-     execution count, or 0 if there is no info. *)
+  (* Initialize each block in its own cluster: cluster id is block's position
+     in the original layout, data is block label, weight is block's execution
+     count, or 0 if there is no info. *)
   let clusters =
     List.mapi original_layout ~f:(fun pos data ->
         let weight =
@@ -110,16 +106,19 @@ let init_layout original_layout execounts =
         List.fold block_info.branches ~init:acc ~f:(fun acc b ->
             if b.intra then
               let dst = find_pos (Option.value_exn b.target_label) in
-              let e = mk_edge ~src ~dst ~weight:b.taken in
+              let e =
+                mk_edge ~src ~dst ~weight:b.taken
+                (* CR-soon gyorsh: can we factor in mispredicted? *)
+              in
               e :: acc
             else acc))
   in
   { next_id = List.length clusters; clusters; edges; original_layout }
 
 (* Compare clusters using their weight, in descending order. Tie breaker
-   using their position in the orginal layout, if available. Otherwise,
-   using their ids which are unique. Clusters that cannot be merged are at
-   the end, ordered amongst them in the same way. *)
+   using their position in the orginal layout, if available. Otherwise, using
+   their ids which are unique. Clusters that cannot be merged are at the end,
+   ordered amongst them in the same way. *)
 let cluster_compare_frozen c1 c2 =
   if Bool.equal c1.can_be_merged c2.can_be_merged then
     let res = compare_weight c2.weight c1.weight in
@@ -156,13 +155,12 @@ let merge t c1 c2 =
   let pos = min c1.pos c2.pos in
   let can_be_merged = not (pos = entry_pos) in
   let c =
-    {
-      id;
+    { id;
       pos;
       can_be_merged;
       weight = Int64.(c1.weight + c2.weight);
       (* For layout, preserve the order of the input items lists. *)
-      items = c1.items @ c2.items;
+      items = c1.items @ c2.items
     }
   in
   (* Add the new cluster at the front and remove the c1 and c2. *)
@@ -195,10 +193,9 @@ let merge t c1 c2 =
           match acc with
           | e2 :: rest when e2.src = e1.src && e2.dst = e1.dst ->
               let e =
-                {
-                  src = e1.src;
+                { src = e1.src;
                   dst = e1.dst;
-                  weight = Int64.(e1.weight + e2.weight);
+                  weight = Int64.(e1.weight + e2.weight)
                 }
               in
               e :: rest
@@ -221,11 +218,11 @@ let find_max_pred t c =
   | Some max -> Some max.src
 
 (* Order clusters by their execution counts, descending, tie breaker using
-   original layout, as in cluster's compare function. Choose the cluster
-   with the highest weight. Find its "most likely predecessor" cluster i.e.,
-   the predecessor with the highest edge weight, tie breaker using original
-   layout. Merge the two clusters. Repeat untill all clusters are merged
-   into a single cluster. Return its data. *)
+   original layout, as in cluster's compare function. Choose the cluster with
+   the highest weight. Find its "most likely predecessor" cluster i.e., the
+   predecessor with the highest edge weight, tie breaker using original
+   layout. Merge the two clusters. Repeat untill all clusters are merged into
+   a single cluster. Return its data. *)
 let optimize_layout original_layout execounts =
   let t = init_layout original_layout execounts in
   let len_clusters = List.length t.clusters in
@@ -236,10 +233,10 @@ let optimize_layout original_layout execounts =
     if !verbose then printf "Optimize layout called with empty layout.\n";
     [] )
   else
-    (* Invariant preserved: clusters that can be merged are ordered by
-       weight and pos, followed by clusters that cannot be merged. The new
-       cluster has the highest weight, amongst ones that can be merged,
-       because it takes the previously highest weight cluster cur and adds a
+    (* Invariant preserved: clusters that can be merged are ordered by weight
+       and pos, followed by clusters that cannot be merged. The new cluster
+       has the highest weight, amongst ones that can be merged, because it
+       takes the previously highest weight cluster cur and adds a
        non-negative weight of pred to it. If a cluster has no predecessors,
        it is moved to the end. *)
     let clusters = List.sort t.clusters ~compare:cluster_compare_frozen in
@@ -249,8 +246,7 @@ let optimize_layout original_layout execounts =
       | [] -> []
       | c :: rest ->
           if c.can_be_merged then (
-            if !verbose then
-              printf "Step %d: merging cluster %d\n" step c.id;
+            if !verbose then printf "Step %d: merging cluster %d\n" step c.id;
             match find_max_pred t c with
             | None ->
                 (* Cluster c is not reachable from within the function using
@@ -259,7 +255,7 @@ let optimize_layout original_layout execounts =
                    marking that it cannot be merged. *)
                 if !verbose then printf "No predecessor for %d\n" c.id;
                 c.can_be_merged <- false;
-                let t = { t with clusters = rest @ [ c ] } in
+                let t = { t with clusters = rest @ [c] } in
                 loop t (step + 1)
             | Some pred_id ->
                 let pred = id_to_cluster t pred_id in
@@ -268,15 +264,22 @@ let optimize_layout original_layout execounts =
                 let t = merge t pred c in
                 loop t (step + 1) )
           else
-            (* Cannot merge any more clusters. Sort the remaining clusters
-               in original layout order. This guarantees that the entry is
-               at the front. *)
+            (* Cannot merge any more clusters. Sort the remaining clusters in
+               original layout order. This guarantees that the entry is at
+               the front. *)
+            let print msg x =
+              let x = List.map x ~f:(fun c -> c.items) in
+              Printf.printf !"%s: %{sexp: int list list}\n" msg x
+            in
+            if !verbose then print "clusters" t.clusters;
             let clusters =
               List.sort t.clusters ~compare:cluster_compare_pos
             in
             (* Merge their lists *)
+            if !verbose then print "sorted" clusters;
             let layout =
-              List.map clusters ~f:(fun c -> c.items) |> List.concat
+              List.concat_map clusters ~f:(fun c ->
+                  List.sort ~compare:Int.compare c.items)
             in
             if !verbose then printf "Finished in %d steps\n" step;
             layout

@@ -506,10 +506,11 @@ let dump_branch (b : Block_info.b) =
   | None -> ()
   | Some successor ->
       if b.intra then
-        Printf.printf "(.L%d %s: %Ld%s)" successor
-          (if b.fallthrough then "ft" else "")
+        Printf.printf "(.L%d%s:%Ld%s)" successor
+          (if b.fallthrough then " ft" else "")
           b.taken
-          ( if Execount.(b.mispredicts > 0L) then sprintf "%Ld" b.mispredicts
+          ( if Execount.(b.mispredicts > 0L) then
+            sprintf " :mis%Ld" b.mispredicts
           else "" )
 
 let dump_call t (c : Block_info.c) =
