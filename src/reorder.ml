@@ -13,7 +13,7 @@ type reorder_algo =
   | Random of Random.State.t
   | Profile of AD.t
 
-let print_list msg l = Report.logf !"%s: %{sexp:int list}\n" msg l
+let print_list msg l = Report.logf !"%s: %{sexp:int list}" msg l
 
 (* All dead blocks should have been eliminated by earlier compiler stages,
    but the functionality for doing it is not fully-implemented yet, and some
@@ -24,9 +24,9 @@ let check cl new_cfg_layout =
   let orig_cfg_layout = CL.layout cl in
   let cfg = CL.cfg cl in
   if not (new_cfg_layout = orig_cfg_layout) then (
-    Report.logf "Reordered %s\n" (C.fun_name cfg);
-    print_list "orig" orig_cfg_layout;
-    print_list "new " new_cfg_layout;
+    Report.logf
+      !"Reordered %s\norig: %{sexp: int list}\nnew : %{sexp: int list}\n"
+      (C.fun_name cfg) orig_cfg_layout new_cfg_layout;
     if !validate then
       (* Make sure the new layout is just a permutation. CR-soon gyorsh: do
          we need to handle block duplication here? *)

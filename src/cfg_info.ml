@@ -50,7 +50,10 @@ let create cl func =
 
 let id_to_label t id =
   match Hashtbl.find t.id_to_label id with
-  | None -> Misc.fatal_errorf "Cannot find label for ID %d in id_to_label" id
+  | None ->
+      Report.(
+        user_error ~hint:(Some Hint.Mismatch)
+          "Cannot find CFG label for Linear ID %d in func %d" id t.func.id)
   | Some lbl ->
       if !verbose then
         Printf.printf "Found label %d for id %d in map\n" lbl id;

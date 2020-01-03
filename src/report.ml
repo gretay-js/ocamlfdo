@@ -77,9 +77,17 @@ let finish () =
   enabled := false
 
 module Hint = struct
-  type t = Old_profile
+  type t =
+    | Old_profile
+    | Mismatch
 
   let to_fmt = function
+    | Mismatch ->
+        format_of_string
+          "Cannot apply the profile to code because the source code changed \
+           and md5 check is disabled.\n\
+           Try generating a new profile or use command line flag \
+           -no-md5-mismatch skip."
     | Old_profile ->
         format_of_string
           "Profile format may have changed.\n\

@@ -36,17 +36,17 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
       Cfg_info.record_trace i ~from_loc ~to_loc ~data);
-  ( if !verbose then
+
+  (* report stats *)
+  let m = Cfg_info.malformed_traces i in
+  ( if Execount.(m > 0L) then
     let total_traces =
       List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
     in
-    let m = Cfg_info.malformed_traces i in
-    let ratio =
-      if Int64.(total_traces > 0L) then Int64.(m * 100L / total_traces)
-      else 0L
-    in
-    printf "Found %Ld malformed traces out of %Ld (%Ld%%)\n" m total_traces
-      ratio );
+    Report.logf "Found %Ld malformed traces out of %Ld (%.3f%%)\n" m
+      total_traces
+      (Report.percent (Execount.to_int_trunc m)
+         (Execount.to_int_trunc total_traces)) );
 
   (* Associate branch counts with basic blocks *)
   Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
@@ -83,6 +83,9 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
       | Some id ->
           let func = Hashtbl.find_exn p.functions id in
           if Int64.(func.count > 0L) && func.has_linearids then (
+            Report.logf "Found profile for function %s with %Ld samples %s"
+              name func.count
+              (if String.equal name s then "" else "using near match " ^ s);
             if !verbose then (
               printf "compute_cfg_execounts for %s\n" name;
               CL.print_dot cl "execount" );

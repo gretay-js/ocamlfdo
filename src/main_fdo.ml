@@ -278,9 +278,9 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   if report then (
     Report.start ();
     Report.logf
-      !"Optimizing %{sexp:string list}\n%s profile\nextra_debug=%b"
+      !"Optimizing %{sexp:string list}\n%s\nextra_debug=%b\n"
       files
-      (Option.value fdo_profile ~default:" no")
+      (Option.value fdo_profile ~default:"no profile")
       extra_debug );
   let profile =
     match fdo_profile with
