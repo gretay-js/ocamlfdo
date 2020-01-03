@@ -343,8 +343,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
                 | exception Crcs.Near_match alternatives ->
                     transform ~alternatives ))
       in
-      if !verbose && !skipped > 0 then
-        Printf.printf
+      if !skipped > 0 then
+        Report.logf
           "Skipped %d functions out of %d in compilation unit %s (%.3f)\n"
           !skipped !total file
           (Report.percent !skipped !total);

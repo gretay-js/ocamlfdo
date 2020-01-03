@@ -60,6 +60,8 @@ let log msg =
         Printf.fprintf oc "%s%s" msg
           (if String.is_suffix msg ~suffix:"\n" then "" else "\n"))
 
+let logf fmt = Format.kasprintf (fun msg -> log msg) ("@?" ^^ fmt ^^ "@.")
+
 let start () =
   if !verbose then printf "Creating summary file %s\n" filename;
   enabled := true

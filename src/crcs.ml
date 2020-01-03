@@ -99,8 +99,8 @@ module Level = struct
   let record t = t.total <- t.total + 1
 
   let report_field t v msg =
-    if v > 0 && t.total > 0 then
-      Printf.printf "%s md5 in %d %s%s out of %d (%.3f%%)\n" msg v
+    if v > 0 then
+      Report.logf "%s md5 in %d %s%s out of %d (%.3f%%)\n" msg v
         (Kind.to_string_hum t.kind)
         (if v = 1 then "" else "s")
         t.total
@@ -142,15 +142,12 @@ module Config = struct
     match on_error with
     | Fail -> Report.user_error "%s\n" msg
     | Use_anyway ->
-        if !verbose then (
-          print_endline msg;
-          Printf.printf "Use anyway.\n" );
+        if !verbose then Printf.printf "Use anyway.\n";
         true
     | Skip ->
-        if !verbose then (
-          print_endline msg;
+        if !verbose then
           if skip then Printf.printf "Skipping.\n"
-          else Printf.printf "Not skipping units.\n" );
+          else Printf.printf "Not skipping units.\n";
         skip
 
   (* result in the case of skip depends on both unit and func settings. *)
@@ -202,7 +199,7 @@ let add ?(error_on_duplicate = true) tbl ~name crc ~file =
         Printf.sprintf
           !"Duplicate! Linear IR for %s from file %s has already been \
             processed.\n\
-            crc: %{sexp:Crc.t}\n"
+            crc: %{sexp:Crc.t}"
           name file crc
       in
       if error_on_duplicate then Report.user_error "%s\n" msg
