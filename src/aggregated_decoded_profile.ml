@@ -372,7 +372,7 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
   let last = ref (Hashtbl.length dst.name2id) in
   let fresh () =
     let res = !last in
-    last := !last + 1;
+    incr last;
     res
   in
   let old2new = Int.Table.create ~size:(Hashtbl.length src.name2id) () in

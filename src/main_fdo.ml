@@ -321,23 +321,33 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let out_filename = Filenames.make_fdo file in
     let open Linear_format in
     let ui, crc = restore file in
-    ( if Crcs.add_unit crcs ui ~hex:(Caml.Digest.to_hex crc) ~file then
+    if Crcs.add_unit crcs ui ~hex:(Caml.Digest.to_hex crc) ~file then (
+      let skipped = ref 0 in
+      let total = ref 0 in
       let new_items =
         List.map ui.items ~f:(fun item ->
             match item with
             | Data dl -> Data dl
             | Func f -> (
+                incr total;
                 let transform ~alternatives =
                   Func
                     (transform f ~algo ~extra_debug
                        ~preserve_orig_labels:false ~alternatives)
                 in
                 match Crcs.add_fun crcs f ~file with
-                | false -> item
+                | false ->
+                    incr skipped;
+                    item
                 | true -> transform ~alternatives:[]
                 | exception Crcs.Near_match alternatives ->
                     transform ~alternatives ))
       in
+      if !verbose && !skipped > 0 then
+        Printf.printf
+          "Skipped %d functions out of %d in compilation unit %s (%.3f)\n"
+          !skipped !total file
+          (Report.percent !skipped !total);
       ui.items <- new_items );
     if extra_debug then emit_crcs ui crcs;
     save out_filename ui
