@@ -17,6 +17,8 @@ let mk () = { execounts = Int.Table.create () }
 
 let add t id info = Hashtbl.add_exn t.execounts ~key:id ~data:info
 
+let find t id = Hashtbl.find t.execounts id
+
 (* Compute detailed execution counts for function [name] using its CFG *)
 (* Translate linear ids of this function's locations to cfg labels within
    this function, find the corresponding basic blocks and update their

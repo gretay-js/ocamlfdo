@@ -142,7 +142,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t)
         }
   in
   Hashtbl.fold p.functions ~init:[] ~f:(fun ~key:_ ~data:func acc ->
-      match Hashtbl.find lp.execounts func.id with
+      match Linearid_profile.find lp func.id with
       | Some cfg_info when func.has_linearids ->
           (* This is expensive because we need to scan the entire original
              binary to find the function. *)

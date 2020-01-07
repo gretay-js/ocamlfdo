@@ -1,5 +1,3 @@
-open Core
-
 let rec instr (i : Linear.instruction) =
   match i.desc with
   | Lend -> { i with dbg = Debuginfo.none }
@@ -11,8 +9,10 @@ let fundecl (f : Linear.fundecl) =
 let unit (ui : Linear_format.linear_unit_info) =
   let open Linear_format in
   let items =
-    List.map ui.items ~f:(function
-      | Func f -> Func (fundecl f)
-      | d -> d)
+    List.map
+      (function
+        | Func f -> Func (fundecl f)
+        | d -> d)
+      ui.items
   in
   { ui with items }

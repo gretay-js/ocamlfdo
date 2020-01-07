@@ -1,18 +1,11 @@
 open Core
 
 type t =
-  { (* Unique identifier we assign to this function *)
-    id : int;
-    (* Raw start address of the function in original binary *)
+  { id : int;
     start : Raw_addr.t;
     finish : Raw_addr.t;
-    (* Preliminary execution count *)
     mutable count : Execount.t;
-    (* Does the function have any linearids? *)
     mutable has_linearids : bool;
-    (* Counters that refer to this function, uses raw addresses. *)
-    (* CR-soon gyorsh: This can be dropped after cfg_count is constructed, to
-       save memory. *)
     agg : Aggregated_perf_profile.t
   }
 [@@deriving sexp, bin_io]

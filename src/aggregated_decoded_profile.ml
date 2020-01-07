@@ -7,7 +7,7 @@ module Cfg = Ocamlcfg.Cfg
 
 let verbose = ref true
 
-let magic_number = "ocamlfdo001"
+let _magic_number = "ocamlfdo001"
 
 type t =
   { (* map raw addresses to locations *)

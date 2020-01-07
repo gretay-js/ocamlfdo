@@ -1,8 +1,7 @@
 open Core
-open Main_fdo
 
 let set_verbose v =
-  verbose := v;
+  Main_fdo.verbose := v;
   Perf_profile.verbose := v;
   Aggregated_decoded_profile.verbose := v;
   Aggregated_perf_profile.verbose := v;
@@ -21,6 +20,30 @@ let set_verbose v =
   Linker_script.verbose := v;
   Merge.verbose := v;
   ()
+
+(* Build systems call 'ocamlfdo opt' on a single file. When -seed is used for
+   random block layout, the same permutation will be applied to layout of all
+   functions that appear in the same source order (first function, second
+   function, etc) in different compilation units, because the random state
+   will be reinitialized from the beginning on each call to 'ocamlfdo opt'.
+   To circumvent it while still having deterministic builds for a given
+   -seed, regardless of the order the build system calls it, we use hash of
+   the file names as an additional seed. *)
+let make_random_state seed files =
+  match seed with
+  | None -> Random.self_init ()
+  | Some seed -> (
+      match files with
+      | [] -> Random.init seed
+      | _ ->
+          let hashes =
+            (* sort to make the initialization deterministic, regardless of
+               the order in which the files are passed on command line, in
+               the case there is more than one file. *)
+            List.sort ~compare:String.compare files
+            |> List.map ~f:Hashtbl.hash
+          in
+          Random.full_init (Array.of_list (seed :: hashes)) )
 
 (* Utility for handling variant type command line options. *)
 (* Print all variants in option's help string. *)
@@ -73,12 +96,6 @@ module Commonflag = struct
   let flag_binary_filename =
     { name = "-binary";
       doc = "filename elf binary to optimize";
-      aliases = []
-    }
-
-  let flag_perf_profile_filename =
-    { name = "-perf-profile";
-      doc = "perf.data output of perf record";
       aliases = []
     }
 
@@ -291,8 +308,8 @@ let merge_command =
       if v then set_verbose true;
       if q then set_verbose false;
       fun () ->
-        merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
-          ~output_filename)
+        Main_fdo.merge files ~read_aggregated_perf_profile ~crc_config
+          ~ignore_buildid ~output_filename)
 
 let decode_command =
   Command.basic
@@ -332,7 +349,7 @@ let decode_command =
       if v then set_verbose true;
       if q then set_verbose false;
       make_random_state seed [];
-      if !verbose then (
+      if !Main_fdo.verbose then (
         if write_aggregated_profile && read_aggregated_perf_profile then
           printf
             "Ignoring -write-agreggated. Incompatible with -read-aggregated.\n";
@@ -343,7 +360,7 @@ let decode_command =
              to reorder.\n" );
       fun () ->
         Profile.record_call "decode" (fun () ->
-            decode files ~binary_filename ~reorder_functions
+            Main_fdo.decode files ~binary_filename ~reorder_functions
               ~linker_script_hot_filename ~output_filename
               ~write_linker_script_hot ~ignore_buildid ~expected_pids
               ~check:(not force) ~write_aggregated_profile
@@ -382,7 +399,7 @@ let opt_command =
       make_random_state seed files;
       fun () ->
         Profile.record_call "opt" (fun () ->
-            optimize files ~fdo_profile ~reorder_blocks ~extra_debug
+            Main_fdo.optimize files ~fdo_profile ~reorder_blocks ~extra_debug
               ~crc_config ~report);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
@@ -403,7 +420,7 @@ let check_linear2cfg_command =
       let%map v = flag_v and q = flag_q and files = anon_files in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> check files)
+      fun () -> Main_fdo.check files)
 
 let compile_command =
   Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
@@ -465,7 +482,7 @@ let compile_command =
         if auto then
           match fdo_profile with
           | None ->
-              if !verbose then
+              if !Main_fdo.verbose then
                 printf
                   "Missing -fdo-profile <file>, required for compilation\n\
                    when -auto is used. Calling ocamlopt directly, without\n\
@@ -474,14 +491,14 @@ let compile_command =
               None
           | Some file ->
               if Sys.file_exists_exn file then (
-                if !verbose then
+                if !Main_fdo.verbose then
                   printf
                     "With -auto, detected that -fdo-profile <%s> file does \
                      not exist.\n\n\
                     \ Setting -extra-debug to true." file;
                 Some (None, true) )
               else (
-                if !verbose then
+                if !Main_fdo.verbose then
                   printf "With -auto, the file -fdo-profile <%s> exists."
                     file;
                 Some (fdo_profile, extra_debug) )
@@ -491,11 +508,11 @@ let compile_command =
       in
       fun () ->
         match fdo with
-        | None -> ocamlopt args
+        | None -> Wrapper.(call_ocamlopt (wrap args) All)
         | Some (fdo_profile, extra_debug) ->
             Profile.record_call "compile" (fun () ->
-                compile args ~fdo_profile ~reorder_blocks ~extra_debug
-                  ~crc_config ~report;
+                Main_fdo.compile args ~fdo_profile ~reorder_blocks
+                  ~extra_debug ~crc_config ~report;
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 
@@ -613,7 +630,7 @@ let linker_script_command =
       then
         Report.user_error
           "Please provide at most one of -fdo-profile and -linker-script-hot";
-      if !verbose && Option.is_some linker_script_hot then
+      if !Main_fdo.verbose && Option.is_some linker_script_hot then
         printf
           "Ignoring -reorder-functions when -linker-script-hot is provided.\n";
       fun () ->
@@ -650,10 +667,14 @@ let of_sexp_command =
 let dump_command =
   Command.basic ~summary:"Debug printout of Linear IR and CFG"
     Command.Let_syntax.(
-      let%map v = flag_v and q = flag_q and files = anon_files in
+      let%map v = flag_v
+      and q = flag_q
+      and files = anon_files
+      and dot = flag_dot
+      and show_instr = flag_dot_show_instr in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> dump files)
+      fun () -> Main_fdo.dump files ~dot ~show_instr)
 
 let check_command =
   Command.group ~summary:"Validation utilities."

@@ -11,14 +11,6 @@ let verbose = ref true
 
 let strict = ref false
 
-let time f x =
-  let open Time in
-  let start = now () in
-  let fx = f x in
-  let stop = now () in
-  printf "Execution time: %s\n" (Span.to_string (abs_diff stop start));
-  fx
-
 (* CR-soon gyorsh: This is the only machine dependent part. owee parser
    doesn't know how to handle /% that may appear in a function name, for
    example an Int operator. *)
@@ -34,29 +26,6 @@ let print_linear msg f =
       printf "%s processing %s\n" f.Linear.fun_name msg;
       Printlinear.fundecl Format.std_formatter f;
       Format.pp_print_flush Format.std_formatter () )
-
-let report_linear ~name title f =
-  Report.with_ppf ~name ~title ~sub:"lin" Printlinear.fundecl f
-
-let report_cfg ~name title cfg =
-  Report.with_outchannel ~name ~title ~sub:"lin"
-    (fun oc x -> CL.print x oc "")
-    cfg
-
-(* CR-soon gyorsh: this is intended as a report at source level and human
-   readable form, like inlining report. Currently, just prints the IRs. Could
-   share infrastructure with inlining report to map back to source when
-   reordering involves inlined functions. CR-soon gyorsh: add separate "dump"
-   flags for all passes in ocamlfdo, printing to stdout similarly to -dcmm
-   -dlinear in the compiler, etc. *)
-let write_reorder_report (f : Linear.fundecl) c newf newc =
-  if not (phys_equal c newc) then (
-    (* Separate files for before and after make it easier to diff *)
-    let name = to_symbol f.fun_name in
-    report_linear ~name "Before-Reorder" f;
-    report_linear ~name "After-Reorder" newf;
-    report_cfg ~name "Before-Reorder" c;
-    report_cfg ~name "After-Reorder" newc )
 
 let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
     ~output_filename =
@@ -159,6 +128,16 @@ let reg_array_equal ra1 ra2 =
     true
   with Not_equal_reg_array -> false
 
+let report_linear ~name title f =
+  let filename = Report.get_filename ~name ~title ~sub:"lin" in
+  let out_channel = Out_channel.create filename in
+  let ppf = Format.formatter_of_out_channel out_channel in
+  Misc.try_finally
+    (fun () -> Printlinear.fundecl ppf f)
+    ~always:(fun () ->
+      Format.pp_print_flush ppf ();
+      Out_channel.close out_channel)
+
 let check_equal f new_body =
   (* CR-someday gyorsh: we do not preserve live and dbg fields of some
      instructions, such as labels, and instruction that do not exist in cfg,
@@ -248,30 +227,6 @@ let emit_crcs ui crcs =
         Cglobal_symbol symbol :: Cdefine_symbol symbol :: items)
   in
   ui.items <- ui.items @ [Data dl]
-
-(* Build systems call 'ocamlfdo opt' on a single file. When -seed is used for
-   random block layout, the same permutation will be applied to layout of all
-   functions that appear in the same source order (first function, second
-   function, etc) in different compilation units, because the random state
-   will be reinitialized from the beginning on each call to 'ocamlfdo opt'.
-   To circumvent it while still having deterministic builds for a given
-   -seed, regardless of the order the build system calls it, we use hash of
-   the file names as an additional seed. *)
-let make_random_state seed files =
-  match seed with
-  | None -> Random.self_init ()
-  | Some seed -> (
-      match files with
-      | [] -> Random.init seed
-      | _ ->
-          let hashes =
-            (* sort to make the initialization deterministic, regardless of
-               the order in which the files are passed on command line, in
-               the case there is more than one file. *)
-            List.sort ~compare:String.compare files
-            |> List.map ~f:Hashtbl.hash
-          in
-          Random.full_init (Array.of_list (seed :: hashes)) )
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     ~report =
@@ -383,7 +338,7 @@ let check files =
   in
   List.iter files ~f:process
 
-let dump files =
+let dump files ~dot ~show_instr =
   let open Linear_format in
   let dump_linear _oc ppf = function
     | Func f -> Printlinear.fundecl ppf f
@@ -393,7 +348,7 @@ let dump files =
     | Data _ -> ()
     | Func f ->
         let cl = CL.of_linear f ~preserve_orig_labels:false in
-        CL.print_dot cl "";
+        if dot then CL.print_dot ~show_instr cl "";
         CL.print cl oc ""
   in
   let process file =
@@ -433,8 +388,3 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     if !verbose && (Option.is_some fdo_profile || extra_debug) then
       printf "Calling ocamlopt directly, without FDO.\n";
     call_ocamlopt w All )
-
-let ocamlopt args =
-  let open Wrapper in
-  let w = wrap args in
-  call_ocamlopt w All

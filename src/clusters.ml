@@ -63,7 +63,7 @@ type 'd t =
 
 let id_to_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
-let find t data =
+let _find t data =
   List.find t.clusters ~f:(fun c ->
       List.mem c.items data ~equal:(fun d1 d2 -> d1 = d2))
 
@@ -136,7 +136,7 @@ let cluster_compare_pos c1 c2 =
     if res = 0 then compare c1.id c2.id else res
   else res
 
-let get_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
+let _get_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
 
 (* Compare edges using weights, in descending order. Tie breaker on sources
    first, then on destinations. *)

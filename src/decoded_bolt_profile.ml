@@ -235,7 +235,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t)
   let chan = Out_channel.create filename in
   (* For each function, print inferred fallthrough edges. *)
   Hashtbl.iter p.functions ~f:(fun func ->
-      match Hashtbl.find lp.execounts func.id with
+      match Linearid_profile.find lp func.id with
       | Some cfg_info when func.has_linearids ->
           Cfg_info.iter cfg_info ~f:(fun bi ->
               List.iter bi.branches ~f:(fun b ->

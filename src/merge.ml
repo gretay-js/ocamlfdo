@@ -13,7 +13,7 @@ let buildid b1 b2 ~ignore_buildid =
         None )
       else Report.user_error "Mismatched buildids:\n%s\n%s\n" b1 b2
 
-module Make (Profile : sig
+module type Profile = sig
   type t
 
   val read : string -> t
@@ -21,21 +21,40 @@ module Make (Profile : sig
   val write : t -> string -> unit
 
   val approx_size : t -> int
-  (** approximate sizes of [t] for merge *)
 
   val merge_into :
     src:t -> dst:t -> crc_config:Crcs.Config.t -> ignore_buildid:bool -> unit
-  (** might mutate both [src] and [dst] *)
-end) =
-struct
+end
+
+module type Algo = sig
+  type profile
+
+  val merge :
+    profile ->
+    profile ->
+    crc_config:Crcs.Config.t ->
+    ignore_buildid:bool ->
+    profile
+
+  val merge_files :
+    string list ->
+    crc_config:Crcs.Config.t ->
+    ignore_buildid:bool ->
+    output_filename:string ->
+    unit
+end
+
+module Make (P : Profile) = struct
+  type profile = P.t
+
   let merge t1 t2 ~crc_config ~ignore_buildid =
     (* choose the biggest profile to merge into, for faster merge. *)
     let src, dst =
-      let s1 = Profile.approx_size t1 in
-      let s2 = Profile.approx_size t2 in
+      let s1 = P.approx_size t1 in
+      let s2 = P.approx_size t2 in
       if s1 <= s2 then (t1, t2) else (t2, t1)
     in
-    Profile.merge_into ~src ~dst ~crc_config ~ignore_buildid;
+    P.merge_into ~src ~dst ~crc_config ~ignore_buildid;
     dst
 
   (* CR-someday gyorsh: stable result, not influenced by the order in which
@@ -51,10 +70,10 @@ struct
       match files with
       | [] -> Report.user_error "Cannot merge, no input files"
       | file :: rest ->
-          List.fold rest ~init:(Profile.read file) ~f:(fun acc file ->
-              let profile = Profile.read file in
+          List.fold rest ~init:(P.read file) ~f:(fun acc file ->
+              let profile = P.read file in
               if !verbose then Printf.printf "Merging %s\n" file;
               merge profile acc ~crc_config ~ignore_buildid)
     in
-    Profile.write profile output_filename
+    P.write profile output_filename
 end

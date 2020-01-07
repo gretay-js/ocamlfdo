@@ -22,29 +22,12 @@ let get_id name =
     incr last_id;
     !last_id - 1 )
 
-(* Some names come out too long. This function shortens them or depending on
-   whether they are write-only, or need to be reused. *)
+(* depending on whether the name is write-only, or need to be reused, we can
+   save ids associated with each name. *)
 let get_filename ~name ~title ~sub =
   let filename = sprintf "%s-%s.%s" name title sub in
   if String.length name < 255 then filename
   else sprintf "%s-%d-%s.%s" (String.prefix name 200) (get_id name) title sub
-
-let with_outchannel ~name ~title ~sub printer x =
-  let filename = get_filename ~name ~title ~sub in
-  let out_channel = Out_channel.create filename in
-  Misc.try_finally
-    (fun () -> printer out_channel x)
-    ~always:(fun () -> Out_channel.close out_channel)
-
-let with_ppf ~name ~title ~sub formatter x =
-  let filename = get_filename ~name ~title ~sub in
-  let out_channel = Out_channel.create filename in
-  let ppf = Format.formatter_of_out_channel out_channel in
-  Misc.try_finally
-    (fun () -> formatter ppf x)
-    ~always:(fun () ->
-      Format.pp_print_flush ppf ();
-      Out_channel.close out_channel)
 
 let filename = sprintf "summary.%s" extension
 
