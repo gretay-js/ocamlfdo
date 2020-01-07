@@ -510,7 +510,7 @@ let dump_branch (b : Block_info.b) =
           (if b.fallthrough then " ft" else "")
           b.taken
           ( if Execount.(b.mispredicts > 0L) then
-            sprintf " :mis%Ld" b.mispredicts
+            sprintf " mis:%Ld" b.mispredicts
           else "" )
 
 let dump_call t (c : Block_info.c) =

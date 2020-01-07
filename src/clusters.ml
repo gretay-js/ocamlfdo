@@ -242,7 +242,7 @@ let optimize_layout original_layout execounts =
     let clusters = List.sort t.clusters ~compare:cluster_compare_frozen in
     let t = { t with clusters } in
     let rec loop t step =
-      match clusters with
+      match t.clusters with
       | [] -> []
       | c :: rest ->
           if c.can_be_merged then (
