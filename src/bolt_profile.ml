@@ -150,7 +150,7 @@ let fallthroughs locations (p : Aggregated_decoded_profile.t)
              dwarf and its inverse. *)
           Elf_locations.resolve_range locations ~start:func.start
             ~finish:func.finish ~with_inverse:true;
-          Hashtbl.fold cfg_info ~init:acc ~f:(fun ~key:_ ~data:bi acc ->
+          Cfg_info.fold cfg_info ~init:acc ~f:(fun ~key:_ ~data:bi acc ->
               List.fold bi.branches ~init:acc ~f:(fun acc b ->
                   if b.fallthrough then (
                     let src_id = bi.terminator_id in

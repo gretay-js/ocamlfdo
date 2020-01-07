@@ -1,13 +1,11 @@
 open Core
 
-type blocks = Block_info.t Hashtbl.M(Cfg_label).t [@@deriving sexp]
-(** Map basic blocks of this function to breakdown of execution counts *)
-
 type t
+(** Map basic blocks of this function to breakdown of execution counts *)
 
 val create : Ocamlcfg.Cfg_with_layout.t -> Func.t -> t
 
-val blocks : t -> blocks
+val get_block : t -> Cfg_label.t -> Block_info.t option
 
 val record_ip : t -> loc:Loc.t -> data:Execount.t -> unit
 
@@ -28,4 +26,8 @@ val malformed_traces : t -> Execount.t
 
 val dump : t -> unit
 
-val dump_dot : t -> unit
+val dump_dot : t -> string -> unit
+
+val fold : t -> init:'a -> f:(key:int -> data:Block_info.t -> 'a -> 'a) -> 'a
+
+val iter : t -> f:(Block_info.t -> unit) -> unit

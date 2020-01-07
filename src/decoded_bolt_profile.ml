@@ -237,7 +237,7 @@ let save_fallthrough (p : Aggregated_decoded_profile.t)
   Hashtbl.iter p.functions ~f:(fun func ->
       match Hashtbl.find lp.execounts func.id with
       | Some cfg_info when func.has_linearids ->
-          Hashtbl.iter cfg_info ~f:(fun bi ->
+          Cfg_info.iter cfg_info ~f:(fun bi ->
               List.iter bi.branches ~f:(fun b ->
                   if b.fallthrough then
                     let count = b.taken in

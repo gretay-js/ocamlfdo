@@ -10,7 +10,7 @@ type t =
     (* logically it should be defined inside Func.t but it creates a cyclic
        dependency between . The advantage of the current design is smaller
        space that a Func takes if it doesn't have a cfg_info *)
-    execounts : Cfg_info.blocks Int.Table.t
+    execounts : Cfg_info.t Int.Table.t
   }
 
 let mk () = { execounts = Int.Table.create () }
@@ -59,8 +59,8 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
   if !verbose then (
     Cfg_info.dump i;
-    Cfg_info.dump_dot i );
-  Cfg_info.blocks i
+    Cfg_info.dump_dot i "annot" );
+  i
 
 (* cfg_info can be saved to a file for later use. It is only useful for
    debugging. It would save recomputing the counters, but it adds another
@@ -75,8 +75,11 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
    is not worth it as it does not take very long to compute it, and it may
    not be useful if the target binary is rebuild with different heuristics. *)
 
-exception Found of Cfg_info.blocks
+exception Found of Cfg_info.t
 
+(** Look for profile for function using its [name]. If not found, look for
+    profiles for [alternatives]. Apply the profile to the cfg to compute
+    detailed execution counts for blocks and branches. *)
 let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
     =
   try

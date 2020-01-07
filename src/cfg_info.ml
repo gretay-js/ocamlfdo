@@ -21,7 +21,7 @@ type t =
             instruction. Used for mapping perf data back to linear IR. *)
   }
 
-let blocks t = t.blocks
+let get_block t label = Hashtbl.find t.blocks label
 
 let malformed_traces t = t.malformed_traces
 
@@ -110,7 +110,7 @@ let can_be_first_emitted_id id (block : BB.t) =
   in
   check_first (BB.body block)
 
-let get_block_info t (block : BB.t) =
+let get_or_add_block t (block : BB.t) =
   Hashtbl.find_or_add t.blocks (BB.start block) ~default:(fun () ->
       let terminator = BB.terminator block in
       let terminator_id =
@@ -134,7 +134,7 @@ let get_block_info t (block : BB.t) =
       Block_info.mk ~label:block_start ~first_id ~terminator_id)
 
 let record t block ~count =
-  let b = get_block_info t block in
+  let b = get_or_add_block t block in
   Block_info.add b ~count
 
 let get_linearid (loc : Loc.t) = Option.value_exn loc.dbg
@@ -159,7 +159,7 @@ let _prev_instr linearid block =
   with Found_prev prev -> prev
 
 (* Find the block in [cfg] that contains [loc] using its linearid *)
-let get_block t (loc : Loc.t) =
+let get_block_for_loc t (loc : Loc.t) =
   match loc.dbg with
   | None ->
       ( if !verbose then
@@ -182,8 +182,8 @@ let get_block t (loc : Loc.t) =
                 label dbg t.func.id () ) )
 
 let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
-  let from_block = get_block t from_loc in
-  let to_block = get_block t to_loc in
+  let from_block = get_block_for_loc t from_loc in
+  let to_block = get_block_for_loc t to_loc in
   match (from_block, to_block) with
   | None, None ->
       if !verbose then
@@ -212,7 +212,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
            (id=%d,lbl=%d,first_id=%d)\n"
           count from_linearid from_block_start to_linearid to_block_start
           to_block_first_id;
-      let bi = get_block_info t from_block in
+      let bi = get_or_add_block t from_block in
       let b =
         { Block_info.target = Some to_loc;
           target_label = Some to_block_start;
@@ -241,7 +241,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
            call and return are sampled. We should try to discard matching
            counts. *)
         (* let call_site = callsite_of_return_site to_loc
-         * let cbi = get_block_info t (get_block call_site)
+         * let cbi = get_or_add_block t (get_block call_site)
          * let callee = { b with
          *                (* start of this function *)
          *                target_label = cfg.entry_label;
@@ -276,7 +276,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
 
 let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
   (* Branch going outside of this function. *)
-  match get_block t from_loc with
+  match get_block_for_loc t from_loc with
   | None ->
       if !verbose then
         printf "Ignore inter branch count %Ld. Can't map to CFG.\n" count
@@ -287,7 +287,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
          instruction is either a terminator or a call.*)
       let linearid = get_linearid from_loc in
       let terminator = BB.terminator from_block in
-      let bi = get_block_info t from_block in
+      let bi = get_or_add_block t from_block in
       if terminator.id = linearid then
         (* terminator *)
         match terminator.desc with
@@ -322,7 +322,7 @@ let record_entry t (to_loc : Loc.t) count _mispredicts =
      Return from call: branch target is a label after the call site.
 
      Exception handler: branch target is a trap handler. *)
-  match get_block t to_loc with
+  match get_block_for_loc t to_loc with
   | None ->
       if !verbose then
         printf "Ignore inter branch count %Ld. Can't map to CFG.\n" count
@@ -419,9 +419,9 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
         printf "record_fallthrough %d->%d count=%Ld\n" src_lbl dst_lbl count;
       let dst_block = Option.value_exn (Cfg.get_block cfg dst_lbl) in
       record t dst_block ~count;
-      let target_bi = get_block_info t dst_block in
+      let target_bi = get_or_add_block t dst_block in
       let src_block = Option.value_exn (Cfg.get_block cfg src_lbl) in
-      let bi = get_block_info t src_block in
+      let bi = get_or_add_block t src_block in
       let b =
         { Block_info.target = None;
           target_label = Some dst_lbl;
@@ -460,7 +460,7 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
   match (from_loc.rel, to_loc.rel) with
   | Some from_rel, Some to_rel
     when from_rel.id = t.func.id && to_rel.id = t.func.id -> (
-      match (get_block t from_loc, get_block t to_loc) with
+      match (get_block_for_loc t from_loc, get_block_for_loc t to_loc) with
       | Some from_block, Some to_block
         when BB.start from_block = BB.start to_block ->
           if !verbose then
@@ -494,7 +494,7 @@ let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
       mal t count
 
 let record_ip t ~loc ~data:count =
-  match get_block t loc with
+  match get_block_for_loc t loc with
   | None ->
       if !verbose then printf "Ignore exec count \n, can't map to cfg\n"
   | Some block -> record t block ~count
@@ -507,7 +507,7 @@ let dump_branch (b : Block_info.b) =
   | Some successor ->
       if b.intra then
         Printf.printf "(.L%d%s:%Ld%s)" successor
-          (if b.fallthrough then " ft" else "")
+          (if b.fallthrough then " tr" else "")
           b.taken
           ( if Execount.(b.mispredicts > 0L) then
             sprintf " mis:%Ld" b.mispredicts
@@ -537,7 +537,7 @@ let dump_call t (c : Block_info.c) =
 
 let dump_block t label =
   Printf.printf ".L%d: " label;
-  match Hashtbl.find t.blocks label with
+  match get_block t label with
   | None -> Printf.printf "\n"
   | Some b ->
       Printf.printf "%Ld " b.count;
@@ -550,14 +550,14 @@ let dump t =
   let layout = CL.layout t.cl in
   List.iter layout ~f:(dump_block t)
 
-let dump_dot t =
+let dump_dot t msg =
   let annotate_block label =
-    match Hashtbl.find t.blocks label with
+    match get_block t label with
     | None -> ""
     | Some bi -> sprintf "%Ld" bi.count
   in
   let annotate_succ label succ =
-    match Hashtbl.find t.blocks label with
+    match get_block t label with
     | None -> ""
     | Some bi -> (
         match
@@ -570,10 +570,14 @@ let dump_dot t =
         | Some b ->
             assert b.intra;
             Printf.sprintf "%s%Ld%s"
-              (if b.fallthrough then "ft\\r" else "")
+              (if b.fallthrough then "tr\\r" else "")
               b.taken
               ( if Execount.(b.mispredicts > 0L) then
                 sprintf "\\rmis:%Ld" b.mispredicts
               else "" ) )
   in
-  CL.print_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ "annot"
+  CL.print_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ msg
+
+let fold t = Hashtbl.fold t.blocks
+
+let iter t = Hashtbl.iter t.blocks

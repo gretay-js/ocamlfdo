@@ -62,6 +62,7 @@ let reorder_opt cfg_info cl =
   in
   check cl new_cfg_layout;
   CL.set_layout cl new_cfg_layout;
+  if !verbose then Cfg_info.dump_dot cfg_info "opt";
   cl
 
 let reorder_profile cl p ~alternatives =

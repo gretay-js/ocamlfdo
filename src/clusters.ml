@@ -88,7 +88,7 @@ let init_layout original_layout execounts =
   let clusters =
     List.mapi original_layout ~f:(fun pos data ->
         let weight =
-          match Hashtbl.find execounts data with
+          match Cfg_info.get_block execounts data with
           | None -> 0L
           | Some block_info -> block_info.count
         in
@@ -101,7 +101,7 @@ let init_layout original_layout execounts =
   in
   let find_pos label = Map.find_exn label2pos label in
   let edges =
-    Hashtbl.fold execounts ~init:[] ~f:(fun ~key:_ ~data:block_info acc ->
+    Cfg_info.fold execounts ~init:[] ~f:(fun ~key:_ ~data:block_info acc ->
         let src = find_pos block_info.label in
         List.fold block_info.branches ~init:acc ~f:(fun acc b ->
             if b.intra then
