@@ -136,7 +136,7 @@ let write ~output_filename ~linker_script_template ~linker_script_hot
    functions, to give better user messages. *)
 type info =
   { missing : int;
-    not_in_hot : int
+    not_in_hot : string list
   }
 
 let check_function_order ~binary_filename ~profile_filename
@@ -180,7 +180,6 @@ let check_function_order ~binary_filename ~profile_filename
   (* Find all symbols between hot code begin and end markers. *)
   let hot_begin_addr = get_addr hot_begin in
   let hot_end_addr = get_addr hot_end in
-  let addr2name = Raw_addr.Table.create ~size:len () in
 
   (* Is hot code begin marker aligned? *)
   let is_page_aligned addr =
@@ -208,6 +207,7 @@ let check_function_order ~binary_filename ~profile_filename
       let is_in_hot addr =
         Raw_addr.(hot_begin_addr <= addr && addr < hot_end_addr)
       in
+      let addr2name = Raw_addr.Table.create ~size:len () in
       Elf_locations.iter_symbols locations ~func:true ~data:true
         ~f:(fun name start ->
           if is_in_hot start then
@@ -251,52 +251,64 @@ let check_function_order ~binary_filename ~profile_filename
           List.iter ~f:print_endline actual ) )
       else (
         (* print the differences *)
-        if !verbose then (
+        if !verbose then
           Printf.printf
             "Differences between expected and actual layout of hot functions\n";
-          (* print all missing functions with addresses *)
-          let { missing; not_in_hot } =
-            List.fold hot ~init:{ missing = 0; not_in_hot = 0 }
-              ~f:(fun acc name ->
-                match get_addr name with
-                | None -> { acc with missing = acc.missing + 1 }
-                | Some addr ->
-                    if is_in_hot addr then acc
-                    else (
+        (* print all extra functions that are unexpected in the hot segment *)
+        let extra =
+          List.fold actual ~init:0 ~f:(fun acc name ->
+              match Hashtbl.find name2addr name with
+              | Some _ -> acc
+              | None ->
+                  if !verbose then
+                    Printf.printf
+                      "Unexpected function symbol %s in hot segment.\n" name;
+                  acc + 1)
+        in
+        if extra > 0 && !verbose then
+          Printf.printf
+            "%d unexpected function symbols appear in hot segment of \
+             %s(%.3f%%).\n"
+            extra binary_filename
+            (Report.percent extra (len - 2));
+        (* print all misplaced functions with addresses *)
+        let { missing; not_in_hot } =
+          List.fold hot ~init:{ missing = 0; not_in_hot = [] }
+            ~f:(fun acc name ->
+              match get_addr name with
+              | None -> { acc with missing = acc.missing + 1 }
+              | Some addr ->
+                  if is_in_hot addr then acc
+                  else (
+                    if !verbose then
                       Printf.printf
                         "Hot symbol %s is at 0x%Lx, not in hot segment\n"
                         name addr;
-                      { acc with not_in_hot = acc.not_in_hot + 1 } ))
-          in
-          if missing > 0 then
-            Printf.printf
-              "Missing %d hot function symbols in binary %s ((%.3f%%))\n"
-              missing binary_filename
-              (Report.percent missing (len - 2));
-          if not_in_hot > 0 then
-            Printf.printf
-              "Placed %d hot function symbols outside of hot code segment\n\
-              \            [0x%Lx,0x%Lx] in binary %s (%.3f%%)\n"
-              not_in_hot hot_begin_addr hot_end_addr binary_filename
-              (Report.percent not_in_hot (len - 2));
-          (* print all extra functions that are unexpected in the hot segment *)
-          let extra =
-            List.fold actual ~init:0 ~f:(fun acc name ->
-                match Hashtbl.find name2addr name with
-                | Some _ -> acc
-                | None ->
-                    if !verbose then
-                      Printf.printf
-                        "Unexpected function symbol %s in hot segment.\n"
-                        name;
-                    acc + 1)
-          in
-          if extra > 0 then
-            Printf.printf
-              "%d unexpected function symbols appears in hot segment of \
-               %s(%.3f%%).\n"
-              extra binary_filename
-              (Report.percent extra (len - 2)) );
+                    { acc with not_in_hot = name :: acc.not_in_hot } ))
+        in
+        if missing > 0 && !verbose then
+          Printf.printf
+            "Missing %d hot function symbols in binary %s ((%.3f%%))\n"
+            missing binary_filename
+            (Report.percent missing (len - 2));
+        let n = List.length not_in_hot in
+        if n > 0 && !verbose then
+          Printf.printf
+            "Placed %d hot function symbols outside of hot code segment \
+             [0x%Lx,0x%Lx] in binary %s (%.3f%%)\n"
+            n hot_begin_addr hot_end_addr binary_filename
+            (Report.percent n (len - 2));
+
+        (* append not_in_hot to actual, in the order of their addresses, to
+           show a nicer output with patdiff *)
+        let actual =
+          actual
+          @ List.sort not_in_hot ~compare:(fun n1 n2 ->
+                let a1 = Option.value_exn (Hashtbl.find_exn name2addr n1) in
+                let a2 = Option.value_exn (Hashtbl.find_exn name2addr n2) in
+                let res = Raw_addr.compare a1 a2 in
+                if res = 0 then String.compare n1 n2 else res)
+        in
         (* save expected and actual to two files, to make it easy for
            diffing. CR gyorsh: can we do it using patdiff programmatically? *)
         let output_filename =
