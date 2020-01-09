@@ -143,9 +143,10 @@ let check_function_order ~binary_filename ~profile_filename
     ~reorder_functions ~output_filename =
   let locations = Elf_locations.create ~elf_executable:binary_filename in
   let profile = AD.read_bin profile_filename in
-  let hot = Reorder.hot_functions profile ~reorder_functions in
+  let hot_wrap l = (hot_begin :: l) @ [hot_end] in
   (* Find addresses of all the function in the expected layout. *)
-  let expected = (hot_begin :: hot) @ [hot_end] in
+  let hot = Reorder.hot_functions profile ~reorder_functions in
+  let expected = hot_wrap hot in
   let len = List.length expected in
   let name2addr = String.Table.create ~size:len () in
   List.iter expected ~f:(fun name ->
@@ -154,11 +155,25 @@ let check_function_order ~binary_filename ~profile_filename
           Report.user_error
             "Function %s appears more than once in hot layout.\n" name
       | `Ok -> ());
-  Elf_locations.find_functions locations name2addr;
+  (* hot_begin and hot_end are not func symbols, so we need both func and
+     data set to true in the call to iter_symbols. *)
+  Elf_locations.iter_symbols locations ~func:true ~data:true
+    ~f:(fun name start ->
+      match Hashtbl.find name2addr name with
+      | Some None -> Hashtbl.set name2addr ~key:name ~data:(Some start)
+      | Some (Some addr) ->
+          (* every symbol shows up twice: dynamic and static symbol table *)
+          if (not Raw_addr.(addr = start)) && !verbose then
+            Printf.printf
+              "find_functions surprised to see again %s at 0x%Lx, prev \
+               address 0x%Lx\n"
+              name start addr
+      | None -> ());
+
   let get_addr name =
     match Hashtbl.find_exn name2addr name with
     | None ->
-        if !verbose then Printf.printf "Missing function symbol %s" name;
+        if !verbose then Printf.printf "Missing function symbol %s\n" name;
         None
     | addr -> addr
   in
@@ -170,7 +185,7 @@ let check_function_order ~binary_filename ~profile_filename
   (* Is hot code begin marker aligned? *)
   let is_page_aligned addr =
     let open Raw_addr in
-    let min_page_size = 4L * 1000L in
+    let min_page_size = 4L * 1024L in
     if !verbose then
       Printf.printf
         "Checking alignment of 0x%Lx to a minimal page boundary of 4K bytes \
@@ -185,19 +200,31 @@ let check_function_order ~binary_filename ~profile_filename
          Hint: Function reordering requires ocaml compiler version 4.10 or \
          higher.\n\
          Was the binary compiled with an older version of ocaml\n\
-        \       or not an ocaml binary?" hot_begin hot_end binary_filename
+         or not an ocaml binary?" hot_begin hot_end binary_filename
   | Some hot_begin_addr, Some hot_end_addr ->
       if (not (is_page_aligned hot_begin_addr)) && !verbose then
         Printf.printf "Warning: %s at address 0x%Lx is not page aligned.\n"
           hot_begin hot_begin_addr;
       let is_in_hot addr =
-        Raw_addr.(hot_begin_addr <= addr && addr <= hot_end_addr)
+        Raw_addr.(hot_begin_addr <= addr && addr < hot_end_addr)
       in
-      Elf_locations.iter_symbols locations ~func:true ~f:(fun name start ->
+      Elf_locations.iter_symbols locations ~func:true ~data:true
+        ~f:(fun name start ->
           if is_in_hot start then
             Raw_addr.Table.update addr2name start ~f:(function
               | None -> [name]
               | Some names -> name :: names));
+      (* Remove hot_begin so that we can put it first regardless of the sort
+         of other function names at the same address, to make nice output.
+         Alternative is to compare all names to it in the iter_symbol, which
+         would be slower as there could be lots of symbols. *)
+      Hashtbl.change addr2name hot_begin_addr ~f:(function
+        | None -> None
+        | Some names ->
+            let new_names =
+              List.filter names ~f:(fun n -> not (String.equal hot_begin n))
+            in
+            if List.is_empty new_names then None else Some new_names);
       (* If there is more than one symbol per address, sort by their position
          in the expect list, or if not in the expect, then alphabetically. *)
       let compare a b =
@@ -215,29 +242,31 @@ let check_function_order ~binary_filename ~profile_filename
       let actual =
         Map.of_hashtbl_exn (module Raw_addr) addr2name
         |> Map.data
-        |> List.map ~f:(List.sort ~compare)
-        |> List.concat
+        |> List.map ~f:(List.dedup_and_sort ~compare)
+        |> List.concat |> hot_wrap
       in
       if List.compare String.compare expected actual = 0 then (
-        if !verbose then
-          Printf.printf !"Success!\n%{sexp:string list} actual" actual )
+        if !verbose then (
+          Printf.printf !"Success!\n";
+          List.iter ~f:print_endline actual ) )
       else (
         (* print the differences *)
         if !verbose then (
           Printf.printf
-            "Differences between expected and actual layout of hot functions";
+            "Differences between expected and actual layout of hot functions\n";
           (* print all missing functions with addresses *)
           let { missing; not_in_hot } =
-            List.fold expected ~init:{ missing = 0; not_in_hot = 0 }
+            List.fold hot ~init:{ missing = 0; not_in_hot = 0 }
               ~f:(fun acc name ->
                 match get_addr name with
                 | None -> { acc with missing = acc.missing + 1 }
                 | Some addr ->
-                    if not (is_in_hot addr) then
+                    if is_in_hot addr then acc
+                    else (
                       Printf.printf
-                        "Hot symbol %s is at 0x%Lx, not in hot segment" name
-                        addr;
-                    { acc with not_in_hot = acc.not_in_hot + 1 })
+                        "Hot symbol %s is at 0x%Lx, not in hot segment\n"
+                        name addr;
+                      { acc with not_in_hot = acc.not_in_hot + 1 } ))
           in
           if missing > 0 then
             Printf.printf
@@ -285,13 +314,14 @@ let check_function_order ~binary_filename ~profile_filename
         in
         let file1 = save "expected" expected in
         let file2 = save "actual" actual in
-        Ppxlib_print_diff.print ~file1 ~file2 ();
+        Ppxlib_print_diff.print ~use_color:true ~file1 ~file2 ();
         exit (-1) )
 
 let randomize_function_order ~binary_filename ~output_filename ~check =
   let locations = Elf_locations.create ~elf_executable:binary_filename in
   let layout = ref [] in
-  Elf_locations.iter_symbols locations ~func:true ~f:(fun name _ ->
+  Elf_locations.iter_symbols locations ~func:true ~data:false
+    ~f:(fun name _ ->
       if not (String.contains name '@') then layout := name :: !layout);
   let layout = List.permute !layout in
   let output_filename =

@@ -102,7 +102,18 @@ let create locations ~filename =
     add_name bolt_branch.dst
   in
   List.iter bolt_profile ~f:gather_function_names;
-  Elf_locations.find_functions locations functions;
+  Elf_locations.iter_symbols locations ~func:true ~data:false
+    ~f:(fun name start ->
+      match Hashtbl.find functions name with
+      | Some None -> Hashtbl.set functions ~key:name ~data:(Some start)
+      | Some (Some addr) ->
+          (* every symbol shows up twice: dynamic and static symbol table *)
+          if (not Raw_addr.(addr = start)) && !verbose then
+            Printf.printf
+              "find_functions surprised to see again %s at 0x%Lx, prev \
+               address 0x%Lx\n"
+              name start addr
+      | None -> ());
 
   (* Collect all addresses *)
   let addresses = Hashtbl.create ~size:len (module Raw_addr) in

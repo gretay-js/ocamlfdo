@@ -372,28 +372,6 @@ let to_address t (dbg : Dbg.t) =
         | Some addr -> Printf.printf " addr 0x%x\n" addr );
       Option.map ~f:Elf_addr.get addr
 
-let find_functions t functions =
-  Owee_elf.Symbol_table.iter t.symtab ~f:(fun sym ->
-      match Owee_elf.Symbol_table.Symbol.type_attribute sym with
-      | Func -> (
-          match Owee_elf.Symbol_table.Symbol.name sym t.strtab with
-          | None -> ()
-          | Some name -> (
-              match Hashtbl.mem functions name with
-              | true -> (
-                  (* bound to None *)
-                  match Hashtbl.find functions name with
-                  | None ->
-                      let start = Owee_elf.Symbol_table.Symbol.value sym in
-                      Hashtbl.set functions ~key:name ~data:(Some start)
-                  | Some _ ->
-                      if !verbose then
-                        Printf.printf
-                          "find_functions surprised to see again  %s\n" name
-                  )
-              | false -> () ) )
-      | _ -> ())
-
 let is_function_symbol sym =
   let open Owee_elf.Symbol_table.Symbol in
   match Owee_elf.Symbol_table.Symbol.type_attribute sym with
@@ -401,9 +379,12 @@ let is_function_symbol sym =
   | Notype | Object | Section | File | Common | TLS | GNU_ifunc | Other _ ->
       false
 
-let iter_symbols ~func t ~f =
+let iter_symbols t ~func ~data ~f =
   Owee_elf.Symbol_table.iter t.symtab ~f:(fun s ->
-      if Bool.equal func (is_function_symbol s) then
+      if
+        Bool.equal func (is_function_symbol s)
+        || Bool.equal data (not (is_function_symbol s))
+      then
         let open Owee_elf.Symbol_table.Symbol in
         match name s t.strtab with
         | None -> ()
