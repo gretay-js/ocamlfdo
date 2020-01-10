@@ -404,6 +404,24 @@ let opt_command =
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
+let check_mach2cfg_command =
+  Command.basic
+    ~summary:
+      "Check that the transformation from Mach IR to CFG produces the same
+       result as the corresponding Linear to CFG."
+    ~readme:(fun () ->
+      {|
+        If there is any difference in the function,
+        dump Linear IR before and after the transformation to files.
+        There can be a differences due to dead code, even though
+        dead code elimination is not performed during this check.
+|})
+    Command.Let_syntax.(
+      let%map v = flag_v and q = flag_q and files = anon_files in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () -> Main_fdo.check_mach files)
+
 let check_linear2cfg_command =
   Command.basic
     ~summary:
@@ -679,6 +697,7 @@ let dump_command =
 let check_command =
   Command.group ~summary:"Validation utilities."
     [ ("linear2cfg", check_linear2cfg_command);
+      ("mach2cfg", check_mach2cfg_command);
       ("hot-functions-layout", check_function_order_command) ]
 
 let profile_command =

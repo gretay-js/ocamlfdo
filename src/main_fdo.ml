@@ -210,7 +210,7 @@ let transform f ~algo ~extra_debug ~preserve_orig_labels ~alternatives =
   fnew
 
 let emit_crcs ui crcs =
-  let open Linear_format in
+  let open Cmir_format in
   (* emit crc symbols *)
   (* CR-someday gyorsh: emit into a separate data section, not interleaved
      with normal data items. We need to add named data sections to Cmm. In
@@ -280,8 +280,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
        CR-someday gyorsh: 4.11 will have a nicer interface to magic numbers,
        use it. *)
     let out_filename = Filenames.make_fdo file in
-    let open Linear_format in
-    let ui, crc = restore file in
+    let open Cmir_format in
+    let ui, crc = restore ~filename:file ~magic:Config.linear_magic_number in
     if Crcs.add_unit crcs ui ~hex:(Caml.Digest.to_hex crc) ~file then (
       let skipped = ref 0 in
       let total = ref 0 in
@@ -311,7 +311,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
           (Report.percent !skipped !total);
       ui.items <- new_items );
     if extra_debug then emit_crcs ui crcs;
-    save out_filename ui
+    save ~filename:out_filename ~magic:Config.linear_magic_number ui
   in
   let process file =
     Profile.record_call ~accumulate:true "process" (fun () -> process file)
@@ -320,8 +320,38 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   Crcs.Config.report crc_config;
   ()
 
+let check_mach files =
+  let open Cmir_format in
+  let transform mach =
+    (* mach -> cfg -> linear  *)
+    print_mach "Before" mach;
+    let m_cfg = CL.of_mach mach ~preserve_orig_labels in
+    let new_body = CL.to_linear m_cfg  in
+    let fnew = { f with fun_body = new_body } in
+    print_linear "After" fnew;
+    (* mach -> linear -> cfg -> linear :
+       the last two steps are to get rid of any dead labels *)
+    let linear = Linearize.fundecl mach in
+    print_linear "Before" linear;
+    let l_cfg = CL.of_linear linear ~preserve_orig_labels in
+    let expected = (CL.to_linear l_cfg) in
+    (* compare *)
+    check_equal fnew expected
+  in
+  let check_item = function
+    | Func f ->
+        check f
+    | Data _ -> ()
+  in
+  let process filename =
+    printf "Checking %s...\n" filename;
+    let ui, _ = restore ~filename ~magic:Config.mach_magic_number in
+    List.iter ui.items ~f:check_item
+  in
+  List.iter files ~f:process
+
 let check files =
-  let open Linear_format in
+  let open Cmir_format in
   let check_item = function
     | Func f ->
         let fnew =
@@ -331,15 +361,15 @@ let check files =
         check_equal f fnew.fun_body
     | Data _ -> ()
   in
-  let process file =
-    printf "Checking %s...\n" file;
-    let ui, _ = restore file in
+  let process filename =
+    printf "Checking %s...\n" filename;
+    let ui, _ = restore ~filename ~magic:Config.linear_magic_number in
     List.iter ui.items ~f:check_item
   in
   List.iter files ~f:process
 
 let dump files ~dot ~show_instr =
-  let open Linear_format in
+  let open Cmir_format in
   let dump_linear _oc ppf = function
     | Func f -> Printlinear.fundecl ppf f
     | Data dl -> Printcmm.data ppf dl
@@ -351,11 +381,11 @@ let dump files ~dot ~show_instr =
         if dot then CL.print_dot ~show_instr cl "";
         CL.print cl oc ""
   in
-  let process file =
-    printf "Dumping %s...\n" file;
-    let ui, _ = restore file in
+  let process filename =
+    printf "Dumping %s...\n" filename;
+    let ui, _ = restore ~filename ~magic:Config.linear_magic_number in
     let dump_format ext dump_item =
-      let dump_filename = sprintf "%s.dump.%s" file ext in
+      let dump_filename = sprintf "%s.dump.%s" filename ext in
       Out_channel.with_file dump_filename ~f:(fun oc ->
           let ppf = Format.formatter_of_out_channel oc in
           List.iter ui.items ~f:(dump_item oc ppf))
