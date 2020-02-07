@@ -299,18 +299,21 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count
                 "record_exit count=%Ld from_block.start=%d terminator_id=%d.\n"
                 count (BB.start from_block) terminator.id;
             assert false
-        | Tailcall (Func _) | Return | Raise _ ->
-            let b =
-              { Block_info.target = to_loc;
-                target_label = None;
-                target_id = None;
-                intra = false;
-                fallthrough = false;
-                taken = count;
-                mispredicts
-              }
-            in
-            Block_info.add_branch bi b
+        | Tailcall (Func _) | Return | Raise _ -> (
+            match to_loc with
+            | None -> ()
+            | Some _ ->
+                let b =
+                  { Block_info.target = to_loc;
+                    target_label = None;
+                    target_id = None;
+                    intra = false;
+                    fallthrough = false;
+                    taken = count;
+                    mispredicts
+                  }
+                in
+                Block_info.add_branch bi b )
       else ( (* Call *)
              (* CR-someday gyorsh: record calls *) )
 
