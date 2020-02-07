@@ -147,7 +147,7 @@ let edge_compare e1 e2 =
     if res = 0 then compare_clusterid e1.dst e2.dst else res
   else res
 
-(* Merge two clusters. *)
+(* Merge two clusters, laying out their components in order as c1@c2. *)
 let merge t c1 c2 =
   assert (c1.id <> c2.id);
   let id = t.next_id in
@@ -208,7 +208,7 @@ let merge t c1 c2 =
 let find_max_pred t c =
   let max =
     List.fold t.edges ~init:None ~f:(fun max e ->
-        if e.dst = c.id then
+        if e.dst = c.id && (* ignore self loops *) not (e.src = c.id) then
           match max with
           | None -> Some e
           | Some me -> if edge_compare me e < 0 then Some e else max
