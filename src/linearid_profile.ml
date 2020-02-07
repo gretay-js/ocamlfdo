@@ -25,7 +25,7 @@ let find t id = Hashtbl.find t.execounts id
    block_info. Perform lots of sanity checks to make sure the location of the
    execounts match the instructions in the cfg. *)
 let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
-  let get_loc addr = Hashtbl.find_exn p.addr2loc addr in
+  let get_loc addr = Hashtbl.find p.addr2loc addr in
   let i = Cfg_info.create cl func in
   (* Associate instruction counts with basic blocks *)
   Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->

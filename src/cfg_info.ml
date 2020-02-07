@@ -274,7 +274,8 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
         ( (* CR-someday gyorsh: record calls *)
           (* recursive call, find the call instruction *) )
 
-let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
+let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count
+    mispredicts =
   (* Branch going outside of this function. *)
   match get_block_for_loc t from_loc with
   | None ->
@@ -300,7 +301,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t) count mispredicts =
             assert false
         | Tailcall (Func _) | Return | Raise _ ->
             let b =
-              { Block_info.target = Some to_loc;
+              { Block_info.target = to_loc;
                 target_label = None;
                 target_id = None;
                 intra = false;
@@ -334,18 +335,33 @@ let record_entry t (to_loc : Loc.t) count _mispredicts =
 (* Depending on the settings of perf record and the corresponding CPU
    configuration, LBR may capture different kinds of branches, including
    function calls and returns. *)
-let record_branch t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count
-    ~mispredicts =
+let record_branch t ~(from_loc : Loc.t option) ~(to_loc : Loc.t option)
+    ~data:count ~mispredicts =
   (* at least one of the locations is known to be in this function *)
-  match (from_loc.rel, to_loc.rel) with
-  | Some from_rel, Some to_rel
-    when from_rel.id = t.func.id && to_rel.id = t.func.id ->
-      record_intra t ~from_loc ~to_loc ~count ~mispredicts
-  | Some from_rel, _ when from_rel.id = t.func.id ->
-      record_exit t from_loc to_loc count mispredicts
-  | _, Some to_rel when to_rel.id = t.func.id ->
-      record_entry t to_loc count mispredicts
-  | _ -> assert false
+  match (from_loc, to_loc) with
+  | None, None -> assert false
+  (* CR gyorsh: fatal error this shouldn't be included in the profile *)
+  | None, Some to_loc -> (
+      match to_loc.rel with
+      | Some rel ->
+          if rel.id = t.func.id then record_entry t to_loc count mispredicts
+      | _ -> () )
+  | Some from_loc, None -> (
+      match from_loc.rel with
+      | Some rel ->
+          if rel.id = t.func.id then
+            record_exit t from_loc to_loc count mispredicts
+      | _ -> () )
+  | Some from_loc, Some to_loc -> (
+      match (from_loc.rel, to_loc.rel) with
+      | Some from_rel, Some to_rel
+        when from_rel.id = t.func.id && to_rel.id = t.func.id ->
+          record_intra t ~from_loc ~to_loc ~count ~mispredicts
+      | Some from_rel, _ when from_rel.id = t.func.id ->
+          record_exit t from_loc (Some to_loc) count mispredicts
+      | _, Some to_rel when to_rel.id = t.func.id ->
+          record_entry t to_loc count mispredicts
+      | _ -> assert false )
 
 exception Malformed_fallthrough_trace
 
@@ -455,49 +471,66 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
     (* If the trace is malformed, don't add counts *)
     mal t count
 
-let record_trace t ~(from_loc : Loc.t) ~(to_loc : Loc.t) ~data:count =
+let record_trace t ~(from_loc : Loc.t option) ~(to_loc : Loc.t option)
+    ~data:count =
   (* both locations must be in this function *)
-  match (from_loc.rel, to_loc.rel) with
-  | Some from_rel, Some to_rel
-    when from_rel.id = t.func.id && to_rel.id = t.func.id -> (
-      match (get_block_for_loc t from_loc, get_block_for_loc t to_loc) with
-      | Some from_block, Some to_block
-        when BB.start from_block = BB.start to_block ->
-          if !verbose then
-            printf
-              "No fallthroughs in trace with count %Ld:from_block = to_block\n"
-              count;
-          record t from_block ~count
-      | Some from_block, Some to_block ->
-          if !verbose then
-            printf
-              "trace=> (from_linid=%d,to_linid=%d)=> \
-               (from_block=%d,to_block=%d)\n"
-              (Option.value_exn from_loc.dbg)
-              (Option.value_exn to_loc.dbg)
-              (BB.start from_block) (BB.start to_block);
-          compute_fallthrough_execounts t (BB.start from_block)
-            (BB.start to_block) count
+  match (from_loc, to_loc) with
+  | None, _ | _, None ->
+      if !verbose then
+        printf
+          "Ignoring trace with count %Ld to or from function is not the \
+           same or not known.\n"
+          count;
+      mal t count
+  | Some from_loc, Some to_loc -> (
+      match (from_loc.rel, to_loc.rel) with
+      | Some from_rel, Some to_rel
+        when from_rel.id = t.func.id && to_rel.id = t.func.id -> (
+          match
+            (get_block_for_loc t from_loc, get_block_for_loc t to_loc)
+          with
+          | Some from_block, Some to_block
+            when BB.start from_block = BB.start to_block ->
+              if !verbose then
+                printf
+                  "No fallthroughs in trace with count %Ld:from_block = \
+                   to_block\n"
+                  count;
+              record t from_block ~count
+          | Some from_block, Some to_block ->
+              if !verbose then
+                printf
+                  "trace=> (from_linid=%d,to_linid=%d)=> \
+                   (from_block=%d,to_block=%d)\n"
+                  (Option.value_exn from_loc.dbg)
+                  (Option.value_exn to_loc.dbg)
+                  (BB.start from_block) (BB.start to_block);
+              compute_fallthrough_execounts t (BB.start from_block)
+                (BB.start to_block) count
+          | _ ->
+              if !verbose then
+                printf
+                  "Ignoring trace with count %Ld:cannot map to_loc or \
+                   from_loc to cfg blocks.\n"
+                  count;
+              mal t count )
       | _ ->
           if !verbose then
             printf
-              "Ignoring trace with count %Ld:cannot map to_loc or from_loc \
-               to cfg blocks.\n"
+              "Ignoring trace with count %Ld to or from function is not the \
+               same or not known.\n"
               count;
           mal t count )
-  | _ ->
-      if !verbose then
-        printf
-          "Ignoring trace with count %Ld and from function is not the same \
-           or not known.\n"
-          count;
-      mal t count
 
 let record_ip t ~loc ~data:count =
-  match get_block_for_loc t loc with
+  match loc with
   | None ->
-      if !verbose then printf "Ignore exec count \n, can't map to cfg\n"
-  | Some block -> record t block ~count
+      if !verbose then printf "Ignore exec count \n, can't find location\n"
+  | Some loc -> (
+      match get_block_for_loc t loc with
+      | None ->
+          if !verbose then printf "Ignore exec count \n, can't map to cfg\n"
+      | Some block -> record t block ~count )
 
 (** debug printing functions *)
 

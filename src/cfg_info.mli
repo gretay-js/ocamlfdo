@@ -7,15 +7,19 @@ val create : Ocamlcfg.Cfg_with_layout.t -> Func.t -> t
 
 val get_block : t -> Cfg_label.t -> Block_info.t option
 
-val record_ip : t -> loc:Loc.t -> data:Execount.t -> unit
+val record_ip : t -> loc:Loc.t option -> data:Execount.t -> unit
 
 val record_trace :
-  t -> from_loc:Loc.t -> to_loc:Loc.t -> data:Execount.t -> unit
+  t ->
+  from_loc:Loc.t option ->
+  to_loc:Loc.t option ->
+  data:Execount.t ->
+  unit
 
 val record_branch :
   t ->
-  from_loc:Loc.t ->
-  to_loc:Loc.t ->
+  from_loc:Loc.t option ->
+  to_loc:Loc.t option ->
   data:Execount.t ->
   mispredicts:Execount.t ->
   unit
