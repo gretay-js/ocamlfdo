@@ -149,6 +149,7 @@ let edge_compare e1 e2 =
 
 (* Merge two clusters. *)
 let merge t c1 c2 =
+  assert (c1.id <> c2.id);
   let id = t.next_id in
   let next_id = id + 1 in
   (* The new pos is the minimal pos of the two clusters we merged. *)
@@ -221,7 +222,7 @@ let find_max_pred t c =
    original layout, as in cluster's compare function. Choose the cluster with
    the highest weight. Find its "most likely predecessor" cluster i.e., the
    predecessor with the highest edge weight, tie breaker using original
-   layout. Merge the two clusters. Repeat untill all clusters are merged into
+   layout. Merge the two clusters. Repeat until all clusters are merged into
    a single cluster. Return its data. *)
 let optimize_layout original_layout execounts =
   let t = init_layout original_layout execounts in
