@@ -186,21 +186,24 @@ let check_equal f new_body =
    less code to deal with when computing layout will be more efficient. *)
 let transform f ~algo ~extra_debug ~preserve_orig_labels ~alternatives =
   print_linear "Before" f;
-  let cfg =
+  let cl =
     Profile.record_call ~accumulate:true "linear_to_cfg" (fun () ->
         CL.of_linear f ~preserve_orig_labels)
   in
   (* eliminate fallthrough implies dead block elimination *)
   if not preserve_orig_labels then
-    Profile.record ~accumulate:true "eliminate_fallthrough"
-      CL.eliminate_fallthrough_blocks cfg;
+    Profile.record_call ~accumulate:true "eliminate_fallthrough"
+      (fun () ->
+         CL.eliminate_fallthrough_blocks cl;
+         CP.simplify_terminators (CL.cfg cl)
+      );
   ( if extra_debug then
     let file = to_symbol f.fun_name |> Filenames.(make Linear) in
     Profile.record_call ~accumulate:true "extra_debug" (fun () ->
-        CP.add_extra_debug (CL.cfg cfg) ~file) );
+        CP.add_extra_debug (CL.cfg cl) ~file) );
   let new_cfg =
     Profile.record_call ~accumulate:true "reorder" (fun () ->
-        Reorder.apply ~algo cfg ~alternatives)
+        Reorder.apply ~algo cl ~alternatives)
   in
   let new_body =
     Profile.record ~accumulate:true "cfg_to_linear" CL.to_linear new_cfg
@@ -348,7 +351,7 @@ let dump files ~dot ~show_instr =
     | Data _ -> ()
     | Func f ->
         let cl = CL.of_linear f ~preserve_orig_labels:false in
-        if dot then CL.print_dot ~show_instr cl "";
+        if dot then CL.save_as_dot ~show_instr cl "";
         CL.print cl oc ""
   in
   let process file =

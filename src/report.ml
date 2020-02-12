@@ -70,7 +70,7 @@ module Hint = struct
           "Cannot apply the profile to code because the source code changed \
            and md5 check is disabled.\n\
            Try generating a new profile or use command line flag \
-           -on-md5-mismatch skip -on-md5-missing skip."
+           -no-md5-mismatch skip."
     | Old_profile ->
         format_of_string
           "Profile format may have changed.\n\

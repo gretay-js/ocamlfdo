@@ -59,13 +59,18 @@ let id_to_label t id =
         Printf.printf "Found label %d for id %d in map\n" lbl id;
       Some lbl
 
-let terminator_to_string (t : Cfg.terminator) =
-  match t with
+let terminator_to_string cfg block =
+  let n =
+    Cfg.successor_labels cfg block |> List.length
+  in
+  match (BB.terminator block).desc with
   | Return -> "Return"
   | Raise _ -> "Raise"
-  | Tailcall _ -> "Tailcall"
-  | Branch s -> sprintf "Branch with %d successors" (List.length s)
-  | Switch s -> sprintf "Switch with %d successors" (Array.length s)
+  | Tailcall (Self _)-> "Tailcall self"
+  | Tailcall (Func _) -> "Tailcall"
+  | Branch _ -> sprintf "Branch with %d successors" n
+  | Switch s -> sprintf "Switch with %d case and %d distinct successors"
+                  (Array.length s) n
 
 let mal t count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
@@ -118,7 +123,7 @@ let get_or_add_block t (block : BB.t) =
         | 0 ->
             (* use the id of the last instruction in the body *)
             ( match terminator.desc with
-            | Branch [(Always, _)] -> assert true
+            | Branch (Always _) -> assert true
             | _ -> assert false );
             let last = List.last_exn (BB.body block) in
             last.id
@@ -423,7 +428,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
               "Unexpected terminator %s in fallthrough trace func %d \
                (from_lbl=%d,to_lbl=%d): src_lbl=%d dst_lbl=%d\n\
                src_block.successor_labels:\n"
-              (terminator_to_string desc)
+              (terminator_to_string cfg block)
               t.func.id from_lbl to_lbl src_lbl dst_lbl;
           raise Malformed_fallthrough_trace
     in
@@ -612,7 +617,7 @@ let dump_dot t msg =
                 sprintf "\\rmis:%Ld" b.mispredicts
               else "" ) )
   in
-  CL.print_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ msg
+  CL.save_as_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ msg
 
 let fold t = Hashtbl.fold t.blocks
 

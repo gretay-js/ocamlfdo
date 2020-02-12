@@ -99,7 +99,7 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
               id;
             if !verbose then (
               printf "compute_cfg_execounts for %s\n" name;
-              CL.print_dot cl "execount" );
+              CL.save_as_dot cl "execount" );
             let cfg_info =
               Profile.record_call ~accumulate:true "cfg_info" (fun () ->
                   create_cfg_info p func cl)
