@@ -358,8 +358,10 @@ let record_branch t ~(from_loc : Loc.t option) ~(to_loc : Loc.t option)
     ~data:count ~mispredicts =
   (* at least one of the locations is known to be in this function *)
   match (from_loc, to_loc) with
-  | None, None -> assert false
-  (* CR gyorsh: fatal error this shouldn't be included in the profile *)
+  | None, None ->
+      Report.user_error
+        "Malformed profile: branch with both source and target locations \
+         unknown"
   | None, Some to_loc -> (
       match to_loc.rel with
       | Some rel ->
