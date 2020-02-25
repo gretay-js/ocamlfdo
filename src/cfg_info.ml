@@ -1,5 +1,5 @@
 (* Create cfg_info *)
-[@@@ocaml.warning "+a-4-30-40-41-42-44"]
+[@@@ocaml.warning "+a-30-40-41-42-44"]
 
 open! Core
 module Cfg = Ocamlcfg.Cfg
@@ -114,7 +114,7 @@ let can_be_first_emitted_id id (block : BB.t) =
         else
           match hd.desc with
           | Reloadretaddr | Prologue | Poptrap -> check_first tl
-          | _ -> false )
+          | Op _ | Call _ | Pushtrap _ -> false )
   in
   check_first (BB.body block)
 
@@ -127,7 +127,9 @@ let get_or_add_block t (block : BB.t) =
             (* use the id of the last instruction in the body *)
             ( match terminator.desc with
             | Always _ -> assert true
-            | _ -> assert false );
+            | Never | Return | Is_even _ | Is_true _ | Float_test _
+            | Int_test _ | Switch _ | Raise _ | Tailcall _ ->
+                assert false );
             let last = List.last_exn (BB.body block) in
             last.id
         | n -> n
@@ -266,12 +268,13 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
             (* CR-someday gyorsh: count calls *)
             (* Block_info.add_call bi ~callsite:from_loc ~callee:b; *)
             Block_info.add_branch bi b
-        | Tailcall _ -> assert false
+        | Tailcall (Func _) -> assert false
         | Raise _ ->
             (* target must be a handler block *)
             (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
             ()
-        | _ ->
+        | Always _ | Never | Is_even _ | Is_true _ | Float_test _
+        | Int_test _ | Switch _ ->
             assert (
               to_block_first_id = to_linearid
               || can_be_first_emitted_id to_linearid to_block );
@@ -434,7 +437,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
                  src_block.successor_labels:\n"
                 t.func.id from_lbl to_lbl src_lbl dst_lbl;
             raise Malformed_fallthrough_trace )
-      | _ ->
+      | Return | Raise _ | Tailcall _ ->
           if !verbose then
             printf
               "Unexpected terminator %s in fallthrough trace func %d \
