@@ -60,17 +60,20 @@ let id_to_label t id =
       Some lbl
 
 let terminator_to_string cfg block =
-  let n =
-    Cfg.successor_labels cfg block |> List.length
-  in
+  let n = Cfg.successor_labels cfg block |> List.length in
   match (BB.terminator block).desc with
   | Return -> "Return"
   | Raise _ -> "Raise"
-  | Tailcall (Self _)-> "Tailcall self"
+  | Tailcall (Self _) -> "Tailcall self"
   | Tailcall (Func _) -> "Tailcall"
-  | Branch _ -> sprintf "Branch with %d successors" n
-  | Switch s -> sprintf "Switch with %d case and %d distinct successors"
-                  (Array.length s) n
+  | Never ->
+      Report.user_error "Illegal cfg for %s: block %d terminator is Never"
+        (Cfg.fun_name cfg) (BB.start block)
+  | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _ ->
+      sprintf "Branch with %d successors" n
+  | Switch s ->
+      sprintf "Switch with %d case and %d distinct successors"
+        (Array.length s) n
 
 let mal t count =
   if !verbose then printf "Malformed trace with %Ld counts.\n" count;
@@ -123,7 +126,7 @@ let get_or_add_block t (block : BB.t) =
         | 0 ->
             (* use the id of the last instruction in the body *)
             ( match terminator.desc with
-            | Branch (Always _) -> assert true
+            | Always _ -> assert true
             | _ -> assert false );
             let last = List.last_exn (BB.body block) in
             last.id
@@ -268,7 +271,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
             (* target must be a handler block *)
             (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
             ()
-        | Branch _ | Switch _ ->
+        | _ ->
             assert (
               to_block_first_id = to_linearid
               || can_be_first_emitted_id to_linearid to_block );
@@ -297,7 +300,12 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count
       if terminator.id = linearid then
         (* terminator *)
         match terminator.desc with
-        | Branch _ | Switch _ | Tailcall (Self _) ->
+        | Never ->
+            Report.user_error "Illegal cfg for block %d: terminator is Never"
+              (BB.start from_block)
+        | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _
+        | Switch _
+        | Tailcall (Self _) ->
             (* can't branch outside the current function *)
             if !verbose then
               printf
@@ -400,7 +408,11 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
       let block = Option.value_exn (Cfg.get_block cfg src_lbl) in
       let desc = (BB.terminator block).desc in
       match desc with
-      | Branch _ | Switch _ ->
+      | Never ->
+          Report.user_error "Illegal cfg for block %d: terminator is Never"
+            (BB.start block)
+      | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _
+      | Switch _ ->
           if !verbose then (
             printf
               "check_fallthrough in func %d trace (from_lbl=%d,to_lbl=%d): \
