@@ -55,3 +55,11 @@ let compare t ~expected:func ~actual:file =
               else
                 Report.user_error "func_dwarf = %s func = %s\n" func_dwarf
                   func () ) )
+
+let to_symbol name =
+  let symbol_prefix =
+    match X86_proc.system with
+    | X86_proc.S_macosx -> "_"
+    | _ -> ""
+  in
+  X86_proc.string_of_symbol symbol_prefix name

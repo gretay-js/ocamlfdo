@@ -286,7 +286,7 @@ let add_unit t (ui : Linear_format.linear_unit_info) ~hex ~file =
 
 let add_fun t f ~file =
   if t.config.func.enabled then
-    let name = f.Linear.fun_name in
+    let name = Filenames.to_symbol f.Linear.fun_name in
     let f = if t.config.ignore_dbg then Remove_dbg.fundecl f else f in
     let crc = Md5.digest_bytes (Marshal.to_bytes f []) in
     check_and_add t ~name { kind = Func; crc } ~file

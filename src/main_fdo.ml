@@ -11,15 +11,6 @@ let verbose = ref true
 
 let strict = ref false
 
-(* CR-soon gyorsh: This is the only machine dependent part. owee parser
-   doesn't know how to handle /% that may appear in a function name, for
-   example an Int operator. *)
-let to_symbol name =
-  let symbol_prefix =
-    if X86_proc.system = X86_proc.S_macosx then "_" else ""
-  in
-  X86_proc.string_of_symbol symbol_prefix name
-
 let print_linear msg f =
   if verbosity_level > 10 then
     if !verbose then (
@@ -166,7 +157,7 @@ let check_equal f new_body =
       false )
   in
   if not (equal f.fun_body new_body) then (
-    let name = to_symbol f.fun_name in
+    let name = Filenames.to_symbol f.fun_name in
     (* Separate files for before and after to make it easier to diff *)
     report_linear ~name "Before" f;
     report_linear ~name "After" { f with fun_body = new_body };
@@ -196,7 +187,7 @@ let transform f ~algo ~extra_debug ~simplify_cfg ~alternatives =
         CL.eliminate_fallthrough_blocks cl;
         CP.simplify_terminators (CL.cfg cl));
   ( if extra_debug then
-    let file = to_symbol f.fun_name |> Filenames.(make Linear) in
+    let file = Filenames.(to_symbol f.fun_name |> make Linear) in
     Profile.record_call ~accumulate:true "extra_debug" (fun () ->
         CP.add_extra_debug (CL.cfg cl) ~file) );
   let new_cfg =
