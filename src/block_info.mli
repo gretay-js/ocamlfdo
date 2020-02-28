@@ -9,7 +9,7 @@ type b =
     (* true for fallthrough targets where counts are inferred from LBR; false
        for branches that appeared explicitly in LBR *)
     mutable taken : Execount.t;
-    mispredicts : Execount.t
+    mutable mispredicts : Execount.t
   }
 [@@deriving sexp]
 
@@ -44,3 +44,5 @@ val add : t -> count:Execount.t -> unit
 val add_call : t -> callsite:Loc.t -> callee:b -> unit
 
 val add_branch : t -> b -> unit
+
+val verbose : bool ref

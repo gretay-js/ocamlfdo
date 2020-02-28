@@ -1,5 +1,7 @@
 open Core
 
+let verbose = ref true
+
 (* CR-soon gyorsh: Improve different option fields. The reason for them is
    that we don't always have all of the information: Loc.t, label, linearid.
    We can have linearid from the cfg without having Loc.t if the the address
@@ -18,7 +20,7 @@ type b =
     (* true for fallthrough targets where counts are inferred from LBR; false
        for branches that appeared explicitly in LBR *)
     mutable taken : Execount.t;
-    mispredicts : Execount.t
+    mutable mispredicts : Execount.t
   }
 [@@deriving sexp, compare]
 
@@ -102,12 +104,21 @@ let add_branch t b =
   match find t.branches b with
   | None -> t.branches <- b :: t.branches
   | Some br ->
+      (* It must have been one Linear instruction emitted as multiple branch
+         instruction to the same target. This should never happen, if the cfg
+         is simplified, but now it can happen from Lcondbranch3, which may
+         have the same target in 2 of its branches. *)
       assert (Bool.equal b.intra br.intra);
       assert (Bool.equal b.fallthrough br.fallthrough);
-      if Execount.equal b.mispredicts 0L && Execount.equal br.mispredicts 0L
-      then br.taken <- Int64.(br.taken + b.taken)
-      else (
+      if
+        !verbose
+        && not
+             ( Execount.equal b.mispredicts 0L
+             && Execount.equal br.mispredicts 0L )
+      then (
+        printf "Non-zero mispredict value for the same target\n";
         printf !"cur: %{sexp:b}\n" b;
         printf !"new: %{sexp:b}\n" br;
-        printf !"all: %{sexp:t}\n" t;
-        assert false )
+        printf !"all: %{sexp:t}\n" t );
+      br.mispredicts <- Execount.(br.mispredicts + b.mispredicts);
+      br.taken <- Execount.(br.taken + b.taken)
