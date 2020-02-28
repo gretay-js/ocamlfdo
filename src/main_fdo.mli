@@ -5,6 +5,7 @@ val optimize :
   extra_debug:bool ->
   crc_config:Crcs.Config.t ->
   report:bool ->
+  simplify_cfg:bool ->
   unit
 
 val compile :
@@ -14,6 +15,7 @@ val compile :
   extra_debug:bool ->
   crc_config:Crcs.Config.t ->
   report:bool ->
+  simplify_cfg:bool ->
   unit
 
 val check : string list -> unit

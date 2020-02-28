@@ -124,6 +124,27 @@ let flag_report =
       ~doc:
         " emit .fdo.org files showing FDO decisions (e.g., blocks reordered)")
 
+let flag_simplify_cfg =
+  let name = "-simplify-cfg" in
+  let doc =
+    " eliminate fallthrough and dead blocks, merge terminators (does not \
+     preserve original labels)"
+  in
+  Command.Param.(
+    let flag_yes =
+      flag name no_arg ~doc
+      |> map ~f:(function
+           | false -> None
+           | true -> Some true)
+    in
+    let flag_no =
+      flag ("-no" ^ name) no_arg ~doc:(" do not" ^ doc)
+      |> map ~f:(function
+           | false -> None
+           | true -> Some false)
+    in
+    choose_one [flag_yes; flag_no] ~if_nothing_chosen:(Default_to true))
+
 let flag_dot =
   Command.Param.(
     flag "-dot" no_arg ~doc:" emit CFG in .dot format for debug")
@@ -393,6 +414,7 @@ let opt_command =
       and report = flag_report
       and crc_config = flag_crc_config
       and files = anon_files
+      and simplify_cfg = flag_simplify_cfg
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
@@ -400,7 +422,7 @@ let opt_command =
       fun () ->
         Profile.record_call "opt" (fun () ->
             Main_fdo.optimize files ~fdo_profile ~reorder_blocks ~extra_debug
-              ~crc_config ~report);
+              ~crc_config ~report ~simplify_cfg);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
@@ -469,6 +491,7 @@ let compile_command =
       and fdo_profile = Commonflag.(optional flag_profile_filename)
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
+      and simplify_cfg = flag_simplify_cfg
       and crc_config = flag_crc_config
       and args =
         Command.Param.(
@@ -512,7 +535,7 @@ let compile_command =
         | Some (fdo_profile, extra_debug) ->
             Profile.record_call "compile" (fun () ->
                 Main_fdo.compile args ~fdo_profile ~reorder_blocks
-                  ~extra_debug ~crc_config ~report;
+                  ~extra_debug ~crc_config ~report ~simplify_cfg;
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 

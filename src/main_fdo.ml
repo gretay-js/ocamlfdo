@@ -184,19 +184,17 @@ let check_equal f new_body =
    dce. It probably doesn't matter for the final layout, if the heuristics
    are reasonable w.r.t. cold code, then dead is just very cold, but having
    less code to deal with when computing layout will be more efficient. *)
-let transform f ~algo ~extra_debug ~preserve_orig_labels ~alternatives =
+let transform f ~algo ~extra_debug ~simplify_cfg ~alternatives =
   print_linear "Before" f;
   let cl =
     Profile.record_call ~accumulate:true "linear_to_cfg" (fun () ->
-        CL.of_linear f ~preserve_orig_labels)
+        CL.of_linear f ~preserve_orig_labels:(not simplify_cfg))
   in
   (* eliminate fallthrough implies dead block elimination *)
-  if not preserve_orig_labels then
-    Profile.record_call ~accumulate:true "eliminate_fallthrough"
-      (fun () ->
-         CL.eliminate_fallthrough_blocks cl;
-         CP.simplify_terminators (CL.cfg cl)
-      );
+  if simplify_cfg then
+    Profile.record_call ~accumulate:true "eliminate_fallthrough" (fun () ->
+        CL.eliminate_fallthrough_blocks cl;
+        CP.simplify_terminators (CL.cfg cl));
   ( if extra_debug then
     let file = to_symbol f.fun_name |> Filenames.(make Linear) in
     Profile.record_call ~accumulate:true "extra_debug" (fun () ->
@@ -232,7 +230,7 @@ let emit_crcs ui crcs =
   ui.items <- ui.items @ [Data dl]
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report =
+    ~report ~simplify_cfg =
   if report then (
     Report.start ();
     Report.logf
@@ -296,8 +294,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
                 incr total;
                 let transform ~alternatives =
                   Func
-                    (transform f ~algo ~extra_debug
-                       ~preserve_orig_labels:false ~alternatives)
+                    (transform f ~algo ~extra_debug ~simplify_cfg
+                       ~alternatives)
                 in
                 match Crcs.add_fun crcs f ~file with
                 | false ->
@@ -329,7 +327,7 @@ let check files =
     | Func f ->
         let fnew =
           transform f ~algo:Reorder.Identity ~extra_debug:false
-            ~preserve_orig_labels:true ~alternatives:[]
+            ~simplify_cfg:false ~alternatives:[]
         in
         check_equal f fnew.fun_body
     | Data _ -> ()
@@ -375,7 +373,7 @@ let dump files ~dot ~show_instr =
    compiler internals. There are multiple ways in which they can be set
    (e.g., from cmd line or from env or config), order matters, etc. *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report =
+    ~report ~simplify_cfg =
   let open Wrapper in
   let w = wrap args in
   if can_split_compile w then (
@@ -384,7 +382,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let files = artifacts w Filenames.Linear in
     Profile.record_call ~accumulate:true "opt" (fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-          ~report);
+          ~report ~simplify_cfg);
     Profile.record_call ~accumulate:true "phase II:emit" (fun () ->
         call_ocamlopt w Emit) )
   else (
