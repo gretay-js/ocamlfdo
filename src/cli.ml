@@ -265,7 +265,11 @@ let flag_crc_config =
       let module RB = AltFlag (Crcs.On_error) in
       RB.mk "-on-md5-mismatch" ~doc:"action taken when md5 mismatch occurs"
     and on_missing =
-      let module RB = AltFlag (Crcs.On_error) in
+      let module RB = AltFlag (struct
+        include Crcs.On_error
+
+        let default = Use_anyway
+      end) in
       RB.mk "-on-md5-missing" ~doc:"action taken when md5 is missing "
     and ignore_dbg =
       Command.Param.(
