@@ -58,6 +58,11 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
+      printf
+        !"recording branch:\n\
+          from addr=%{sexp:Raw_addr.t} loc=%{sexp:Loc.t option}\n\
+          to   addr=%{sexp:Raw_addr.t} loc=%{sexp:Loc.t option}\n"
+        from_addr from_loc to_addr to_loc;
       Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
   if !verbose then (
     Cfg_info.dump i;

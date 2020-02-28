@@ -102,9 +102,12 @@ let add_branch t b =
   match find t.branches b with
   | None -> t.branches <- b :: t.branches
   | Some br ->
-      assert (b.intra && br.intra);
-      assert (b.fallthrough && br.fallthrough);
-      assert (
-        Execount.equal b.mispredicts 0L && Execount.equal br.mispredicts 0L
-      );
-      br.taken <- Int64.(br.taken + b.taken)
+      assert (Bool.equal b.intra br.intra);
+      assert (Bool.equal b.fallthrough br.fallthrough);
+      if Execount.equal b.mispredicts 0L && Execount.equal br.mispredicts 0L
+      then br.taken <- Int64.(br.taken + b.taken)
+      else (
+        printf !"cur: %{sexp:b}\n" b;
+        printf !"new: %{sexp:b}\n" br;
+        printf !"all: %{sexp:t}\n" t;
+        assert false )
