@@ -129,7 +129,7 @@ let report_linear ~name title f =
       Format.pp_print_flush ppf ();
       Out_channel.close out_channel)
 
-let check_equal f new_body =
+let equal_linear f new_body =
   (* CR-someday gyorsh: we do not preserve live and dbg fields of some
      instructions, such as labels, and instruction that do not exist in cfg,
      like trap handling stuff, or things that CFG can generate new ones.
@@ -144,13 +144,16 @@ let check_equal f new_body =
   let open Linear in
   let rec equal i1 i2 =
     if
-      i1.desc = i2.desc
+      Poly.equal i1.desc i2.desc
       && reg_array_equal i1.arg i2.arg
       && reg_array_equal i1.res i2.res
       && ( ignored i1.desc
          || Reg.Set.equal i1.live i2.live
             && Debuginfo.compare i1.dbg i2.dbg = 0 )
-    then if i1.desc = Lend then true else equal i1.next i2.next
+    then
+      match i1.desc with
+      | Lend -> true
+      | _ -> equal i1.next i2.next
     else (
       Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
         f.fun_name Printlinear.instr i1 Printlinear.instr i2;
@@ -316,11 +319,14 @@ let check files =
   let open Linear_format in
   let check_item = function
     | Func f ->
-        let fnew =
-          transform f ~algo:Reorder.Identity ~extra_debug:false
-            ~simplify_cfg:false ~alternatives:[]
-        in
-        check_equal f fnew.fun_body
+        print_linear "Before" f;
+        let cl = CL.of_linear f ~preserve_orig_labels:true in
+        let new_body = CL.to_linear cl in
+        let fnew = { f with fun_body = new_body } in
+        print_linear "After" fnew;
+        equal_linear f new_body
+        (* let new_cl = CL.of_linear f ~preserve_orig_labels:true in
+         * CL.equal cl cl_new *)
     | Data _ -> ()
   in
   let process file =

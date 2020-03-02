@@ -112,7 +112,8 @@ let row_to_sample ~keep_pid row =
               ( match String.split id ~on:'/' with
               | [n; _tid] ->
                   (* Do we need to do anything with tid? what does it mean? *)
-                  assert (Int.of_string n = pid)
+                  let k = Int.of_string n in
+                  assert (k = pid)
               | _ -> Report.user_error "Unexpected format" );
 
               (* parse the important info *)
@@ -143,6 +144,11 @@ let row_to_sample ~keep_pid row =
       else Unknown
   | _ -> Report.user_error "Cannot parse %s\n" row ()
 
+(* let row_to_sample ~keep_pid row =
+ *   if !verbose then printf "parsing row %S\n" row;
+ *   try row_to_sample ~keep_pid row
+ *   with e -> Report.user_error "Cannot parse %S\n" row () *)
+
 let pids = ref Int.Set.empty
 
 let check_keep_pid expected_pids p ~ignore_buildid =
@@ -169,8 +175,13 @@ let perf_fold filename args ~init ~f =
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
-  let t = eval (err_to_out (call args) |- fold_lines ~init ~f) in
-  t
+  let t, sexp =
+    Traced.eval ~capture:true (call args |- fold_lines ~init ~f)
+  in
+  print_endline (Sexp.to_string_hum sexp);
+  match t with
+  | Ok t -> t
+  | _ -> assert false
 
 let read filename =
   if !verbose then
@@ -447,7 +458,7 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
   if !verbose then (
     Printf.printf "Read %d samples with %d LBR entries\n" stats.total
       stats.lbr;
-    let r = Float.(of_int stats.ignored * 100.0 / of_int stats.total) in
+    let r = Report.percent stats.ignored stats.total in
     Printf.printf "Ignored %d samples (%.1f)\n" stats.ignored r;
     Printf.printf "Found pids:\n";
     Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid) );
