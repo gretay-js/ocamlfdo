@@ -178,10 +178,10 @@ let perf_fold filename args ~init ~f =
   let t, sexp =
     Traced.eval ~capture:true (call args |- fold_lines ~init ~f)
   in
-  print_endline (Sexp.to_string_hum sexp);
+  if !verbose then print_endline (Sexp.to_string_hum sexp);
   match t with
   | Ok t -> t
-  | _ -> assert false
+  | _ -> Report.user_error "Unexpected output of %s" (String.concat args)
 
 let read filename =
   if !verbose then
