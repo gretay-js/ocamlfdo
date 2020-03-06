@@ -349,7 +349,7 @@ let decode_command =
        Use Linux Perf to sample hardware execution counters using LBR:\n\
        $ perf record -e cycles:u -j any,u -o perf.data <prog.exe> <args..>\n\n\
        Decode the samples:\n\
-       $ ocamlfdo decode -perf-profile <perf.data> -binary <prog.exe> \n\n\
+       $ ocamlfdo decode <perf.data> -binary <prog.exe> \n\n\
        It will generate a profile in prog.exe.fdo-profile.\n\
        The profile can be used to reoptimize the executable.\n\
        With -write-linker-script-hot, ocamlfdo decode will also produce hot \
