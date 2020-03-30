@@ -18,3 +18,8 @@
  (preprocess (pps ppx_jane)))
 
 (alias (name DEFAULT) (deps ocamlfdo.ml.pp))
+
+(install
+ (files ocamlfdo.exe)
+ (section bin)
+ (package ocamlfdo))

@@ -28,6 +28,7 @@ Copyright (c) 2019 Jane Street Group LLC.
   core
   ppx_jane
   re2
+;  (shexp  (>= v0.14-preview.122.11+261))
   shexp
   parsexp_io
  )
