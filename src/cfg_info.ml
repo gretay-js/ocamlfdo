@@ -69,7 +69,7 @@ let terminator_to_string cfg block =
   | Never ->
       Report.user_error "Illegal cfg for %s: block %d terminator is Never"
         (Cfg.fun_name cfg) (BB.start block)
-  | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _ ->
+  | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _ ->
       sprintf "Branch with %d successors" n
   | Switch s ->
       sprintf "Switch with %d case and %d distinct successors"
@@ -127,7 +127,7 @@ let get_or_add_block t (block : BB.t) =
             (* use the id of the last instruction in the body *)
             ( match terminator.desc with
             | Always _ -> assert true
-            | Never | Return | Is_even _ | Is_true _ | Float_test _
+            | Never | Return | Parity_test _ | Truth_test _ | Float_test _
             | Int_test _ | Switch _ | Raise _ | Tailcall _ ->
                 assert false );
             let last = List.last_exn (BB.body block) in
@@ -273,7 +273,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
             (* target must be a handler block *)
             (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
             ()
-        | Always _ | Never | Is_even _ | Is_true _ | Float_test _
+        | Always _ | Never | Parity_test _ | Truth_test _ | Float_test _
         | Int_test _ | Switch _ ->
             assert (
               to_block_first_id = to_linearid
@@ -306,8 +306,8 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count
         | Never ->
             Report.user_error "Illegal cfg for block %d: terminator is Never"
               (BB.start from_block)
-        | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _
-        | Switch _
+        | Always _ | Parity_test _ | Truth_test _ | Float_test _
+        | Int_test _ | Switch _
         | Tailcall (Self _) ->
             (* can't branch outside the current function *)
             if !verbose then
@@ -416,7 +416,7 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
       | Never ->
           Report.user_error "Illegal cfg for block %d: terminator is Never"
             (BB.start block)
-      | Always _ | Is_even _ | Is_true _ | Float_test _ | Int_test _
+      | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
       | Switch _ ->
           if !verbose then (
             printf
