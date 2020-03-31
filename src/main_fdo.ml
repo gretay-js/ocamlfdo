@@ -268,14 +268,14 @@ let check files =
               { f with fun_body = simplified_body }
               new_body "2"
           in
-          fprintf stderr "Simplify and check again %s... %s\n" f.fun_name
+          fprintf stderr "Simplify and check again %s ... %s\n" f.fun_name
             (if res then "success!" else "failed after simplify!!")
         (* let new_cl = CL.of_linear f ~preserve_orig_labels:true in
          * CL.equal cl cl_new *)
     | Data _ -> ()
   in
   let process file =
-    fprintf stderr "Checking %s...\n" file;
+    fprintf stderr "Checking %s ...\n" file;
     let ui, _ = restore file in
     List.iter ui.items ~f:check_item
   in

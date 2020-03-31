@@ -67,10 +67,59 @@ let equal_linear f new_body msg =
     false )
   else true
 
-(* CR gyorsh: implement *)
 let rec simplify i =
   let open Linear in
   let cont j = { j with next = simplify j.next } in
+  let test c = Mach.Iinttest_imm (Iunsigned c, 1) in
+  let module Label = Int in
+  let simplify3way l0 l1 l2 ~fallthrough =
+    let l0 = Option.value l0 ~default:fallthrough in
+    let l1 = Option.value l1 ~default:fallthrough in
+    let l2 = Option.value l2 ~default:fallthrough in
+    match
+      ( Label.equal l0 fallthrough,
+        Label.equal l1 fallthrough,
+        Label.equal l2 fallthrough )
+    with
+    | true, true, true -> simplify i.next
+    | false, true, true ->
+        { i with desc = Lcondbranch (test Clt, l0); next = simplify i.next }
+    | true, false, true ->
+        { i with desc = Lcondbranch (test Ceq, l1); next = simplify i.next }
+    | true, true, false ->
+        { i with desc = Lcondbranch (test Cgt, l2); next = simplify i.next }
+    | false, false, true ->
+        if Label.equal l0 l1 then
+          { i with
+            desc = Lcondbranch (test Cle, l0);
+            next = simplify i.next
+          }
+        else cont i
+    | false, true, false ->
+        if Label.equal l0 l2 then
+          { i with
+            desc = Lcondbranch (test Cne, l0);
+            next = simplify i.next
+          }
+        else cont i
+    | true, false, false ->
+        if Label.equal l1 l2 then
+          { i with
+            desc = Lcondbranch (test Cge, l1);
+            next = simplify i.next
+          }
+        else cont i
+    | false, false, false ->
+        if Label.equal l0 l1 && Label.equal l0 l2 then
+          { i with desc = Lbranch l0; next = simplify i.next }
+        else if Label.equal l0 l1 then
+          let next = { i with desc = Lbranch l2; next = simplify i.next } in
+          { i with desc = Lcondbranch (test Cle, l0); next }
+        else if Label.equal l1 l2 then
+          let next = { i with desc = Lbranch l0; next = simplify i.next } in
+          { i with desc = Lcondbranch (test Cge, l1); next }
+        else cont i
+  in
   match i.desc with
   | Lend -> i
   | Lcondbranch (_, lbl) | Lbranch lbl -> (
@@ -78,59 +127,7 @@ let rec simplify i =
       | Llabel fallthrough when lbl = fallthrough -> simplify i.next
       | _ -> cont i )
   | Lcondbranch3 (l0, l1, l2) -> (
-      let module Label = Int in
-      (* | Ceq | Cne | Clt | Cgt | Cle | Cge *)
-      let test c = Mach.Iinttest_imm (Iunsigned c, 1) in
       match i.next.desc with
-      | Llabel fallthrough -> (
-          let l0 = Option.value l0 ~default:fallthrough in
-          let l1 = Option.value l1 ~default:fallthrough in
-          let l2 = Option.value l2 ~default:fallthrough in
-          match
-            ( Label.equal l0 fallthrough,
-              Label.equal l1 fallthrough,
-              Label.equal l2 fallthrough )
-          with
-          | true, true, true -> simplify i.next
-          | false, true, true ->
-              { i with
-                desc = Lcondbranch (test Clt, l0);
-                next = simplify i.next
-              }
-          | true, false, true ->
-              { i with
-                desc = Lcondbranch (test Ceq, l1);
-                next = simplify i.next
-              }
-          | true, true, false ->
-              { i with
-                desc = Lcondbranch (test Cgt, l2);
-                next = simplify i.next
-              }
-          | false, false, true ->
-              if Label.equal l0 l1 then
-                { i with
-                  desc = Lcondbranch (test Cle, l0);
-                  next = simplify i.next
-                }
-              else cont i
-          | false, true, false ->
-              if Label.equal l0 l2 then
-                { i with
-                  desc = Lcondbranch (test Cne, l0);
-                  next = simplify i.next
-                }
-              else cont i
-          | true, false, false ->
-              if Label.equal l1 l2 then
-                { i with
-                  desc = Lcondbranch (test Cge, l1);
-                  next = simplify i.next
-                }
-              else cont i
-          | false, false, false ->
-              if Label.equal l0 l1 && Label.equal l0 l2 then
-                { i with desc = Lbranch l0; next = simplify i.next }
-              else cont i )
+      | Llabel fallthrough -> simplify3way l0 l1 l2 ~fallthrough
       | _ -> cont i )
   | _ -> cont i
