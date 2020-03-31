@@ -110,14 +110,45 @@ let rec simplify i =
           }
         else cont i
     | false, false, false ->
+        (* CR-soon gyorsh: this is very repetitive and can be simplified
+           using Linear.invert_test . *)
         if Label.equal l0 l1 && Label.equal l0 l2 then
           { i with desc = Lbranch l0; next = simplify i.next }
         else if Label.equal l0 l1 then
-          let next = { i with desc = Lbranch l2; next = simplify i.next } in
-          { i with desc = Lcondbranch (test Cle, l0); next }
+          (* heuristic in cfg_to_linear is to emit unconditional branch to
+             the smallest *)
+          if Label.compare l2 l0 < 0 then
+            let next =
+              { i with desc = Lbranch l2; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Cle, l0); next }
+          else
+            let next =
+              { i with desc = Lbranch l0; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Cgt, l2); next }
         else if Label.equal l1 l2 then
-          let next = { i with desc = Lbranch l0; next = simplify i.next } in
-          { i with desc = Lcondbranch (test Cge, l1); next }
+          if Label.compare l0 l1 < 0 then
+            let next =
+              { i with desc = Lbranch l0; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Cge, l1); next }
+          else
+            let next =
+              { i with desc = Lbranch l1; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Clt, l0); next }
+        else if Label.equal l0 l2 then
+          if Label.compare l1 l0 < 0 then
+            let next =
+              { i with desc = Lbranch l1; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Cne, l0); next }
+          else
+            let next =
+              { i with desc = Lbranch l0; next = simplify i.next }
+            in
+            { i with desc = Lcondbranch (test Ceq, l1); next }
         else cont i
   in
   match i.desc with
