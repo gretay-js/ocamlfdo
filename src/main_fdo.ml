@@ -9,8 +9,6 @@ let verbosity_level = 20
 
 let verbose = ref true
 
-let strict = ref false
-
 let print_linear msg f =
   if verbosity_level > 10 then
     if !verbose then (
@@ -106,69 +104,6 @@ let decode files ~binary_filename ~reorder_functions
         Profile.record_call ~accumulate:true "linker_script_hot" (fun () ->
             Linker_script.write_hot filename agg_dec_profile
               ~reorder_functions ~check)
-
-exception Not_equal_reg_array
-
-let reg_array_equal ra1 ra2 =
-  (* Uses stamps just like the implementation of compare for Reg.Set.t *)
-  let reg_equal (r1 : Reg.t) (r2 : Reg.t) =
-    if not (r1.stamp = r2.stamp) then raise Not_equal_reg_array
-  in
-  try
-    Array.iter2_exn ~f:reg_equal ra1 ra2;
-    true
-  with Not_equal_reg_array -> false
-
-let report_linear ~name title f =
-  let filename = Report.get_filename ~name ~title ~sub:"lin" in
-  let out_channel = Out_channel.create filename in
-  let ppf = Format.formatter_of_out_channel out_channel in
-  Misc.try_finally
-    (fun () -> Printlinear.fundecl ppf f)
-    ~always:(fun () ->
-      Format.pp_print_flush ppf ();
-      Out_channel.close out_channel)
-
-let equal_linear f new_body =
-  (* CR-someday gyorsh: we do not preserve live and dbg fields of some
-     instructions, such as labels, and instruction that do not exist in cfg,
-     like trap handling stuff, or things that CFG can generate new ones.
-
-     For live, this is fine because this field is used for Lop but not for
-     labels and trap handling instruciont. For dbg, it is fine for now
-     because mshinwell said so.*)
-  let ignored = function
-    | Linear.Llabel _ | Lentertrap | Ladjust_trap_depth _ -> true
-    | _ -> false
-  in
-  let open Linear in
-  let rec equal i1 i2 =
-    if
-      Poly.equal i1.desc i2.desc
-      && reg_array_equal i1.arg i2.arg
-      && reg_array_equal i1.res i2.res
-      && ( ignored i1.desc
-         || Reg.Set.equal i1.live i2.live
-            && Debuginfo.compare i1.dbg i2.dbg = 0 )
-    then
-      match i1.desc with
-      | Lend -> true
-      | _ -> equal i1.next i2.next
-    else (
-      Format.kasprintf prerr_endline "Equality failed in %s on:@;%a@;%a"
-        f.fun_name Printlinear.instr i1 Printlinear.instr i2;
-      false )
-  in
-  if not (equal f.fun_body new_body) then (
-    let name = Filenames.to_symbol f.fun_name in
-    (* Separate files for before and after to make it easier to diff *)
-    report_linear ~name "Before" f;
-    report_linear ~name "After" { f with fun_body = new_body };
-    if !strict then
-      Report.user_error
-        "Conversion from linear to cfg and back to linear is not an \
-         identity function %s.\n"
-        name () )
 
 (* CR-soon gyorsh: If we eliminate dead blocks before a transformation then
    some algorithms might not apply because they rely on perf data based on
@@ -324,13 +259,23 @@ let check files =
         let new_body = CL.to_linear cl in
         let fnew = { f with fun_body = new_body } in
         print_linear "After" fnew;
-        equal_linear f new_body
+        if not (Check_invariants.equal_linear f new_body "") then
+          (* Apply known equivalences to the input linear IR and compare
+             again *)
+          let simplified_body = Check_invariants.simplify f.fun_body in
+          let res =
+            Check_invariants.equal_linear
+              { f with fun_body = simplified_body }
+              new_body "2"
+          in
+          fprintf stderr "Simplify and check again %s... %s\n" f.fun_name
+            (if res then "success!" else "failed after simplify!!")
         (* let new_cl = CL.of_linear f ~preserve_orig_labels:true in
          * CL.equal cl cl_new *)
     | Data _ -> ()
   in
   let process file =
-    printf "Checking %s...\n" file;
+    fprintf stderr "Checking %s...\n" file;
     let ui, _ = restore file in
     List.iter ui.items ~f:check_item
   in
