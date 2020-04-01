@@ -18,7 +18,7 @@ val compile :
   simplify_cfg:bool ->
   unit
 
-val check : string list -> unit
+val check : string list -> input:string option -> unit
 
 val decode :
   string list ->

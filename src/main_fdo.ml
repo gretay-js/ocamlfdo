@@ -250,7 +250,20 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
   Crcs.Config.report crc_config;
   ()
 
-let check files =
+let check files ~input =
+  let files =
+    match input with
+    | None -> files
+    | Some input ->
+        if !verbose then
+          Printf.printf
+            "Reading input files to check from %s, in addition to files \
+             listed on command line"
+            input;
+        In_channel.with_file input ~f:(fun oc ->
+            In_channel.fold_lines oc ~init:files ~f:(fun acc s ->
+                Filename.realpath s :: acc))
+  in
   let open Linear_format in
   let check_item = function
     | Func f ->

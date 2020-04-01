@@ -283,6 +283,17 @@ let flag_timings =
   Command.Param.(
     flag "-timings" no_arg ~doc:" print timings information for each pass")
 
+let flag_input =
+  Command.Param.(
+    flag "-input"
+      (optional Filename.arg_type)
+      ~doc:
+        "FILENAME read input filenames from this file in addition to \
+         command line, one argument per line")
+
+let anon_files_optional =
+  Command.Param.(anon (sequence ("FILENAME" %: Filename.arg_type)))
+
 let anon_files =
   Command.Param.(
     anon (non_empty_sequence_as_list ("FILENAME" %: Filename.arg_type)))
@@ -444,10 +455,13 @@ let check_linear2cfg_command =
         dead code elimination is not performed during this check.
 |})
     Command.Let_syntax.(
-      let%map v = flag_v and q = flag_q and files = anon_files in
+      let%map v = flag_v
+      and q = flag_q
+      and files = anon_files_optional
+      and input = flag_input in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> Main_fdo.check files)
+      fun () -> Main_fdo.check files ~input)
 
 let compile_command =
   Command.basic ~summary:"ocamlfdo wrapper to ocamlopt"
