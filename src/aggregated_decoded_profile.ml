@@ -114,10 +114,14 @@ let get_func_id t ~name ~start ~finish =
       Hashtbl.add_exn t.name2id ~key:name ~data:id;
       func.id
   | Some id ->
-      let func = Hashtbl.find_exn t.functions id in
-      assert (func.id = id);
-      assert (Raw_addr.equal func.start start);
-      assert (Raw_addr.equal func.finish finish);
+    let func = Hashtbl.find_exn t.functions id in
+    if not ( (func.id = id) &&  (Raw_addr.equal func.start start) && (Raw_addr.equal func.finish finish))
+    then
+      Report.user_error "Mismatch get_func_id for %s with start=0x%Lx,finish=0x%Lx\n\
+                        Found %s in name2id with id=%d but id2func is func.id=%d start=0x%Lx,finish=0x%Lx\n"
+        name start finish name id func.id func.start func.finish
+                ()
+    ;
       func.id
 
 let decode_addr t addr interval dbg =
