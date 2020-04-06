@@ -75,7 +75,7 @@ opam install ocamlfdo
 
 * Decode
   ```
-  ocamlfdo decode -binary test2.exe -perf-profile test2.perf.data
+  ocamlfdo decode -binary test2.exe test2.perf.data
   ```
   Aggregate the samples collected by `perf` and map them to program locations,
   using extra debug information.
@@ -255,7 +255,7 @@ Then, the simple example can be simplified a little more:
 $ touch test2.exe.linker-script-hot
 $ ocamlopt test2.ml -o test2.exe
 $ perf record -e cycles:u -j any,u ./test2.exe
-$ ocamlfdo decode -binary test2.exe -perf-profile perf.data -write-linker-script -linker-script-hot linker-script-hot
+$ ocamlfdo decode -binary test2.exe perf.data -write-linker-script -linker-script-hot linker-script-hot
 $ ocamlopt test2.ml -o test2.exe
 ```
 
