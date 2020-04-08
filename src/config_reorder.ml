@@ -1,3 +1,5 @@
+open Core
+
 module Reorder_blocks = struct
   type t =
     | No
@@ -28,4 +30,19 @@ module Reorder_functions = struct
     | Execounts -> "execution-counts"
     | Hot_clusters -> "hot-clusters"
     | Random -> "random"
+end
+
+module Cutoff_functions = struct
+  type action =
+    | Top_percent of Percent.t
+    | Top_percent_samples of Percent.t
+    | Top of int
+    | Top_clusters of int
+    | Min_samples of int
+  [@@deriving sexp]
+
+  type t = action list [@@deriving sexp]
+
+  (** keep all functions*)
+  let default = [Top_percent (Percent.of_mult 1.)]
 end

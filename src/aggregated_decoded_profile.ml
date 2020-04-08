@@ -35,7 +35,7 @@ let mk size crcs buildid =
   }
 
 let get_func t addr =
-  match Hashtbl.find t.addr2loc addr with
+  match Raw_addr.Table.find t.addr2loc addr with
   | None ->
       if !verbose then
         printf "Not found any cached location for address 0x%Lx\n" addr;
@@ -45,7 +45,7 @@ let get_func t addr =
       | None -> None
       | Some rel ->
           let id = rel.id in
-          let func = Hashtbl.find_exn t.functions id in
+          let func = Int.Table.find_exn t.functions id in
           Some func )
 
 (* Source or target addr of this branch does not belong to the binary and
@@ -66,12 +66,12 @@ let track_branch (from_addr, to_addr) =
    In particular, it does not count instructions that can be traced using
    LBR. The advantage is that we can compute it for non-OCaml functions. *)
 let create_func_execounts t (agg : Aggregated_perf_profile.t) =
-  Hashtbl.iteri agg.instructions ~f:(fun ~key ~data ->
+  Raw_addr.Table.iteri agg.instructions ~f:(fun ~key ~data ->
       match get_func t key with
       | None -> ()
       | Some func ->
           func.count <- Int64.(func.count + data);
-          Hashtbl.add_exn func.agg.instructions ~key ~data);
+          Raw_addr.Table.add_exn func.agg.instructions ~key ~data);
   let process (from_addr, to_addr) update =
     match (get_func t from_addr, get_func t to_addr) with
     | None, None -> ()
@@ -84,44 +84,52 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
           update from_func;
           update to_func )
   in
-  Hashtbl.iteri agg.branches ~f:(fun ~key ~data ->
+  Raw_addr_pair.Table.iteri agg.branches ~f:(fun ~key ~data ->
       let mispredicts =
-        Option.value (Hashtbl.find agg.mispredicts key) ~default:0L
+        Option.value
+          (Raw_addr_pair.Table.find agg.mispredicts key)
+          ~default:0L
       in
       let update_br func =
         func.count <- Int64.(func.count + data);
         if track_branch key then (
-          Hashtbl.add_exn func.agg.branches ~key ~data;
+          Raw_addr_pair.Table.add_exn func.agg.branches ~key ~data;
           if Int64.(mispredicts > 0L) then
-            Hashtbl.add_exn func.agg.mispredicts ~key ~data:mispredicts )
+            Raw_addr_pair.Table.add_exn func.agg.mispredicts ~key
+              ~data:mispredicts )
       in
       process key update_br);
-  Hashtbl.iteri agg.traces ~f:(fun ~key ~data ->
+  Raw_addr_pair.Table.iteri agg.traces ~f:(fun ~key ~data ->
       (* traces don't contribute to func's total count because it is
          accounted for in branches. *)
       let update_tr func =
-        if track_branch key then Hashtbl.add_exn func.agg.traces ~key ~data
+        if track_branch key then
+          Raw_addr_pair.Table.add_exn func.agg.traces ~key ~data
       in
       process key update_tr)
 
 (* Find or add the function and return its id *)
 let get_func_id t ~name ~start ~finish =
-  match Hashtbl.find t.name2id name with
+  match String.Table.find t.name2id name with
   | None ->
-      let id = Hashtbl.length t.functions in
+      let id = Int.Table.length t.functions in
       let func = Func.mk ~id ~start ~finish in
-      Hashtbl.add_exn t.functions ~key:id ~data:func;
-      Hashtbl.add_exn t.name2id ~key:name ~data:id;
+      Int.Table.add_exn t.functions ~key:id ~data:func;
+      String.Table.add_exn t.name2id ~key:name ~data:id;
       func.id
   | Some id ->
-    let func = Hashtbl.find_exn t.functions id in
-    if not ( (func.id = id) &&  (Raw_addr.equal func.start start) && (Raw_addr.equal func.finish finish))
-    then
-      Report.user_error "Mismatch get_func_id for %s with start=0x%Lx,finish=0x%Lx\n\
-                        Found %s in name2id with id=%d but id2func is func.id=%d start=0x%Lx,finish=0x%Lx\n"
-        name start finish name id func.id func.start func.finish
-                ()
-    ;
+      let func = Int.Table.find_exn t.functions id in
+      if
+        not
+          ( func.id = id
+          && Raw_addr.equal func.start start
+          && Raw_addr.equal func.finish finish )
+      then
+        Report.user_error
+          "Mismatch get_func_id for %s with start=0x%Lx,finish=0x%Lx\n\
+           Found %s in name2id with id=%d but id2func is func.id=%d \
+           start=0x%Lx,finish=0x%Lx\n"
+          name start finish name id func.id func.start func.finish ();
       func.id
 
 let decode_addr t addr interval dbg =
@@ -163,7 +171,7 @@ let decode_addr t addr interval dbg =
               if Filenames.(compare Linear ~expected:name ~actual:dbg.file)
               then (
                 (* Set has_linearids of this function *)
-                let func = Hashtbl.find_exn t.functions id in
+                let func = Int.Table.find_exn t.functions id in
                 func.has_linearids <- true;
                 Some dbg.line )
               else None
@@ -172,7 +180,7 @@ let decode_addr t addr interval dbg =
         { rel; dbg }
   in
   if Option.is_some loc.rel then
-    Hashtbl.add_exn t.addr2loc ~key:addr ~data:loc
+    Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc
 
 let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   if !verbose then printf "Decoding perf profile.\n";
@@ -180,24 +188,25 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
      same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
   let size =
-    Hashtbl.length agg.instructions + (Hashtbl.length agg.branches * 2)
+    Raw_addr.Table.length agg.instructions
+    + (Raw_addr_pair.Table.length agg.branches * 2)
   in
   let addresses = Raw_addr.Table.create ~size () in
   let add key =
-    if not (Hashtbl.mem addresses key) then (
+    if not (Raw_addr.Table.mem addresses key) then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
-      Hashtbl.set addresses ~key ~data:None )
+      Raw_addr.Table.set addresses ~key ~data:None )
     else if !verbose then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =
     add fa;
     add ta
   in
-  Hashtbl.iter_keys agg.instructions ~f:add;
-  Hashtbl.iter_keys agg.branches ~f:add2;
+  Raw_addr.Table.iter_keys agg.instructions ~f:add;
+  Raw_addr_pair.Table.iter_keys agg.branches ~f:add2;
 
   (* A key may be used multiple times in keys of t.instruction and t.branches *)
-  let len = Hashtbl.length addresses in
+  let len = Raw_addr.Table.length addresses in
   if !verbose then printf "size=%d,len=%d\n" size len;
   assert (len <= size);
   (* Resolve all addresses seen in samples in one pass over the binary. *)
@@ -209,7 +218,7 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
     ~f:(fun name _ -> Crcs.decode_and_add crcs name);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
-  Hashtbl.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
+  Raw_addr.Table.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
       (* this is cached using interval tree *)
       let interval =
         Elf_locations.resolve_function_containing locations
@@ -295,18 +304,24 @@ let of_sexp ~input_filename ~output_filename =
    correctly, with multiple and warnings disabled perhaps?
 
    Alternative is to split function names into a pair of name and index. *)
+(* CR-soon gyorsh: handle local functions by indexing their names correctly. *)
 let id2name t =
-  Hashtbl.to_alist t.name2id
+  String.Table.to_alist t.name2id
   |> List.Assoc.inverse
   |> Map.of_alist_multi (module Int)
   (* sort for stability of function ordering *)
   |> Map.map ~f:(fun l -> List.sort l ~compare:String.compare)
 
-let all_functions t = Hashtbl.keys t.name2id
+let all_functions t = String.Table.keys t.name2id
+
+let print_sorted sorted names =
+  Printf.printf "Top functions sorted by execution counters:\n";
+  List.iter sorted ~f:(fun f ->
+      Printf.printf !"%Ld %{sexp:string List.t}\n" f.count (names f))
 
 (* Sort functions using preliminary function-level execution counts in
    descending order. *)
-let top_functions t =
+let sort_functions t =
   let id2name = id2name t in
   let names func = Map.find_exn id2name func.id in
   let compare f1 f2 =
@@ -320,23 +335,49 @@ let top_functions t =
     if res = 0 then List.compare String.compare (names f1) (names f2)
     else res
   in
-  let sorted = List.sort (Hashtbl.data t.functions) ~compare in
-  if !verbose then (
-    Printf.printf "Top functions sorted by execution counters:\n";
-    List.iter sorted ~f:(fun f ->
-        Printf.printf !"%Ld %{sexp:string List.t}\n" f.count (names f)) );
+  let sorted = List.sort (Int.Table.data t.functions) ~compare in
+  if !verbose then print_sorted sorted names;
+  (sorted, names)
+
+let print_sorted_functions_with_counts t =
+  let sorted, names = sort_functions t in
+  print_sorted sorted names
+
+let sorted_functions t =
+  let sorted, names = sort_functions t in
   (* reverse the mapping: from functions to names *)
   List.concat_map sorted ~f:names
 
+let sorted_functions_with_counts t =
+  let sorted, names = sort_functions t in
+  (* reverse the mapping: from functions to names *)
+  let names_and_counts func =
+    List.map (names func) ~f:(fun name -> (name, func.count))
+  in
+  List.concat_map sorted ~f:names_and_counts
+
+let trim t keep =
+  String.Table.filteri_inplace t.name2id ~f:(fun ~key:name ~data:id ->
+      let res = keep name in
+      if not res then (
+        Int.Table.remove t.functions id;
+        Raw_addr.Table.filteri_inplace t.addr2loc
+          ~f:(fun ~key:addr ~data:loc ->
+            match loc.rel with
+            | None -> true
+            | Some rel -> not (rel.id = id)) );
+      res)
+
 let rename t old2new =
-  Hashtbl.map_inplace t.name2id ~f:(fun id -> Hashtbl.find_exn old2new id);
-  Hashtbl.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
-  let size = Hashtbl.length t.functions in
+  String.Table.map_inplace t.name2id ~f:(fun id ->
+      Int.Table.find_exn old2new id);
+  Raw_addr.Table.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
+  let size = Int.Table.length t.functions in
   let functions = Int.Table.create ~size () in
-  Hashtbl.iteri old2new ~f:(fun ~key:id ~data:newid ->
-      let func = Hashtbl.find_exn t.functions id in
-      Hashtbl.set functions ~key:newid ~data:{ func with id = newid });
-  assert (Hashtbl.length functions = size);
+  Int.Table.iteri old2new ~f:(fun ~key:id ~data:newid ->
+      let func = Int.Table.find_exn t.functions id in
+      Int.Table.set functions ~key:newid ~data:{ func with id = newid });
+  assert (Int.Table.length functions = size);
   { t with functions }
 
 type patch =
@@ -373,16 +414,18 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
   (* refresh ids of function in src, so as not to clash with dst: if func is
      in both src and dst, use the id from dst, otherwise rename src id to a
      fresh id. *)
-  let last = ref (Hashtbl.length dst.name2id) in
+  let last = ref (String.Table.length dst.name2id) in
   let fresh () =
     let res = !last in
     incr last;
     res
   in
-  let old2new = Int.Table.create ~size:(Hashtbl.length src.name2id) () in
+  let old2new =
+    Int.Table.create ~size:(String.Table.length src.name2id) ()
+  in
   let patches = ref [] in
   let merge_name2id ~key a b =
-    let id = Hashtbl.find old2new a in
+    let id = Int.Table.find old2new a in
     if Option.is_some id && !verbose then
       (* Two different names mapped to the same id in src. currently cannot
          happen in profiles saved to file. Handle it here anyway, to ensure
@@ -405,33 +448,34 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
             patches := { from = id; newid = b } :: !patches );
           b
     in
-    Hashtbl.set old2new ~key:a ~data:newid;
-    Hashtbl.Set_to newid
+    Int.Table.set old2new ~key:a ~data:newid;
+    String.Table.Set_to newid
   in
   if !verbose then (
-    Printf.printf !"src:\n%{sexp:(string, int) Hashtbl.t}\n" src.name2id;
-    Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
-  Hashtbl.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
+    Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
+    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id );
+  String.Table.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
   ( if not (List.is_empty !patches) then
       (* patch dst.name2id: needed if two names in src mapped to the same id. *)
       (* CR-soon gyorsh: this is completely untested. *)
       if !verbose then (
         Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
         Printf.printf
-          !"dst before patch:\n%{sexp:(string, int) Hashtbl.t}\n"
+          !"dst before patch:\n%{sexp:(string, int) String.Table.t}\n"
           dst.name2id );
     let id2name = id2name dst in
     List.iter !patches ~f:(fun { from; newid } ->
         let names = Map.find_exn id2name from in
         assert (List.length names > 0);
         List.iter names ~f:(fun name ->
-            Hashtbl.set dst.name2id ~key:name ~data:newid)) );
+            String.Table.set dst.name2id ~key:name ~data:newid)) );
   if !verbose then
-    Printf.printf !"old2new:\n%{sexp:(int, int) Hashtbl.t}\n" old2new;
+    Printf.printf !"old2new:\n%{sexp:(int, int) Int.Table.t}\n" old2new;
   let src = rename src old2new in
   if !verbose then (
-    Printf.printf !"src:\n%{sexp:(string, int)Hashtbl.t}\n" src.name2id;
-    Printf.printf !"dst:\n%{sexp:(string, int) Hashtbl.t}\n" dst.name2id );
+    Printf.printf !"src:\n%{sexp:(string, int) String.Table.t}\n" src.name2id;
+    Printf.printf !"dst:\n%{sexp:(string, int) String.Table.t}\n" dst.name2id
+    );
   let merge_addr2loc ~key:_ a = function
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to (Loc.merge a b)
@@ -440,8 +484,10 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
     | None -> Hashtbl.Set_to a
     | Some b -> Hashtbl.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
-  Hashtbl.merge_into ~src:src.addr2loc ~dst:dst.addr2loc ~f:merge_addr2loc;
-  Hashtbl.merge_into ~src:src.functions ~dst:dst.functions ~f:merge_functions;
+  Raw_add.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
+    ~f:merge_addr2loc;
+  Int.Table.merge_into ~src:src.functions ~dst:dst.functions
+    ~f:merge_functions;
   Crcs.merge_into ~src:src.crcs ~dst:dst.crcs crc_config
 
 module Merge = Merge.Make (struct
@@ -453,5 +499,6 @@ module Merge = Merge.Make (struct
 
   let write = write_bin
 
-  let approx_size t = Hashtbl.length t.addr2loc + Hashtbl.length t.name2id
+  let approx_size t =
+    Raw_add.Table.length t.addr2loc + String.Table.length t.name2id
 end)

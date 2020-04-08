@@ -2,24 +2,14 @@ open Core
 
 let verbose = ref false
 
-(* Pair of addresses *)
-module Raw_address_pair = struct
-  module T = struct
-    type t = Raw_addr.t * Raw_addr.t [@@deriving compare, hash, sexp, bin_io]
-  end
-
-  include T
-  include Hashable.Make_binable (T)
-end
-
 type t =
   { instructions : Execount.t Raw_addr.Table.t;
-    branches : Execount.t Raw_address_pair.Table.t;
+    branches : Execount.t Raw_addr_pair.Table.t;
         (** number of times the branch was taken. *)
-    mispredicts : Execount.t Raw_address_pair.Table.t;
+    mispredicts : Execount.t Raw_addr_pair.Table.t;
         (** number of times the branch was mispredicted: branch target
             mispredicted or branch direction was mispredicted. *)
-    traces : Execount.t Raw_address_pair.Table.t;
+    traces : Execount.t Raw_addr_pair.Table.t;
         (** execution count: number of times the trace was taken. *)
     mutable buildid : string option
         (** identifier of the relevant unit (i.e., binary's buildid or
@@ -29,9 +19,9 @@ type t =
 
 let empty () =
   { instructions = Raw_addr.Table.create ();
-    branches = Raw_address_pair.Table.create ();
-    mispredicts = Raw_address_pair.Table.create ();
-    traces = Raw_address_pair.Table.create ();
+    branches = Raw_addr_pair.Table.create ();
+    mispredicts = Raw_addr_pair.Table.create ();
+    traces = Raw_addr_pair.Table.create ();
     buildid = None
   }
 

@@ -75,3 +75,5 @@ val encode : t -> string list
 val verbose : bool ref
 
 val merge_into : src:tbl -> dst:tbl -> Config.t -> unit
+
+val trim : tbl -> Config.t -> unit

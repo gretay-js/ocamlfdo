@@ -6,9 +6,7 @@ module Kind = struct
   type t =
     | Func
     | Unit
-  [@@deriving sexp, equal, bin_io]
-
-  let all = [Func; Unit]
+  [@@deriving sexp, equal, bin_io, enumerate]
 
   let to_string = function
     | Unit -> "u"
@@ -423,3 +421,14 @@ let merge_into ~src ~dst (config : Config.t) =
                 Hashtbl.Remove )
   in
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs
+
+let trim tbl (config : Config.t) =
+  match (config.unit.enabled, config.func.enabled) with
+  | true, true -> ()
+  | false, false -> String.Table.clear tbl
+  | true, false ->
+      String.Table.filteri_inplace tbl ~f:(fun ~key:name ~data:crc ->
+          Kind.equal crc.kind Unit)
+  | false, true ->
+      String.Table.filteri_inplace tbl ~f:(fun ~key:name ~data:crc ->
+          Kind.equal crc.kind Func)

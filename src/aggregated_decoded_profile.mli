@@ -1,5 +1,7 @@
 open Core
 
+type function_name = string
+
 type t =
   { (* map raw addresses to locations *)
     addr2loc : Loc.t Raw_addr.Table.t;
@@ -38,11 +40,24 @@ val of_sexp : input_filename:string -> output_filename:string -> unit
 (** Read profile from file where it was saved as sexp and save it to output
     file in binary format. Useful for manually editting profiles for debug. *)
 
-val id2name : t -> (int, string list, Core.Int.comparator_witness) Core.Map.t
+val id2name :
+  t -> (int, function_name list, Core.Int.comparator_witness) Core.Map.t
 
-val all_functions : t -> string list
+val all_functions : t -> function_name list
+(** all functions, ordered by IDs, not execution counts *)
 
-val top_functions : t -> string list
+val sorted_functions : t -> function_name list
+(** all functions, in descending order of execution counts *)
+
+val sorted_functions_with_counts : t -> (function_name * Execount.t) list
+(** all functions, in descending order of execution counts, paired with the
+    counts. *)
+
+val print_sorted_functions_with_counts : t -> unit
+
+val trim : t -> keep:(function_name -> bool) -> unit
+(** Trim the profile in place, by keeping information only about functions
+    for which [keep] returns true. *)
 
 module Merge : Merge.Algo with type profile = t
 

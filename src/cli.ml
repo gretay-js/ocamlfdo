@@ -277,7 +277,7 @@ let flag_crc_config =
           (optional_with_default true bool)
           ~doc:"bool ignore debug info when creating md5")
     in
-    config ~on_mismatch ~on_missing ~ignore_dbg)
+    Crcs.Config.mk ~on_mismatch ~on_missing ~ignore_dbg)
 
 let flag_timings =
   Command.Param.(
@@ -309,6 +309,13 @@ let flag_reorder_functions =
   let module RF = AltFlag (Config_reorder.Reorder_functions) in
   RF.mk "-reorder-functions"
     ~doc:"heuristics used for function layout generated in linker script"
+
+let flag_cutoff_functions =
+  let module M = Config_reorder.Cutoff_functions in
+  Command.Param.(
+    flag "-cutoff-functions"
+      (optional_with_default M.default (sexp_conv M.t_of_sexp))
+      ~doc:"filter which of the sampled functions to use")
 
 let merge_command =
   Command.basic ~summary:"Merge profiles "
@@ -559,10 +566,11 @@ let compile_command =
                   Profile.print Format.std_formatter Profile.all_columns))
 
 let check_function_order_command =
-  Command.basic ~summary:"Check function reordering"
+  Command.basic ~summary:"Check order of hot functions in the binary"
     ~readme:(fun () ->
-      {| Given a binary and an fdo profile, check that the layout
-         of hot functions in the given binary matches the profile.
+      {|
+      Given a binary and an fdo profile, check that the layout
+      of hot functions in the given binary matches the profile.
 
       This is useful when the source code may have changed since the profile
       was created, or to ensure that function sections were enabled,
@@ -681,6 +689,57 @@ let linker_script_command =
               ~linker_script_hot ~profile_filename ~reorder_functions
               ~check:(not force)))
 
+let hot_functions_command =
+  Command.basic
+    ~summary:
+      "Print all functions in the profile with their execution counters, in \
+       descending order."
+    Command.Let_syntax.(
+      let%map v = flag_v and q = flag_q and input_filename = anon_file in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () ->
+        Aggregated_decoded_profile.(
+          read_bin input_filename |> print_sorted_functions_with_counts))
+
+let trim_functions_command =
+  Command.basic
+    ~summary:
+      "Trim the profile: remove functions with execution counters below \
+       threshold."
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and input_filename = anon_file
+      and output_filename = Commonflag.(required flag_output_filename)
+      and cutoff = flag_cutoff in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () ->
+        let open Aggregated_decoded_profile in
+        let profile = read_bin input_filename in
+        Trim.functions profile ~cutoff;
+        write_bin profile output_filename)
+
+let trim_crc_command =
+  Command.basic ~summary:"Trim the profile: remove md5"
+    Command.Let_syntax.(
+      let%map v = flag_v
+      and q = flag_q
+      and input_filename = anon_file
+      and output_filename = Commonflag.(required flag_output_filename)
+      and config = flag_get_config in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      (* not using flag_crc_config because other command line options
+         shouldn't be avaiable to the user of trim command. *)
+      let crc_config =
+        config ~on_missing:On_error.Fail ~on_mismatch:On_error.Fail
+          ~ignore_dbg:true
+      in
+      fun () ->
+        Main_fdo.trim_crcs ~input_filename ~output_filename ~crc_config)
+
 let to_sexp_command =
   Command.basic ~summary:"Print decoded profile as sexp to stdout."
     Command.Let_syntax.(
@@ -727,6 +786,9 @@ let profile_command =
   Command.group ~summary:"Utilities for manipulating decoded profiles."
     [ ("to-sexp", to_sexp_command);
       ("of-sexp", of_sexp_command);
+      ("dump-hot-functions", hot_functions_command);
+      ("trim-functions", trim_functions_command);
+      ("trim-md5", trim_crc_command);
       ("merge", merge_command) ]
 
 let bolt_command =
@@ -742,7 +804,7 @@ let misc_command =
   Command.group
     ~summary:"Experimental commands and testing/debuging utilities"
     [ ("randomize-function-layout", randomize_function_order_command);
-      ("dump", dump_command);
+      ("dump-ir", dump_command);
       ("bolt", bolt_command) ]
 
 let main_command =

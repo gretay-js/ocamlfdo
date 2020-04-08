@@ -30,6 +30,7 @@ depends: [
   "owee"
   "core"
   "ppx_jane"
+  "dune-build-info"
   "re2"
   "shexp"
   "parsexp_io"

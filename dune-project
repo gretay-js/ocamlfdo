@@ -27,6 +27,7 @@ Copyright (c) 2019 Jane Street Group LLC.
   owee
   core
   ppx_jane
+  dune-build-info
   re2
 ;  (shexp  (>= v0.14-preview.122.11+261))
   shexp
