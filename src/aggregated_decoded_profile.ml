@@ -6,57 +6,58 @@ module Cfg_with_layout = Ocamlcfg.Cfg_with_layout
 module Cfg = Ocamlcfg.Cfg
 
 let verbose = ref true
-
 let _magic_number = "ocamlfdo001"
 
 type t =
   { (* map raw addresses to locations *)
-    addr2loc : Loc.t Raw_addr.Table.t;
-    (* map func name to func id *)
-    name2id : int String.Table.t;
-    (* map func id to func info *)
-    functions : Func.t Int.Table.t;
-    (* map name of compilation unit or function to its md5 digest. Currently
+    addr2loc : Loc.t Raw_addr.Table.t
+  ; (* map func name to func id *)
+    name2id : int String.Table.t
+  ; (* map func id to func info *)
+    functions : Func.t Int.Table.t
+  ; (* map name of compilation unit or function to its md5 digest. Currently
        contains only crcs of linear IR. Not using Caml.Digest.t because it
        does not have sexp. Not using Core's Digest because digests generated
        by the compiler using Caml.Digest might disagree. *)
-    crcs : Crcs.tbl;
-    (* buildid of the executable, if known *)
+    crcs : Crcs.tbl
+  ; (* buildid of the executable, if known *)
     mutable buildid : string option
   }
 [@@deriving sexp, bin_io]
 
 let mk size crcs buildid =
-  { addr2loc = Raw_addr.Table.create ~size ();
-    name2id = String.Table.create ();
-    functions = Int.Table.create ();
-    crcs;
-    buildid
+  { addr2loc = Raw_addr.Table.create ~size ()
+  ; name2id = String.Table.create ()
+  ; functions = Int.Table.create ()
+  ; crcs
+  ; buildid
   }
+;;
 
 let get_func t addr =
   match Raw_addr.Table.find t.addr2loc addr with
   | None ->
-      if !verbose then
-        printf "Not found any cached location for address 0x%Lx\n" addr;
-      None
-  | Some loc -> (
-      match loc.rel with
-      | None -> None
-      | Some rel ->
-          let id = rel.id in
-          let func = Int.Table.find_exn t.functions id in
-          Some func )
+    if !verbose then printf "Not found any cached location for address 0x%Lx\n" addr;
+    None
+  | Some loc ->
+    (match loc.rel with
+    | None -> None
+    | Some rel ->
+      let id = rel.id in
+      let func = Int.Table.find_exn t.functions id in
+      Some func)
+;;
 
 (* Source or target addr of this branch does not belong to the binary and
    usually to_addr cannot be target of jump because it is not a return from a
    call instruction and not an entry function. Could it be a context switch? *)
 let track_branch (from_addr, to_addr) =
-  if Int64.(from_addr < 0L) || Int64.(to_addr < 0L) then (
-    if !verbose then
-      printf "ignore branch 0x%Lx -> 0x%Lx (addr < 0)\n" from_addr to_addr;
-    false )
+  if Int64.(from_addr < 0L) || Int64.(to_addr < 0L)
+  then (
+    if !verbose then printf "ignore branch 0x%Lx -> 0x%Lx (addr < 0)\n" from_addr to_addr;
+    false)
   else true
+;;
 
 (* Partition aggregated_perf to functions and calculate total execution
    counts of each function. Total execution count of a function is determined
@@ -70,117 +71,117 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       match get_func t key with
       | None -> ()
       | Some func ->
-          func.count <- Int64.(func.count + data);
-          Raw_addr.Table.add_exn func.agg.instructions ~key ~data);
+        func.count <- Int64.(func.count + data);
+        Raw_addr.Table.add_exn func.agg.instructions ~key ~data);
   let process (from_addr, to_addr) update =
-    match (get_func t from_addr, get_func t to_addr) with
+    match get_func t from_addr, get_func t to_addr with
     | None, None -> ()
     | None, Some to_func -> update to_func
     | Some from_func, None -> update from_func
     | Some from_func, Some to_func ->
-        if from_func.id = to_func.id then update to_func
-        else (
-          (* interprocedural branch: add to both functions *)
-          update from_func;
-          update to_func )
+      if from_func.id = to_func.id
+      then update to_func
+      else (
+        (* interprocedural branch: add to both functions *)
+        update from_func;
+        update to_func)
   in
   Raw_addr_pair.Table.iteri agg.branches ~f:(fun ~key ~data ->
       let mispredicts =
-        Option.value
-          (Raw_addr_pair.Table.find agg.mispredicts key)
-          ~default:0L
+        Option.value (Raw_addr_pair.Table.find agg.mispredicts key) ~default:0L
       in
       let update_br func =
         func.count <- Int64.(func.count + data);
-        if track_branch key then (
+        if track_branch key
+        then (
           Raw_addr_pair.Table.add_exn func.agg.branches ~key ~data;
-          if Int64.(mispredicts > 0L) then
-            Raw_addr_pair.Table.add_exn func.agg.mispredicts ~key
-              ~data:mispredicts )
+          if Int64.(mispredicts > 0L)
+          then Raw_addr_pair.Table.add_exn func.agg.mispredicts ~key ~data:mispredicts)
       in
       process key update_br);
   Raw_addr_pair.Table.iteri agg.traces ~f:(fun ~key ~data ->
       (* traces don't contribute to func's total count because it is
          accounted for in branches. *)
       let update_tr func =
-        if track_branch key then
-          Raw_addr_pair.Table.add_exn func.agg.traces ~key ~data
+        if track_branch key then Raw_addr_pair.Table.add_exn func.agg.traces ~key ~data
       in
       process key update_tr)
+;;
 
 (* Find or add the function and return its id *)
 let get_func_id t ~name ~start ~finish =
   match String.Table.find t.name2id name with
   | None ->
-      let id = Int.Table.length t.functions in
-      let func = Func.mk ~id ~start ~finish in
-      Int.Table.add_exn t.functions ~key:id ~data:func;
-      String.Table.add_exn t.name2id ~key:name ~data:id;
-      func.id
+    let id = Int.Table.length t.functions in
+    let func = Func.mk ~id ~start ~finish in
+    Int.Table.add_exn t.functions ~key:id ~data:func;
+    String.Table.add_exn t.name2id ~key:name ~data:id;
+    func.id
   | Some id ->
-      let func = Int.Table.find_exn t.functions id in
-      if
-        not
-          ( func.id = id
-          && Raw_addr.equal func.start start
-          && Raw_addr.equal func.finish finish )
-      then
-        Report.user_error
-          "Mismatch get_func_id for %s with start=0x%Lx,finish=0x%Lx\n\
-           Found %s in name2id with id=%d but id2func is func.id=%d \
-           start=0x%Lx,finish=0x%Lx\n"
-          name start finish name id func.id func.start func.finish ();
-      func.id
+    let func = Int.Table.find_exn t.functions id in
+    if not
+         (func.id = id
+         && Raw_addr.equal func.start start
+         && Raw_addr.equal func.finish finish)
+    then
+      Report.user_error
+        "Mismatch get_func_id for %s with start=0x%Lx,finish=0x%Lx\n\
+         Found %s in name2id with id=%d but id2func is func.id=%d \
+         start=0x%Lx,finish=0x%Lx\n"
+        name
+        start
+        finish
+        name
+        id
+        func.id
+        func.start
+        func.finish
+        ();
+    func.id
+;;
 
 let decode_addr t addr interval dbg =
   let open Loc in
   let loc =
     match interval with
     | None ->
-        if !verbose then
-          printf "Cannot find function symbol containing 0x%Lx\n" addr;
-        { rel = None; dbg = None }
+      if !verbose then printf "Cannot find function symbol containing 0x%Lx\n" addr;
+      { rel = None; dbg = None }
     | Some interval ->
-        let open Intervals in
-        let name = interval.v in
-        let start = interval.l in
-        let finish = interval.r in
-        let offset =
-          match Int64.(to_int (addr - start)) with
-          | None ->
-              Report.user_error "Offset too big: 0x%Lx"
-                Raw_addr.(addr - start)
-                ()
-          | Some offset ->
-              assert (offset >= 0);
-              offset
-        in
-        let id = get_func_id t ~name ~start ~finish in
-        let rel = Some { id; offset } in
-        let dbg =
-          match dbg with
-          | None ->
-              if !verbose then
-                Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
-              None
-          | Some dbg ->
-              if !verbose then
-                Printf.printf "%Lx:%Lx:%s:%d\n" addr start dbg.file dbg.line;
-
-              (* Check that the filename has supported suffix and return it. *)
-              if Filenames.(compare Linear ~expected:name ~actual:dbg.file)
-              then (
-                (* Set has_linearids of this function *)
-                let func = Int.Table.find_exn t.functions id in
-                func.has_linearids <- true;
-                Some dbg.line )
-              else None
-        in
-        if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
-        { rel; dbg }
+      let open Intervals in
+      let name = interval.v in
+      let start = interval.l in
+      let finish = interval.r in
+      let offset =
+        match Int64.(to_int (addr - start)) with
+        | None -> Report.user_error "Offset too big: 0x%Lx" Raw_addr.(addr - start) ()
+        | Some offset ->
+          assert (offset >= 0);
+          offset
+      in
+      let id = get_func_id t ~name ~start ~finish in
+      let rel = Some { id; offset } in
+      let dbg =
+        match dbg with
+        | None ->
+          if !verbose then Printf.printf "Elf location NOT FOUND at 0x%Lx\n" addr;
+          None
+        | Some dbg ->
+          if !verbose then Printf.printf "%Lx:%Lx:%s:%d\n" addr start dbg.file dbg.line;
+          (* Check that the filename has supported suffix and return it. *)
+          if Filenames.(compare Linear ~expected:name ~actual:dbg.file)
+          then (
+            (* Set has_linearids of this function *)
+            let func = Int.Table.find_exn t.functions id in
+            func.has_linearids <- true;
+            Some dbg.line)
+          else None
+      in
+      if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
+      { rel; dbg }
   in
-  if Option.is_some loc.rel then
-    Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc
+  if Option.is_some loc.rel then Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc
+;;
 
 let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   if !verbose then printf "Decoding perf profile.\n";
@@ -188,15 +189,16 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
      same addresses as branches, so no need to add them *)
   (* Overapproximation of number of different addresses for creating hashtbl *)
   let size =
-    Raw_addr.Table.length agg.instructions
-    + (Raw_addr_pair.Table.length agg.branches * 2)
+    Raw_addr.Table.length agg.instructions + (Raw_addr_pair.Table.length agg.branches * 2)
   in
   let addresses = Raw_addr.Table.create ~size () in
   let add key =
-    if not (Raw_addr.Table.mem addresses key) then (
+    if not (Raw_addr.Table.mem addresses key)
+    then (
       if !verbose then printf "Adding key 0x%Lx\n" key;
-      Raw_addr.Table.set addresses ~key ~data:None )
-    else if !verbose then printf "Found key 0x%Lx\n" key
+      Raw_addr.Table.set addresses ~key ~data:None)
+    else if !verbose
+    then printf "Found key 0x%Lx\n" key
   in
   let add2 (fa, ta) =
     add fa;
@@ -204,7 +206,6 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   in
   Raw_addr.Table.iter_keys agg.instructions ~f:add;
   Raw_addr_pair.Table.iter_keys agg.branches ~f:add2;
-
   (* A key may be used multiple times in keys of t.instruction and t.branches *)
   let len = Raw_addr.Table.length addresses in
   if !verbose then printf "size=%d,len=%d\n" size len;
@@ -214,58 +215,61 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   (* set config to all true to decode all symbols from the binary and store
      in the profile, even if the user chooses to ignore them later. *)
   let crcs = Crcs.(mk Create crc_config) in
-  Elf_locations.iter_symbols locations ~func:false ~data:true
-    ~f:(fun name _ -> Crcs.decode_and_add crcs name);
+  Elf_locations.iter_symbols locations ~func:false ~data:true ~f:(fun name _ ->
+      Crcs.decode_and_add crcs name);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
   Raw_addr.Table.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
       (* this is cached using interval tree *)
       let interval =
-        Elf_locations.resolve_function_containing locations
-          ~program_counter:addr
+        Elf_locations.resolve_function_containing locations ~program_counter:addr
       in
       decode_addr t addr interval dbg);
   create_func_execounts t agg;
   t
+;;
 
 let read filename =
-  if !verbose then
-    printf "Reading aggregated decoded profile from %s\n" filename;
+  if !verbose then printf "Reading aggregated decoded profile from %s\n" filename;
   let t =
     match Parsexp_io.load (module Parsexp.Single) ~filename with
-    | Ok t_sexp -> (
-        try t_of_sexp t_sexp
-        with e ->
-          Report.user_error ~hint:(Some Report.Hint.Old_profile)
-            ~exn:(Some e)
-            "Cannot parse aggregated decoded profile from file %s." filename
-        )
+    | Ok t_sexp ->
+      (try t_of_sexp t_sexp with
+      | e ->
+        Report.user_error
+          ~hint:(Some Report.Hint.Old_profile)
+          ~exn:(Some e)
+          "Cannot parse aggregated decoded profile from file %s."
+          filename)
     | Error error ->
-        Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
-        Report.user_error "Cannot parse aggregated decoded profile file %s"
-          filename
+      Parsexp.Parse_error.report Caml.Format.std_formatter error ~filename;
+      Report.user_error "Cannot parse aggregated decoded profile file %s" filename
   in
   if !verbose then printf !"Aggregated decoded profile:\n%{sexp:t}\n" t;
   t
+;;
 
 let write t filename =
-  if !verbose then
-    printf "Writing aggregated decoded profile to %s\n" filename;
+  if !verbose then printf "Writing aggregated decoded profile to %s\n" filename;
   let chan = Out_channel.create filename in
   Printf.fprintf chan !"%{sexp:t}\n" t;
   Out_channel.close chan
+;;
 
 let write_shape oc =
   let d = Bin_prot.Shape.(eval_to_digest bin_shape_t |> Digest.to_md5) in
   Md5.output_blocking d oc
+;;
 
 let read_and_check_shape ic =
   let d = Md5.input_blocking ic in
   let open Bin_prot.Shape in
   if not (0 = Digest.compare (eval_to_digest bin_shape_t) (Digest.of_md5 d))
   then
-    Report.user_error ~hint:(Some Report.Hint.Old_profile)
+    Report.user_error
+      ~hint:(Some Report.Hint.Old_profile)
       "Incompatible format of profile file."
+;;
 
 let write_bin t filename =
   try
@@ -273,8 +277,9 @@ let write_bin t filename =
         write_shape oc;
         let buf = Bin_prot.Utils.bin_dump ~header:true bin_writer_t t in
         Bigstring.really_output oc buf)
-  with e ->
-    Report.user_error ~exn:(Some e) "Failed to write profile to %s" filename
+  with
+  | e -> Report.user_error ~exn:(Some e) "Failed to write profile to %s" filename
+;;
 
 let read_bin filename =
   try
@@ -282,16 +287,19 @@ let read_bin filename =
         read_and_check_shape ic;
         let read buf ~pos ~len = Bigstring.really_input ic ~pos ~len buf in
         Bin_prot.Utils.bin_read_stream ~read bin_reader_t)
-  with e ->
-    Report.user_error ~exn:(Some e) "Failed to read profile from %s" filename
+  with
+  | e -> Report.user_error ~exn:(Some e) "Failed to read profile from %s" filename
+;;
 
 let to_sexp filename =
   let t = read_bin filename in
   Printf.printf !"%{sexp:t}" t
+;;
 
 let of_sexp ~input_filename ~output_filename =
   let t = read input_filename in
   write_bin t output_filename
+;;
 
 (* CR-soon gyorsh: how often do we need to create it? is it worth storing it
    as a field of [t]. It can be computed after the profile is decoded (i.e.,
@@ -311,6 +319,7 @@ let id2name t =
   |> Map.of_alist_multi (module Int)
   (* sort for stability of function ordering *)
   |> Map.map ~f:(fun l -> List.sort l ~compare:String.compare)
+;;
 
 let all_functions t = String.Table.keys t.name2id
 
@@ -331,16 +340,16 @@ let sorted_functions_with_counts t =
       let func = Int.Table.find_exn t.functions id in
       (name, func.count) :: acc)
   |> List.sort ~compare
+;;
 
 let remove_counts l = List.unzip l |> fst
-
 let top_functions t = sorted_functions_with_counts t |> remove_counts
 
 let print_sorted_functions_with_counts t =
   let sorted = sorted_functions_with_counts t in
   Printf.printf "Top functions sorted by execution counters:\n";
-  List.iter sorted ~f:(fun (name, count) ->
-      Printf.printf !"%Ld %s\n" count name)
+  List.iter sorted ~f:(fun (name, count) -> Printf.printf !"%Ld %s\n" count name)
+;;
 
 let print_stats t =
   (* approximate size using sexp representation of the profile and its
@@ -349,56 +358,60 @@ let print_stats t =
   let crcs_stats = Crcs.get_stats t.crcs in
   let total_crcs = crcs_stats.func + crcs_stats.unit in
   let stats =
-    [ ("functions", Int.Table.length t.functions);
-      ("addresses", Raw_addr.Table.length t.addr2loc) ]
+    [ "functions", Int.Table.length t.functions
+    ; "addresses", Raw_addr.Table.length t.addr2loc
+    ]
   in
   let len = Option.value_map ~default:0 ~f:String.length t.buildid in
   let sizes =
-    [ ("crcs", total_crcs, total_crcs);
-      ("func crcs", crcs_stats.func, total_crcs);
-      ("unit crcs", crcs_stats.unit, total_crcs);
-      ("total size of sexp atoms in chars", total, total);
-      ("buildid", len, total);
-      ( "addr2loc",
-        Raw_addr.Table.sexp_of_t Loc.sexp_of_t t.addr2loc |> Sexp.size |> snd,
-        total );
-      ( "functions",
-        Int.Table.sexp_of_t Func.sexp_of_t t.functions |> Sexp.size |> snd,
-        total );
-      ("crcs", Crcs.sexp_of_tbl t.crcs |> Sexp.size |> snd, total) ]
+    [ "crcs", total_crcs, total_crcs
+    ; "func crcs", crcs_stats.func, total_crcs
+    ; "unit crcs", crcs_stats.unit, total_crcs
+    ; "total size of sexp atoms in chars", total, total
+    ; "buildid", len, total
+    ; ( "addr2loc"
+      , Raw_addr.Table.sexp_of_t Loc.sexp_of_t t.addr2loc |> Sexp.size |> snd
+      , total )
+    ; ( "functions"
+      , Int.Table.sexp_of_t Func.sexp_of_t t.functions |> Sexp.size |> snd
+      , total )
+    ; "crcs", Crcs.sexp_of_tbl t.crcs |> Sexp.size |> snd, total
+    ]
   in
   Printf.printf "Profile size and stats:\n";
-  List.iter stats ~f:(fun (title, size) ->
-      Printf.printf "%d\t %s\n" size title);
+  List.iter stats ~f:(fun (title, size) -> Printf.printf "%d\t %s\n" size title);
   List.iter sizes ~f:(fun (title, size, total_size) ->
-      Printf.printf "%d\t (%fl)\t %s\n" size
-        (Report.percent size total_size)
-        title);
+      Printf.printf "%d\t (%.1f%%)\t %s\n" size (Report.percent size total_size) title);
   ()
+;;
 
 (** Trim the profile in place, by keeping information only about functions
     for which [keep] returns true. *)
 let trim t ~keep =
   String.Table.filteri_inplace t.name2id ~f:(fun ~key:name ~data:id ->
       let res = keep name in
-      if not res then (
+      if not res
+      then (
         Int.Table.remove t.functions id;
         Raw_addr.Table.filter_inplace t.addr2loc ~f:(fun loc ->
             match loc.rel with
             | None -> true
-            | Some rel -> not (rel.id = id)) );
+            | Some rel -> not (rel.id = id)));
       res)
+;;
 
 let trim_functions t ~cutoff =
   let top =
     sorted_functions_with_counts t
-    |> Trim.apply cutoff |> remove_counts |> String.Set.of_list
+    |> Trim.apply cutoff
+    |> remove_counts
+    |> String.Set.of_list
   in
   trim t ~keep:(String.Set.mem top)
+;;
 
 let rename t old2new =
-  String.Table.map_inplace t.name2id ~f:(fun id ->
-      Int.Table.find_exn old2new id);
+  String.Table.map_inplace t.name2id ~f:(fun id -> Int.Table.find_exn old2new id);
   Raw_addr.Table.map_inplace t.addr2loc ~f:(Loc.rename ~old2new);
   let size = Int.Table.length t.functions in
   let functions = Int.Table.create ~size () in
@@ -407,10 +420,11 @@ let rename t old2new =
       Int.Table.set functions ~key:newid ~data:{ func with id = newid });
   assert (Int.Table.length functions = size);
   { t with functions }
+;;
 
 type patch =
-  { from : int;
-    newid : int
+  { from : int
+  ; newid : int
   }
 [@@deriving sexp]
 
@@ -448,61 +462,63 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
     incr last;
     res
   in
-  let old2new =
-    Int.Table.create ~size:(String.Table.length src.name2id) ()
-  in
+  let old2new = Int.Table.create ~size:(String.Table.length src.name2id) () in
   let patches = ref [] in
   let merge_name2id ~key a b =
     let id = Int.Table.find old2new a in
-    if Option.is_some id && !verbose then
+    if Option.is_some id && !verbose
+    then
       (* Two different names mapped to the same id in src. currently cannot
          happen in profiles saved to file. Handle it here anyway, to ensure
          all possible agg_dec_profiles are handled correctly. *)
       Printf.printf
         "Duplicate use of id. Different function names\n\
-        \               mapped to the same id by profile. One of them is \
-         %s, original id is %d, mapped to new id %d.\n"
-        key a (Option.value_exn id);
+        \               mapped to the same id by profile. One of them is %s, original \
+         id is %d, mapped to new id %d.\n"
+        key
+        a
+        (Option.value_exn id);
     let newid =
-      match (id, b) with
+      match id, b with
       | None, None -> fresh ()
       | Some id, None -> id
       | None, Some b -> b
       | Some id, Some b ->
-          if not (b = id) then (
-            if !verbose then
-              Printf.printf "patching old2new for old id %d from %d to %d" a
-                id b;
-            patches := { from = id; newid = b } :: !patches );
-          b
+        if not (b = id)
+        then (
+          if !verbose
+          then Printf.printf "patching old2new for old id %d from %d to %d" a id b;
+          patches := { from = id; newid = b } :: !patches);
+        b
     in
     Int.Table.set old2new ~key:a ~data:newid;
     String.Table.Set_to newid
   in
-  if !verbose then (
+  if !verbose
+  then (
     Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
-    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id );
+    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id);
   String.Table.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
-  ( if not (List.is_empty !patches) then
-      (* patch dst.name2id: needed if two names in src mapped to the same id. *)
-      (* CR-soon gyorsh: this is completely untested. *)
-      if !verbose then (
-        Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
-        Printf.printf
-          !"dst before patch:\n%{sexp:int String.Table.t}\n"
-          dst.name2id );
+  (if not (List.is_empty !patches)
+   then
+     (* patch dst.name2id: needed if two names in src mapped to the same id. *)
+     (* CR-soon gyorsh: this is completely untested. *)
+     if !verbose
+     then (
+       Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
+       Printf.printf !"dst before patch:\n%{sexp:int String.Table.t}\n" dst.name2id);
     let id2name = id2name dst in
     List.iter !patches ~f:(fun { from; newid } ->
         let names = Map.find_exn id2name from in
         assert (List.length names > 0);
         List.iter names ~f:(fun name ->
-            String.Table.set dst.name2id ~key:name ~data:newid)) );
-  if !verbose then
-    Printf.printf !"old2new:\n%{sexp:int Int.Table.t}\n" old2new;
+            String.Table.set dst.name2id ~key:name ~data:newid)));
+  if !verbose then Printf.printf !"old2new:\n%{sexp:int Int.Table.t}\n" old2new;
   let src = rename src old2new in
-  if !verbose then (
+  if !verbose
+  then (
     Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
-    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id );
+    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id);
   let merge_addr2loc ~key:_ a = function
     | None -> Raw_addr.Table.Set_to a
     | Some b -> Raw_addr.Table.Set_to (Loc.merge a b)
@@ -511,21 +527,16 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
     | None -> Int.Table.Set_to a
     | Some b -> Int.Table.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
-  Raw_addr.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
-    ~f:merge_addr2loc;
-  Int.Table.merge_into ~src:src.functions ~dst:dst.functions
-    ~f:merge_functions;
+  Raw_addr.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc ~f:merge_addr2loc;
+  Int.Table.merge_into ~src:src.functions ~dst:dst.functions ~f:merge_functions;
   Crcs.merge_into ~src:src.crcs ~dst:dst.crcs crc_config
+;;
 
 module Merge = Merge.Make (struct
   type nonrec t = t
 
   let merge_into = merge_into
-
   let read = read_bin
-
   let write = write_bin
-
-  let approx_size t =
-    Raw_addr.Table.length t.addr2loc + String.Table.length t.name2id
+  let approx_size t = Raw_addr.Table.length t.addr2loc + String.Table.length t.name2id
 end)
