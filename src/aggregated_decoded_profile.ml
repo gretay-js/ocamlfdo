@@ -364,7 +364,7 @@ let print_stats t =
   in
   let len = Option.value_map ~default:0 ~f:String.length t.buildid in
   let sizes =
-    [ "crcs", total_crcs, total_crcs
+    [ "total crcs", total_crcs, total_crcs
     ; "func crcs", crcs_stats.func, total_crcs
     ; "unit crcs", crcs_stats.unit, total_crcs
     ; "total size of sexp atoms in chars", total, total
@@ -379,9 +379,9 @@ let print_stats t =
     ]
   in
   Printf.printf "Profile size and stats:\n";
-  List.iter stats ~f:(fun (title, size) -> Printf.printf "%d\t %s\n" size title);
+  List.iter stats ~f:(fun (title, size) -> Printf.printf "%15d          %s\n" size title);
   List.iter sizes ~f:(fun (title, size, total_size) ->
-      Printf.printf "%d\t (%.1f%%)\t %s\n" size (Report.percent size total_size) title);
+      Printf.printf "%15d (%5.1f%%) %s\n" size (Report.percent size total_size) title);
   ()
 ;;
 
@@ -401,13 +401,16 @@ let trim t ~keep =
 ;;
 
 let trim_functions t ~cutoff =
-  let top =
-    sorted_functions_with_counts t
-    |> Trim.apply cutoff
-    |> remove_counts
-    |> String.Set.of_list
-  in
-  trim t ~keep:(String.Set.mem top)
+  match cutoff with
+  | [] -> ()
+  | _ ->
+    let top =
+      sorted_functions_with_counts t
+      |> Trim.apply cutoff
+      |> remove_counts
+      |> String.Set.of_list
+    in
+    trim t ~keep:(String.Set.mem top)
 ;;
 
 let rename t old2new =
