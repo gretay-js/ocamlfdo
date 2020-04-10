@@ -71,12 +71,12 @@ let save_hot filename functions ~check =
   if !verbose then printf "Writing linker script hot to %s\n" filename;
   Out_channel.with_file filename ~f:(print_hot ~functions ~check)
 
-let write_hot filename profile ~reorder_functions ~cutoff ~check =
-  let functions = Reorder.hot_functions profile ~reorder_functions ~cutoff in
+let write_hot filename profile ~reorder_functions ~check =
+  let functions = Reorder.hot_functions profile ~reorder_functions in
   save_hot filename functions ~check
 
 let write ~output_filename ~linker_script_template ~linker_script_hot
-    ~profile_filename ~reorder_functions ~cutoff ~check =
+    ~profile_filename ~reorder_functions ~check =
   let output_filename =
     Option.value output_filename ~default:"linker-script"
   in
@@ -104,9 +104,7 @@ let write ~output_filename ~linker_script_template ~linker_script_hot
         if !verbose then
           printf "Hot function layout from profile %s\n" filename;
         let profile = AD.read_bin filename in
-        let functions =
-          Reorder.hot_functions profile ~reorder_functions ~cutoff
-        in
+        let functions = Reorder.hot_functions profile ~reorder_functions in
         print_hot oc ~functions ~check
     | Some _, Some _ -> assert false
   in
@@ -142,12 +140,12 @@ type info =
   }
 
 let check_function_order ~binary_filename ~profile_filename
-    ~reorder_functions ~cutoff ~output_filename =
+    ~reorder_functions ~output_filename =
   let locations = Elf_locations.create ~elf_executable:binary_filename in
   let profile = AD.read_bin profile_filename in
   let hot_wrap l = (hot_begin :: l) @ [hot_end] in
   (* Find addresses of all the function in the expected layout. *)
-  let hot = Reorder.hot_functions profile ~reorder_functions ~cutoff in
+  let hot = Reorder.hot_functions profile ~reorder_functions in
   let expected = hot_wrap hot in
   let len = List.length expected in
   let name2addr = String.Table.create ~size:len () in

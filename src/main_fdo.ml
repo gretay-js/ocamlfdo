@@ -24,9 +24,9 @@ let merge files ~read_aggregated_perf_profile ~crc_config ~ignore_buildid
     AD.Merge.merge_files files ~crc_config ~ignore_buildid ~output_filename
 
 let decode_file ~binary_filename ~perf_profile_filename ~reorder_functions
-    ~cutoff ~linker_script_hot_filename ~output_filename
-    ~write_linker_script_hot ~ignore_buildid ~expected_pids ~check
-    ~write_aggregated_profile ~read_aggregated_perf_profile ~crc_config =
+    ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
+    ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
+    ~read_aggregated_perf_profile ~crc_config =
   let tmp ext = Filename.chop_extension output_filename ^ ".tmp" ^ ext in
   (* First aggregate raw profile and then decode it. *)
   let aggr_perf_profile =
@@ -64,10 +64,10 @@ let decode_file ~binary_filename ~perf_profile_filename ~reorder_functions
     in
     Profile.record_call ~accumulate:true "linker_script_hot" (fun () ->
         Linker_script.write_hot filename agg_dec_profile ~reorder_functions
-          ~cutoff ~check) );
+          ~check) );
   ()
 
-let decode files ~binary_filename ~reorder_functions ~cutoff
+let decode files ~binary_filename ~reorder_functions
     ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
     ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
     ~read_aggregated_perf_profile ~crc_config =
@@ -79,9 +79,9 @@ let decode files ~binary_filename ~reorder_functions ~cutoff
   | [] -> if !verbose then Printf.printf "Missing input perf.data\n"
   | [perf_profile_filename] ->
       decode_file ~binary_filename ~perf_profile_filename ~reorder_functions
-        ~cutoff ~linker_script_hot_filename ~output_filename
-        ~write_linker_script_hot ~ignore_buildid ~expected_pids ~check
-        ~write_aggregated_profile ~read_aggregated_perf_profile ~crc_config
+        ~linker_script_hot_filename ~output_filename ~write_linker_script_hot
+        ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
+        ~read_aggregated_perf_profile ~crc_config
   | _ ->
       let prefix = Filename.basename binary_filename in
       let tmp_files =
@@ -89,7 +89,7 @@ let decode files ~binary_filename ~reorder_functions ~cutoff
       in
       List.iter2_exn files tmp_files ~f:(fun perf_profile_filename tmp ->
           decode_file ~binary_filename ~perf_profile_filename
-            ~reorder_functions ~cutoff ~linker_script_hot_filename
+            ~reorder_functions ~linker_script_hot_filename
             ~output_filename:tmp ~write_linker_script_hot:false
             ~ignore_buildid ~expected_pids ~check ~write_aggregated_profile
             ~read_aggregated_perf_profile ~crc_config);
@@ -103,7 +103,7 @@ let decode files ~binary_filename ~reorder_functions ~cutoff
         in
         Profile.record_call ~accumulate:true "linker_script_hot" (fun () ->
             Linker_script.write_hot filename agg_dec_profile
-              ~reorder_functions ~cutoff ~check)
+              ~reorder_functions ~check)
 
 (* CR-soon gyorsh: If we eliminate dead blocks before a transformation then
    some algorithms might not apply because they rely on perf data based on
@@ -344,19 +344,3 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     if !verbose && (Option.is_some fdo_profile || extra_debug) then
       printf "Calling ocamlopt directly, without FDO.\n";
     call_ocamlopt w All )
-
-let trim_functions ~input_filename ~output_filename ~cutoff =
-  let profile = AD.read_bin input_filename in
-  let reorder_functions =
-  let top =
-
-    (Reorder.hot_functions profile ~reorder_functions ~cutoff)
-    |> String.Set.of_list
-  in
-  AD.trim profile ~keep:(String.Set.mem top);
-  AD.write_bin profile output_filename
-
-let trim_crcs ~input_filename ~output_filename ~crc_config =
-  let profile = AD.read_bin input_filename in
-  Crcs.trim profile.crcs crc_config;
-  AD.write_bin profile output_filename

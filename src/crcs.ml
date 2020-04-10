@@ -422,13 +422,32 @@ let merge_into ~src ~dst (config : Config.t) =
   in
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs
 
-let trim tbl (config : Config.t) =
+let trim (tbl : tbl) (config : Config.t) =
   match (config.unit.enabled, config.func.enabled) with
   | true, true -> ()
   | false, false -> String.Table.clear tbl
   | true, false ->
-      String.Table.filteri_inplace tbl ~f:(fun ~key:name ~data:crc ->
+      String.Table.filter_inplace tbl ~f:(fun crc ->
           Kind.equal crc.kind Unit)
   | false, true ->
-      String.Table.filteri_inplace tbl ~f:(fun ~key:name ~data:crc ->
+      String.Table.filter_inplace tbl ~f:(fun crc ->
           Kind.equal crc.kind Func)
+
+type stats =
+  { func : int;
+    unit : int
+  }
+
+let get_stats (tbl : tbl) =
+  let stats =
+    String.Table.fold tbl ~init:{ func = 0; unit = 0 }
+      ~f:(fun ~key:_ ~data:crc s ->
+        match crc.kind with
+        | Kind.Func -> { s with func = s.func + 1 }
+        | Kind.Unit -> { s with unit = s.unit + 1 })
+  in
+  if not (String.Table.length tbl = stats.func + stats.unit) then
+    Report.user_error
+      "Crcs table stats confused: length = %d, func = %d, unit = %d\n"
+      (String.Table.length tbl) stats.func stats.unit;
+  stats

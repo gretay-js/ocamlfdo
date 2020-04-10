@@ -314,59 +314,87 @@ let id2name t =
 
 let all_functions t = String.Table.keys t.name2id
 
-let print_sorted sorted names =
-  Printf.printf "Top functions sorted by execution counters:\n";
-  List.iter sorted ~f:(fun f ->
-      Printf.printf !"%Ld %{sexp:string List.t}\n" f.count (names f))
-
 (* Sort functions using preliminary function-level execution counts in
    descending order. *)
-let sort_functions t =
-  let id2name = id2name t in
-  let names func = Map.find_exn id2name func.id in
-  let compare f1 f2 =
+let sorted_functions_with_counts t =
+  let compare (n1, c1) (n2, c2) =
     (* Descending order of execution counts, i.e., reverse order of int
        compare. *)
-    let res = Int64.compare f2.count f1.count in
+    let res = Int64.compare c2 c1 in
     (* Tie breaker using names. Slower than id but more stable w.r.t. changes
        in perf data and ocamlfdo, because ids are an artifact of the way
        ocamlfdo reads and decodes locations. Change to tie breaker using id
        if speed becomes a problem. *)
-    if res = 0 then List.compare String.compare (names f1) (names f2)
-    else res
+    if res = 0 then String.compare n1 n2 else res
   in
-  let sorted = List.sort (Int.Table.data t.functions) ~compare in
-  if !verbose then print_sorted sorted names;
-  (sorted, names)
+  String.Table.fold t.name2id ~init:[] ~f:(fun ~key:name ~data:id acc ->
+      let func = Int.Table.find_exn t.functions id in
+      (name, func.count) :: acc)
+  |> List.sort ~compare
+
+let remove_counts l = List.unzip l |> fst
+
+let top_functions t = sorted_functions_with_counts t |> remove_counts
 
 let print_sorted_functions_with_counts t =
-  let sorted, names = sort_functions t in
-  print_sorted sorted names
+  let sorted = sorted_functions_with_counts t in
+  Printf.printf "Top functions sorted by execution counters:\n";
+  List.iter sorted ~f:(fun (name, count) ->
+      Printf.printf !"%Ld %s\n" count name)
 
-let sorted_functions t =
-  let sorted, names = sort_functions t in
-  (* reverse the mapping: from functions to names *)
-  List.concat_map sorted ~f:names
-
-let sorted_functions_with_counts t =
-  let sorted, names = sort_functions t in
-  (* reverse the mapping: from functions to names *)
-  let names_and_counts func =
-    List.map (names func) ~f:(fun name -> (name, func.count))
+let print_stats t =
+  (* approximate size using sexp representation of the profile and its
+     components *)
+  let total = sexp_of_t t |> Sexp.size |> snd in
+  let crcs_stats = Crcs.get_stats t.crcs in
+  let total_crcs = crcs_stats.func + crcs_stats.unit in
+  let stats =
+    [ ("functions", Int.Table.length t.functions);
+      ("addresses", Raw_addr.Table.length t.addr2loc) ]
   in
-  List.concat_map sorted ~f:names_and_counts
+  let len = Option.value_map ~default:0 ~f:String.length t.buildid in
+  let sizes =
+    [ ("crcs", total_crcs, total_crcs);
+      ("func crcs", crcs_stats.func, total_crcs);
+      ("unit crcs", crcs_stats.unit, total_crcs);
+      ("total size of sexp atoms in chars", total, total);
+      ("buildid", len, total);
+      ( "addr2loc",
+        Raw_addr.Table.sexp_of_t Loc.sexp_of_t t.addr2loc |> Sexp.size |> snd,
+        total );
+      ( "functions",
+        Int.Table.sexp_of_t Func.sexp_of_t t.functions |> Sexp.size |> snd,
+        total );
+      ("crcs", Crcs.sexp_of_tbl t.crcs |> Sexp.size |> snd, total) ]
+  in
+  Printf.printf "Profile size and stats:\n";
+  List.iter stats ~f:(fun (title, size) ->
+      Printf.printf "%d\t %s\n" size title);
+  List.iter sizes ~f:(fun (title, size, total_size) ->
+      Printf.printf "%d\t (%fl)\t %s\n" size
+        (Report.percent size total_size)
+        title);
+  ()
 
-let trim t keep =
+(** Trim the profile in place, by keeping information only about functions
+    for which [keep] returns true. *)
+let trim t ~keep =
   String.Table.filteri_inplace t.name2id ~f:(fun ~key:name ~data:id ->
       let res = keep name in
       if not res then (
         Int.Table.remove t.functions id;
-        Raw_addr.Table.filteri_inplace t.addr2loc
-          ~f:(fun ~key:addr ~data:loc ->
+        Raw_addr.Table.filter_inplace t.addr2loc ~f:(fun loc ->
             match loc.rel with
             | None -> true
             | Some rel -> not (rel.id = id)) );
       res)
+
+let trim_functions t ~cutoff =
+  let top =
+    sorted_functions_with_counts t
+    |> Trim.apply cutoff |> remove_counts |> String.Set.of_list
+  in
+  trim t ~keep:(String.Set.mem top)
 
 let rename t old2new =
   String.Table.map_inplace t.name2id ~f:(fun id ->
@@ -461,7 +489,7 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
       if !verbose then (
         Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
         Printf.printf
-          !"dst before patch:\n%{sexp:(string, int) String.Table.t}\n"
+          !"dst before patch:\n%{sexp:int String.Table.t}\n"
           dst.name2id );
     let id2name = id2name dst in
     List.iter !patches ~f:(fun { from; newid } ->
@@ -470,21 +498,20 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
         List.iter names ~f:(fun name ->
             String.Table.set dst.name2id ~key:name ~data:newid)) );
   if !verbose then
-    Printf.printf !"old2new:\n%{sexp:(int, int) Int.Table.t}\n" old2new;
+    Printf.printf !"old2new:\n%{sexp:int Int.Table.t}\n" old2new;
   let src = rename src old2new in
   if !verbose then (
-    Printf.printf !"src:\n%{sexp:(string, int) String.Table.t}\n" src.name2id;
-    Printf.printf !"dst:\n%{sexp:(string, int) String.Table.t}\n" dst.name2id
-    );
+    Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
+    Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id );
   let merge_addr2loc ~key:_ a = function
-    | None -> Hashtbl.Set_to a
-    | Some b -> Hashtbl.Set_to (Loc.merge a b)
+    | None -> Raw_addr.Table.Set_to a
+    | Some b -> Raw_addr.Table.Set_to (Loc.merge a b)
   in
   let merge_functions ~key:_ a = function
-    | None -> Hashtbl.Set_to a
-    | Some b -> Hashtbl.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
+    | None -> Int.Table.Set_to a
+    | Some b -> Int.Table.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
-  Raw_add.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
+  Raw_addr.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
     ~f:merge_addr2loc;
   Int.Table.merge_into ~src:src.functions ~dst:dst.functions
     ~f:merge_functions;
@@ -500,5 +527,5 @@ module Merge = Merge.Make (struct
   let write = write_bin
 
   let approx_size t =
-    Raw_add.Table.length t.addr2loc + String.Table.length t.name2id
+    Raw_addr.Table.length t.addr2loc + String.Table.length t.name2id
 end)

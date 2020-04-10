@@ -1,9 +1,10 @@
 open Core
+module AD = Aggregated_decoded_profile
 
 let set_verbose v =
   Main_fdo.verbose := v;
   Perf_profile.verbose := v;
-  Aggregated_decoded_profile.verbose := v;
+  AD.verbose := v;
   Aggregated_perf_profile.verbose := v;
   Bolt_profile.verbose := v;
   Decoded_bolt_profile.verbose := v;
@@ -277,7 +278,7 @@ let flag_crc_config =
           (optional_with_default true bool)
           ~doc:"bool ignore debug info when creating md5")
     in
-    Crcs.Config.mk ~on_mismatch ~on_missing ~ignore_dbg)
+    config ~on_mismatch ~on_missing ~ignore_dbg)
 
 let flag_timings =
   Command.Param.(
@@ -311,11 +312,11 @@ let flag_reorder_functions =
     ~doc:"heuristics used for function layout generated in linker script"
 
 let flag_cutoff_functions =
-  let module M = Config_reorder.Cutoff_functions in
+  let module M = Trim in
   Command.Param.(
     flag "-cutoff-functions"
-      (optional_with_default M.default (sexp_conv M.t_of_sexp))
-      ~doc:"filter which of the sampled functions to use")
+      (optional_with_default [] (sexp_conv Trim.of_sexp))
+      ~doc:"filters to apply to functions")
 
 let merge_command =
   Command.basic ~summary:"Merge profiles "
@@ -699,8 +700,16 @@ let hot_functions_command =
       if v then set_verbose true;
       if q then set_verbose false;
       fun () ->
-        Aggregated_decoded_profile.(
-          read_bin input_filename |> print_sorted_functions_with_counts))
+        AD.read_bin input_filename |> AD.print_sorted_functions_with_counts)
+
+let size_command =
+  Command.basic
+    ~summary:"Print profile size and statistics about its components."
+    Command.Let_syntax.(
+      let%map v = flag_v and q = flag_q and input_filename = anon_file in
+      if v then set_verbose true;
+      if q then set_verbose false;
+      fun () -> AD.read_bin input_filename |> AD.print_stats)
 
 let trim_functions_command =
   Command.basic
@@ -712,14 +721,13 @@ let trim_functions_command =
       and q = flag_q
       and input_filename = anon_file
       and output_filename = Commonflag.(required flag_output_filename)
-      and cutoff = flag_cutoff in
+      and cutoff = flag_cutoff_functions in
       if v then set_verbose true;
       if q then set_verbose false;
       fun () ->
-        let open Aggregated_decoded_profile in
-        let profile = read_bin input_filename in
-        Trim.functions profile ~cutoff;
-        write_bin profile output_filename)
+        let profile = AD.read_bin input_filename in
+        AD.trim_functions profile ~cutoff;
+        AD.write_bin profile output_filename)
 
 let trim_crc_command =
   Command.basic ~summary:"Trim the profile: remove md5"
@@ -731,14 +739,16 @@ let trim_crc_command =
       and config = flag_get_config in
       if v then set_verbose true;
       if q then set_verbose false;
-      (* not using flag_crc_config because other command line options
-         shouldn't be avaiable to the user of trim command. *)
-      let crc_config =
-        config ~on_missing:On_error.Fail ~on_mismatch:On_error.Fail
-          ~ignore_dbg:true
-      in
       fun () ->
-        Main_fdo.trim_crcs ~input_filename ~output_filename ~crc_config)
+        (* not using flag_crc_config because other command line options
+           shouldn't be avaiable to the user of trim command. *)
+        let crc_config =
+          config ~on_missing:Crcs.On_error.Fail
+            ~on_mismatch:Crcs.On_error.Fail ~ignore_dbg:true
+        in
+        let profile = AD.read_bin input_filename in
+        Crcs.trim profile.crcs crc_config;
+        AD.write_bin profile output_filename)
 
 let to_sexp_command =
   Command.basic ~summary:"Print decoded profile as sexp to stdout."
@@ -746,7 +756,7 @@ let to_sexp_command =
       let%map v = flag_v and q = flag_q and input_filename = anon_file in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () -> Aggregated_decoded_profile.to_sexp input_filename)
+      fun () -> AD.to_sexp input_filename)
 
 let of_sexp_command =
   Command.basic
@@ -762,8 +772,7 @@ let of_sexp_command =
       and output_filename = Commonflag.(required flag_output_filename) in
       if v then set_verbose true;
       if q then set_verbose false;
-      fun () ->
-        Aggregated_decoded_profile.of_sexp ~input_filename ~output_filename)
+      fun () -> AD.of_sexp ~input_filename ~output_filename)
 
 let dump_command =
   Command.basic ~summary:"Debug printout of Linear IR and CFG"
@@ -789,6 +798,7 @@ let profile_command =
       ("dump-hot-functions", hot_functions_command);
       ("trim-functions", trim_functions_command);
       ("trim-md5", trim_crc_command);
+      ("size", size_command);
       ("merge", merge_command) ]
 
 let bolt_command =

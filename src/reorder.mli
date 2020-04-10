@@ -14,5 +14,4 @@ val validate : bool ref
 val hot_functions :
   Aggregated_decoded_profile.t ->
   reorder_functions:Config_reorder.Reorder_functions.t ->
-  cutoff:Config_reorder.Cutoff_functions.t ->
   string list

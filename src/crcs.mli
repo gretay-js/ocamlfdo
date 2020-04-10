@@ -77,3 +77,13 @@ val verbose : bool ref
 val merge_into : src:tbl -> dst:tbl -> Config.t -> unit
 
 val trim : tbl -> Config.t -> unit
+(** Trim the profile in place, by keeping only CRCs that are enabled in
+    [config]. *)
+
+type stats =
+  { func : int;
+    unit : int
+  }
+
+val get_stats : tbl -> stats
+(** number of crcs of each kind in the table *)

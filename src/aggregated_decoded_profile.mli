@@ -1,7 +1,5 @@
 open Core
 
-type function_name = string
-
 type t =
   { (* map raw addresses to locations *)
     addr2loc : Loc.t Raw_addr.Table.t;
@@ -40,24 +38,24 @@ val of_sexp : input_filename:string -> output_filename:string -> unit
 (** Read profile from file where it was saved as sexp and save it to output
     file in binary format. Useful for manually editting profiles for debug. *)
 
-val id2name :
-  t -> (int, function_name list, Core.Int.comparator_witness) Core.Map.t
+val id2name : t -> (int, string list, Core.Int.comparator_witness) Core.Map.t
 
-val all_functions : t -> function_name list
-(** all functions, ordered by IDs, not execution counts *)
+val trim_functions : t -> cutoff:Trim.t -> unit
+(** Trim the profile in place, by removing functions that don't make the
+    cutoff. *)
 
-val sorted_functions : t -> function_name list
-(** all functions, in descending order of execution counts *)
+val all_functions : t -> string list
+(** all functions, ordered by IDs, not execution counts. *)
 
-val sorted_functions_with_counts : t -> (function_name * Execount.t) list
-(** all functions, in descending order of execution counts, paired with the
-    counts. *)
+val top_functions : t -> string list
+(** all functions, in descending order of execution counts. *)
 
 val print_sorted_functions_with_counts : t -> unit
 
-val trim : t -> keep:(function_name -> bool) -> unit
-(** Trim the profile in place, by keeping information only about functions
-    for which [keep] returns true. *)
+val print_stats : t -> unit
+(** print size of compiler components, based on sexp representation, and
+    various statistics about the content of the profile. Useful for
+    understanding the cause of very large profiles and how to best trim them. *)
 
 module Merge : Merge.Algo with type profile = t
 

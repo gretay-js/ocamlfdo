@@ -24,7 +24,6 @@ val decode :
   string list ->
   binary_filename:string ->
   reorder_functions:Config_reorder.Reorder_functions.t ->
-  cutoff:Config_reorder.Cutoff_functions.t ->
   linker_script_hot_filename:string option ->
   output_filename:string option ->
   write_linker_script_hot:bool ->
