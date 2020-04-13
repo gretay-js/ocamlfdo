@@ -11,5 +11,5 @@ type action =
 type t = action list [@@deriving sexp]
 
 val apply : t -> (string * Execount.t) list -> (string * Execount.t) list
-
 val of_sexp : Sexp.t -> t
+val to_sexp_string : t -> string

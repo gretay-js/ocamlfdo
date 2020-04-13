@@ -357,31 +357,42 @@ let print_stats t =
   let total = sexp_of_t t |> Sexp.size |> snd in
   let crcs_stats = Crcs.get_stats t.crcs in
   let total_crcs = crcs_stats.func + crcs_stats.unit in
-  let stats =
-    [ "functions", Int.Table.length t.functions
-    ; "addresses", Raw_addr.Table.length t.addr2loc
-    ]
-  in
+  let funcs = Int.Table.length t.functions in
   let len = Option.value_map ~default:0 ~f:String.length t.buildid in
-  let sizes =
-    [ "total crcs", total_crcs, total_crcs
-    ; "func crcs", crcs_stats.func, total_crcs
-    ; "unit crcs", crcs_stats.unit, total_crcs
-    ; "total size of sexp atoms in chars", total, total
-    ; "buildid", len, total
-    ; ( "addr2loc"
-      , Raw_addr.Table.sexp_of_t Loc.sexp_of_t t.addr2loc |> Sexp.size |> snd
-      , total )
-    ; ( "functions"
-      , Int.Table.sexp_of_t Func.sexp_of_t t.functions |> Sexp.size |> snd
-      , total )
-    ; "crcs", Crcs.sexp_of_tbl t.crcs |> Sexp.size |> snd, total
+  let stats =
+    [ [ "names", String.Table.length t.name2id, None
+      ; "functions", funcs, None
+      ; ( "functions with linear ids"
+        , Int.Table.count t.functions ~f:(fun f -> f.has_linearids)
+        , Some funcs )
+      ; "addresses", Raw_addr.Table.length t.addr2loc, None
+      ]
+    ; [ "total crcs", total_crcs, Some total_crcs
+      ; "func crcs", crcs_stats.func, Some total_crcs
+      ; "unit crcs", crcs_stats.unit, Some total_crcs
+      ]
+    ; [ "total size of sexp atoms in chars", total, Some total
+      ; "buildid", len, Some total
+      ; ( "addr2loc"
+        , Raw_addr.Table.sexp_of_t Loc.sexp_of_t t.addr2loc |> Sexp.size |> snd
+        , Some total )
+      ; ( "functions"
+        , Int.Table.sexp_of_t Func.sexp_of_t t.functions |> Sexp.size |> snd
+        , Some total )
+      ; "crcs", Crcs.sexp_of_tbl t.crcs |> Sexp.size |> snd, Some total
+      ]
+    ; []
     ]
   in
   Printf.printf "Profile size and stats:\n";
-  List.iter stats ~f:(fun (title, size) -> Printf.printf "%15d          %s\n" size title);
-  List.iter sizes ~f:(fun (title, size, total_size) ->
-      Printf.printf "%15d (%5.1f%%) %s\n" size (Report.percent size total_size) title);
+  let pp part = function
+    | None -> "        "
+    | Some whole -> sprintf "(%5.1f%%)" (Report.percent part whole)
+  in
+  List.iter stats ~f:(fun sizes ->
+      Printf.printf "-----------------------------------------------------------------\n";
+      List.iter sizes ~f:(fun (title, size, total_size) ->
+          Printf.printf "%15d %s %s\n" size (pp size total_size) title));
   ()
 ;;
 

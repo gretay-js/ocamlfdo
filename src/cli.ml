@@ -356,8 +356,13 @@ let flag_cutoff_functions =
       "-cutoff-functions"
       (optional_with_default [] (sexp_conv Trim.of_sexp))
       ~doc:
-        "filters remove from profile functions that do not satisfy the filters.\n\
-         sexp of type Trim.t")
+        ("filters remove from profile functions that do not satisfy the filters.\n\
+          Specify the sequence of actions as an sexp of type list, for example:\n"
+        ^ Trim.to_sexp_string [ Top 100 ]
+        ^ " or \n"
+        ^ Trim.to_sexp_string [ Top_percent_samples (Percent.of_string "99%") ]
+        ^ " or \n"
+        ^ Trim.to_sexp_string [ Min_samples 100; Top_percent (Percent.of_string "50%") ]))
 ;;
 
 let merge_command =

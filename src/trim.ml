@@ -68,3 +68,4 @@ let apply_action l a =
 ;;
 
 let apply t l = List.fold t ~init:l ~f:apply_action
+let to_sexp_string t = sexp_of_t t |> Sexp.to_string
