@@ -355,7 +355,9 @@ let flag_cutoff_functions =
     flag
       "-cutoff-functions"
       (optional_with_default [] (sexp_conv Trim.of_sexp))
-      ~doc:"filters to apply to functions")
+      ~doc:
+        "filters remove from profile functions that do not satisfy the filters.\n\
+         sexp of type Trim.t")
 ;;
 
 let merge_command =
@@ -818,7 +820,6 @@ let trim_command =
             ~on_mismatch:Crcs.On_error.Fail
             ~ignore_dbg:true
         in
-        let profile = AD.read_bin input_filename in
         Crcs.trim profile.crcs crc_config;
         AD.write_bin profile output_filename)
 ;;

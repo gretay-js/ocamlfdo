@@ -14,6 +14,8 @@ type t = action list [@@deriving sexp]
 
 let of_sexp s =
   let t = t_of_sexp s in
+  if !verbose
+  then Printf.printf !"input=%{sexp:Sexp.t}\nsexp=%{sexp:Sexp.t}\n" s (sexp_of_t t);
   List.iter t ~f:(function
       | Top_percent p
       | Top_percent_samples p ->
@@ -50,7 +52,11 @@ let take_top_percent_samples l p =
 
 let apply_action l a =
   match a with
-  | Top n -> List.take l n
+  | Top n ->
+    if !verbose then Printf.printf "len before=%d\n" (List.length l);
+    let l = List.take l n in
+    if !verbose then Printf.printf "len after=%d\n" (List.length l);
+    l
   | Top_percent p ->
     let total = List.length l in
     let n = Percent.apply p (Float.of_int total) |> Float.to_int in
