@@ -14,9 +14,7 @@ type t =
   }
 
 let mk () = { execounts = Int.Table.create () }
-
 let add t id info = Hashtbl.add_exn t.execounts ~key:id ~data:info
-
 let find t id = Hashtbl.find t.execounts id
 
 (* Compute detailed execution counts for function [name] using its CFG *)
@@ -31,25 +29,24 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
   Hashtbl.iteri func.agg.instructions ~f:(fun ~key ~data ->
       let loc = get_loc key in
       Cfg_info.record_ip i ~loc ~data);
-
   (* Associate fall-through trace counts with basic blocks *)
   Hashtbl.iteri func.agg.traces ~f:(fun ~key ~data ->
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
       Cfg_info.record_trace i ~from_loc ~to_loc ~data);
-
   (* report stats *)
   let m = Cfg_info.malformed_traces i in
-  ( if Execount.(m > 0L) then
+  if Execount.(m > 0L)
+  then (
     let total_traces =
-      List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Int64.( + )
+      List.fold (Hashtbl.data func.agg.traces) ~init:0L ~f:Execount.( + )
     in
-    Report.logf "Found %Ld malformed traces out of %Ld (%.3f%%)\n" m
+    Report.logf
+      "Found %Ld malformed traces out of %Ld (%.3f%%)\n"
+      m
       total_traces
-      (Report.percent (Execount.to_int_trunc m)
-         (Execount.to_int_trunc total_traces)) );
-
+      (Report.percent (Execount.to_int_trunc m) (Execount.to_int_trunc total_traces)));
   (* Associate branch counts with basic blocks *)
   Hashtbl.iteri func.agg.branches ~f:(fun ~key ~data ->
       let mispredicts =
@@ -58,17 +55,23 @@ let create_cfg_info (p : Aggregated_decoded_profile.t) func cl =
       let from_addr, to_addr = key in
       let from_loc = get_loc from_addr in
       let to_loc = get_loc to_addr in
-      if !verbose then
+      if !verbose
+      then
         printf
           !"recording branch:\n\
             from addr=%{sexp:Raw_addr.t} loc=%{sexp:Loc.t option}\n\
             to   addr=%{sexp:Raw_addr.t} loc=%{sexp:Loc.t option}\n"
-          from_addr from_loc to_addr to_loc;
+          from_addr
+          from_loc
+          to_addr
+          to_loc;
       Cfg_info.record_branch i ~from_loc ~to_loc ~data ~mispredicts);
-  if !verbose then (
+  if !verbose
+  then (
     Cfg_info.dump i;
-    Cfg_info.dump_dot i "annot" );
+    Cfg_info.dump_dot i "annot");
   i
+;;
 
 (* cfg_info can be saved to a file for later use. It is only useful for
    debugging. It would save recomputing the counters, but it adds another
@@ -88,31 +91,34 @@ exception Found of Cfg_info.t
 (** Look for profile for function using its [name]. If not found, look for
     profiles for [alternatives]. Apply the profile to the cfg to compute
     detailed execution counts for blocks and branches. *)
-let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives
-    =
+let create_cfg_info (p : Aggregated_decoded_profile.t) name cl ~alternatives =
   try
     let f s =
       match Hashtbl.find p.name2id s with
       | None -> ()
       | Some id ->
-          let func = Hashtbl.find_exn p.functions id in
-          if Int64.(func.count > 0L) && func.has_linearids then (
-            Report.logf
-              "Found profile for function %s with %Ld samples %s (func id = \
-               %d)"
-              name func.count
-              (if String.equal name s then "" else "using near match " ^ s)
-              id;
-            if !verbose then (
-              printf "compute_cfg_execounts for %s\n" name;
-              CL.save_as_dot cl "execount" );
-            let cfg_info =
-              Profile.record_call ~accumulate:true "cfg_info" (fun () ->
-                  create_cfg_info p func cl)
-            in
-            raise (Found cfg_info) )
+        let func = Hashtbl.find_exn p.functions id in
+        if Execount.(func.count > 0L) && func.has_linearids
+        then (
+          Report.logf
+            "Found profile for function %s with %Ld samples %s (func id = %d)"
+            name
+            func.count
+            (if String.equal name s then "" else "using near match " ^ s)
+            id;
+          if !verbose
+          then (
+            printf "compute_cfg_execounts for %s\n" name;
+            CL.save_as_dot cl "execount");
+          let cfg_info =
+            Profile.record_call ~accumulate:true "cfg_info" (fun () ->
+                create_cfg_info p func cl)
+          in
+          raise (Found cfg_info))
     in
     List.iter ~f (name :: alternatives);
     if !verbose then printf "Not found profile info for %s with cfg.\n" name;
     None
-  with Found cfg_info -> Some cfg_info
+  with
+  | Found cfg_info -> Some cfg_info
+;;

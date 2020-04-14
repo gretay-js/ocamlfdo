@@ -123,6 +123,14 @@ module Commonflag = struct
   ;;
 end
 
+let flag_ignore_overflow =
+  Command.Param.(
+    flag
+      "-ignore-overflow"
+      no_arg
+      ~doc:" on overflow during execution counter aggregation, return max_value")
+;;
+
 let flag_report =
   Command.Param.(
     flag
@@ -396,17 +404,22 @@ let merge_command =
       and crc_config = flag_crc_config
       and ignore_buildid = flag_ignore_buildid
       and files = anon_files
+      and report = flag_report
+      and ignore_overflow = flag_ignore_overflow
       and output_filename = Commonflag.(required flag_output_filename)
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile in
       if v then set_verbose true;
       if q then set_verbose false;
+      Execount.ignore_overflow := ignore_overflow;
       fun () ->
         Main_fdo.merge
           files
           ~read_aggregated_perf_profile
           ~crc_config
           ~ignore_buildid
-          ~output_filename)
+          ~report
+          ~output_filename;
+        Execount.report_overflow ())
 ;;
 
 let decode_command =
@@ -442,10 +455,13 @@ let decode_command =
       and ignore_buildid = flag_ignore_buildid
       and expected_pids = flag_expected_pids
       and crc_config = flag_crc_config
+      and report = flag_report
       and force = flag_force
+      and ignore_overflow = flag_ignore_overflow
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
+      Execount.ignore_overflow := ignore_overflow;
       make_random_state seed [];
       if !Main_fdo.verbose
       then (
@@ -470,7 +486,9 @@ let decode_command =
               ~check:(not force)
               ~write_aggregated_profile
               ~read_aggregated_perf_profile
+              ~report
               ~crc_config);
+        Execount.report_overflow ();
         if timings then Profile.print Format.std_formatter Profile.all_columns)
 ;;
 

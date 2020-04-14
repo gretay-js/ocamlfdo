@@ -52,7 +52,7 @@ let get_func t addr =
    usually to_addr cannot be target of jump because it is not a return from a
    call instruction and not an entry function. Could it be a context switch? *)
 let track_branch (from_addr, to_addr) =
-  if Int64.(from_addr < 0L) || Int64.(to_addr < 0L)
+  if Raw_addr.(from_addr < 0L) || Raw_addr.(to_addr < 0L)
   then (
     if !verbose then printf "ignore branch 0x%Lx -> 0x%Lx (addr < 0)\n" from_addr to_addr;
     false)
@@ -71,7 +71,7 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
       match get_func t key with
       | None -> ()
       | Some func ->
-        func.count <- Int64.(func.count + data);
+        func.count <- Execount.(func.count + data);
         Raw_addr.Table.add_exn func.agg.instructions ~key ~data);
   let process (from_addr, to_addr) update =
     match get_func t from_addr, get_func t to_addr with
@@ -91,11 +91,11 @@ let create_func_execounts t (agg : Aggregated_perf_profile.t) =
         Option.value (Raw_addr_pair.Table.find agg.mispredicts key) ~default:0L
       in
       let update_br func =
-        func.count <- Int64.(func.count + data);
+        func.count <- Execount.(func.count + data);
         if track_branch key
         then (
           Raw_addr_pair.Table.add_exn func.agg.branches ~key ~data;
-          if Int64.(mispredicts > 0L)
+          if Execount.(mispredicts > 0L)
           then Raw_addr_pair.Table.add_exn func.agg.mispredicts ~key ~data:mispredicts)
       in
       process key update_br);
@@ -143,7 +143,9 @@ let get_func_id t ~name ~start ~finish =
 let decode_addr t addr interval dbg =
   (* let open Loc in *)
   match interval with
-  | None -> if !verbose then printf "Cannot find function symbol containing 0x%Lx\n" addr
+  | None ->
+    if !verbose then printf "Cannot find function symbol containing 0x%Lx\n" addr;
+    false
   | Some interval ->
     let module I = Intervals in
     let module E = Elf_locations in
@@ -158,12 +160,16 @@ let decode_addr t addr interval dbg =
          BOLT can do this as post link. We ignore all samples in local functions. *)
       if !verbose
       then
-        printf "Ignoring sample in local function symbol %s at address 0x%Lx\n" name addr
+        printf
+          "Ignoring samples in local function symbol %s at address 0x%Lx\n"
+          name
+          addr;
+      false
     | E.Not_local name ->
       let start = interval.l in
       let finish = interval.r in
       let offset =
-        match Int64.(to_int (addr - start)) with
+        match Raw_addr.(to_int (addr - start)) with
         | None -> Report.user_error "Offset too big: 0x%Lx" Raw_addr.(addr - start) ()
         | Some offset ->
           assert (offset >= 0);
@@ -189,7 +195,8 @@ let decode_addr t addr interval dbg =
       in
       if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
       let loc = { rel; dbg } in
-      Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc)
+      Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc;
+      true)
 ;;
 
 let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
@@ -228,12 +235,20 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
       Crcs.decode_and_add crcs name);
   let t = mk len (Crcs.tbl crcs) agg.buildid in
   (* Decode all locations: map addresses to locations. *)
-  Raw_addr.Table.iteri addresses ~f:(fun ~key:addr ~data:dbg ->
-      (* this is cached using interval tree *)
-      let interval =
-        Elf_locations.resolve_function_containing locations ~program_counter:addr
-      in
-      decode_addr t addr interval dbg);
+  let resolved =
+    Raw_addr.Table.fold addresses ~init:0 ~f:(fun ~key:addr ~data:dbg acc ->
+        (* this is cached using interval tree *)
+        let interval =
+          Elf_locations.resolve_function_containing locations ~program_counter:addr
+        in
+        if decode_addr t addr interval dbg then acc + 1 else acc)
+  in
+  let total = Raw_addr.Table.length addresses in
+  Report.logf
+    "Resolved %d of %d addresses (%.2fl%%)"
+    resolved
+    total
+    (Report.percent resolved total);
   create_func_execounts t agg;
   t
 ;;
@@ -338,7 +353,7 @@ let sorted_functions_with_counts t =
   let compare (n1, c1) (n2, c2) =
     (* Descending order of execution counts, i.e., reverse order of int
        compare. *)
-    let res = Int64.compare c2 c1 in
+    let res = Execount.compare c2 c1 in
     (* Tie breaker using names. Slower than id but more stable w.r.t. changes
        in perf data and ocamlfdo, because ids are an artifact of the way
        ocamlfdo reads and decodes locations. Change to tie breaker using id

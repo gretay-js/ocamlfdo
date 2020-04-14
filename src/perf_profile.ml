@@ -469,11 +469,11 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
        addresses accroding to their order relative to map events. *)
   in
   let stats = perf_fold filename script ~init:empty_stats ~f in
+  Report.logf "Read %d samples with %d LBR entries\n" stats.total stats.lbr;
+  let r = Report.percent stats.ignored stats.total in
+  Report.logf "Ignored %d samples (%.1f)\n" stats.ignored r;
   if !verbose
   then (
-    Printf.printf "Read %d samples with %d LBR entries\n" stats.total stats.lbr;
-    let r = Report.percent stats.ignored stats.total in
-    Printf.printf "Ignored %d samples (%.1f)\n" stats.ignored r;
     Printf.printf "Found pids:\n";
     Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid));
   aggregated
