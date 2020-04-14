@@ -13,22 +13,24 @@ type mispredict_flag =
 let mispredicted = function
   | M -> true
   | _ -> false
+;;
 
 type br =
-  { from_addr : Raw_addr.t;
-    to_addr : Raw_addr.t;
-    mispredict : mispredict_flag;
-    index : int
-        (* Position on the stack, with 0 being the most recent branch. This
+  { from_addr : Raw_addr.t
+  ; to_addr : Raw_addr.t
+  ; mispredict : mispredict_flag
+  ; index : int
+  (* Position on the stack, with 0 being the most recent branch. This
            field is only used for only for validation. *)
-        (* cycles : int; *)
+  (* cycles : int; *)
   }
 [@@deriving compare, sexp]
 
 type sample =
-  { ip : Raw_addr.t;
-    (* instruction pointer where the sample was taken *)
-    brstack : br list (* branch stack is the last branch record (LBR) *)
+  { ip : Raw_addr.t
+  ; (* instruction pointer where the sample was taken *)
+    brstack : br list
+  (* branch stack is the last branch record (LBR) *)
   }
 [@@deriving compare, sexp]
 
@@ -36,55 +38,54 @@ type t = sample list [@@deriving compare, sexp]
 
 let parse_br index s =
   match String.split s ~on:'/' with
-  | [from_addr; to_addr; m; t; a; c] ->
-      let mispredict =
-        match m with
-        | "M" -> M
-        | "P" -> P
-        | "-" -> NOT_SUPPORTED
-        | _ ->
-            Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
-      in
-      (* Parse and ignore t and a flags. *)
-      ( match t with
-      | "X" | "-" -> ()
+  | [ from_addr; to_addr; m; t; a; c ] ->
+    let mispredict =
+      match m with
+      | "M" -> M
+      | "P" -> P
+      | "-" -> NOT_SUPPORTED
       | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" m s ()
-      );
-      ( match a with
-      | "A" | "-" -> ()
-      | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" a s ()
-      );
-
-      (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
-      let _cycles = Int.of_string c in
-      { from_addr = Int64.of_string from_addr;
-        to_addr = Int64.of_string to_addr;
-        index;
-        mispredict
-      }
+    in
+    (* Parse and ignore t and a flags. *)
+    (match t with
+    | "X" | "-" -> ()
+    | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" m s ());
+    (match a with
+    | "A" | "-" -> ()
+    | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" a s ());
+    (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
+    let _cycles = Int.of_string c in
+    { from_addr = Raw_addr.of_string from_addr
+    ; to_addr = Raw_addr.of_string to_addr
+    ; index
+    ; mispredict
+    }
   | _ -> Report.user_error "Cannot parse %s\n" s ()
+;;
 
 (* The most recent branch is printed first by perf script. The number of
    branch entries vary based on the underlying hardware. This function
    reverses the stack from its perf profile order. *)
 let rec parse_brstack (index, brstack) row =
   match row with
-  | [] -> (index, brstack)
+  | [] -> index, brstack
   | hd :: tl ->
-      let brstack = parse_br index hd :: brstack in
-      parse_brstack (index + 1, brstack) tl
+    let brstack = parse_br index hd :: brstack in
+    parse_brstack (index + 1, brstack) tl
+;;
 
 let split_on_whitespace row =
   let r = String.split ~on:' ' row in
   List.filter r ~f:(fun s -> not (String.is_empty s))
+;;
 
 let hex s = if String.is_prefix ~prefix:"0x" s then s else "0x" ^ s
 
 type mmap =
-  { pid : int;
-    name : string;
-    base : Raw_addr.t;
-    size : Raw_addr.t
+  { pid : int
+  ; name : string
+  ; base : Raw_addr.t
+  ; size : Raw_addr.t
   }
 
 type row =
@@ -97,52 +98,51 @@ type row =
 let row_to_sample ~keep_pid row =
   match split_on_whitespace row with
   | pid :: "PERF_RECORD_MMAP2" :: id :: pos :: rest ->
-      if !verbose then
-        printf "parsing PERF_RECORD_MMAP2 for pid=%s:\n%s\n" pid row;
-      let pid = Int.of_string pid in
-      if keep_pid pid then
-        match List.last rest with
-        | None -> Report.user_error "Unexpected format"
-        | Some name ->
-            if String.is_prefix ~prefix:"/" name then (
-              (* This is just a sanity check for the format *)
-              let id =
-                String.chop_suffix id ~suffix:":" |> Option.value_exn
-              in
-              ( match String.split id ~on:'/' with
-              | [n; _tid] ->
-                  (* Do we need to do anything with tid? what does it mean? *)
-                  let k = Int.of_string n in
-                  assert (k = pid)
-              | _ -> Report.user_error "Unexpected format" );
-
-              (* parse the important info *)
-              match String.split_on_chars pos ~on:['['; '('; ')'] with
-              | [base; size] ->
-                  let base = Raw_addr.of_string base in
-                  let size = Raw_addr.of_string size in
-                  Mmap { pid; name; base; size }
-              | _ -> Report.user_error "Unexpected format" )
-            else Unknown
-      else Unknown
+    if !verbose then printf "parsing PERF_RECORD_MMAP2 for pid=%s:\n%s\n" pid row;
+    let pid = Int.of_string pid in
+    if keep_pid pid
+    then (
+      match List.last rest with
+      | None -> Report.user_error "Unexpected format"
+      | Some name ->
+        if String.is_prefix ~prefix:"/" name
+        then (
+          (* This is just a sanity check for the format *)
+          let id = String.chop_suffix id ~suffix:":" |> Option.value_exn in
+          (match String.split id ~on:'/' with
+          | [ n; _tid ] ->
+            (* Do we need to do anything with tid? what does it mean? *)
+            let k = Int.of_string n in
+            assert (k = pid)
+          | _ -> Report.user_error "Unexpected format");
+          (* parse the important info *)
+          match String.split_on_chars pos ~on:[ '['; '('; ')' ] with
+          | [ base; size ] ->
+            let base = Raw_addr.of_string base in
+            let size = Raw_addr.of_string size in
+            Mmap { pid; name; base; size }
+          | _ -> Report.user_error "Unexpected format")
+        else Unknown)
+    else Unknown
   | pid :: ip :: rest ->
-      let pid = Int.of_string pid in
-      if keep_pid pid then (
-        if !verbose then printf "parsing ip %s\n" ip;
-        let sample =
-          { ip = Int64.of_string (hex ip);
-            brstack = snd (parse_brstack (0, []) rest)
-          }
-        in
-        if !verbose then (
-          printf "raw brstack=%s\n" row;
-          printf "parsed brstack=";
-          List.iter sample.brstack ~f:(fun br ->
-              printf "0x%Lx/0x%Lx " br.from_addr br.to_addr);
-          printf "\n" );
-        Sample sample )
-      else Unknown
+    let pid = Int.of_string pid in
+    if keep_pid pid
+    then (
+      if !verbose then printf "parsing ip %s\n" ip;
+      let sample =
+        { ip = Raw_addr.of_string (hex ip); brstack = snd (parse_brstack (0, []) rest) }
+      in
+      if !verbose
+      then (
+        printf "raw brstack=%s\n" row;
+        printf "parsed brstack=";
+        List.iter sample.brstack ~f:(fun br ->
+            printf "0x%Lx/0x%Lx " br.from_addr br.to_addr);
+        printf "\n");
+      Sample sample)
+    else Unknown
   | _ -> Report.user_error "Cannot parse %s\n" row ()
+;;
 
 (* let row_to_sample ~keep_pid row =
  *   if !verbose then printf "parsing row %S\n" row;
@@ -152,140 +152,153 @@ let row_to_sample ~keep_pid row =
 let pids = ref Int.Set.empty
 
 let check_keep_pid expected_pids p ~ignore_buildid =
-  if !verbose then
-    if not (Int.Set.mem !pids p) then (
+  if !verbose
+  then
+    if not (Int.Set.mem !pids p)
+    then (
       printf "Found new pid: %d\n" p;
-      pids := Int.Set.add !pids p );
-  if ignore_buildid then true
-  else
+      pids := Int.Set.add !pids p);
+  if ignore_buildid
+  then true
+  else (
     let keep = Int.Set.mem expected_pids p in
-    if (not keep) && !verbose then
-      printf
-        !"Ignoring pid %d, not in expected %{sexp:Int.Set.t}).\n"
-        p expected_pids;
-    keep
+    if not keep && !verbose
+    then printf !"Ignoring pid %d, not in expected %{sexp:Int.Set.t}).\n" p expected_pids;
+    keep)
+;;
 
-let script = ["script"; "-F"; "pid,ip,brstack"]
-
-let buildid = ["buildid-list"; "-f"]
+let script = [ "script"; "-F"; "pid,ip,brstack" ]
+let buildid = [ "buildid-list"; "-f" ]
 
 let perf_fold filename args ~init ~f =
-  let args = List.concat [["perf"]; args; ["-i"; filename]] in
+  let args = List.concat [ [ "perf" ]; args; [ "-i"; filename ] ] in
   if !verbose then Printf.printf "%s\n" (String.concat args);
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
-  let t, sexp =
-    Traced.eval ~capture:true (call args |- fold_lines ~init ~f)
-  in
+  let t, sexp = Traced.eval ~capture:true (call args |- fold_lines ~init ~f) in
   if !verbose then print_endline (Sexp.to_string_hum sexp);
   match t with
   | Ok t -> t
   | _ -> Report.user_error "Unexpected output of %s" (String.concat args)
+;;
 
 let read filename =
-  if !verbose then
+  if !verbose
+  then
     printf
-      "Reading perf profile generated by \"perf script -F pid,ip,brstack\" \
-       from %s\n"
+      "Reading perf profile generated by \"perf script -F pid,ip,brstack\" from %s\n"
       filename;
   let keep_pid = check_keep_pid Int.Set.empty ~ignore_buildid:true in
   let f acc row =
     match row_to_sample ~keep_pid (String.strip row) with
     | Unknown -> acc
     | Sample sample -> sample :: acc
-    | Mmap _ ->
-        Report.user_error "Unexpected mmap event in perf script output"
+    | Mmap _ -> Report.user_error "Unexpected mmap event in perf script output"
   in
   let t = perf_fold filename script ~init:[] ~f in
-  if !verbose then (
+  if !verbose
+  then (
     Printf.printf !"%{sexp:t}\n" t;
     Printf.printf "Found pids:\n";
-    Int.Set.iter !pids ~f:(fun pid -> Printf.printf "%d\n" pid) );
+    Int.Set.iter !pids ~f:(fun pid -> Printf.printf "%d\n" pid));
   t
+;;
 
 type stats =
-  { ignored : int;
-    total : int;
-    lbr : int
+  { ignored : int
+  ; total : int
+  ; lbr : int
   }
 
 let inc table key =
-  Hashtbl.update table key ~f:(fun v ->
-      Int64.(1L + Option.value ~default:0L v))
+  Hashtbl.update table key ~f:(fun v -> Execount.(1L + Option.value ~default:0L v))
+;;
 
 let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
   (* Instructions executed between branches can be inferred from brstack *)
   let add_br () =
-    let key = (cur.from_addr, cur.to_addr) in
+    let key = cur.from_addr, cur.to_addr in
     inc aggregated.branches key;
     if mispredicted cur.mispredict then inc aggregated.mispredicts key
   in
   match prev with
   | None -> add_br ()
   | Some prev ->
-      assert (prev.index = cur.index + 1);
-      let from_addr = prev.to_addr in
-      let to_addr = cur.from_addr in
-      if !verbose then printf "cur 0x%Lx->0x%Lx\n" cur.from_addr cur.to_addr;
-      if !verbose then printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
-      let open Int64 in
-      (* There appear to be a problem with perf output: last LBR entry is
+    assert (prev.index = cur.index + 1);
+    let from_addr = prev.to_addr in
+    let to_addr = cur.from_addr in
+    if !verbose then printf "cur 0x%Lx->0x%Lx\n" cur.from_addr cur.to_addr;
+    if !verbose then printf "trace 0x%Lx->0x%Lx\n" from_addr to_addr;
+    let open Raw_addr in
+    (* There appear to be a problem with perf output: last LBR entry is
          repeated twice sometimes. It may be related to the recent problem
          mentioned in a patch for perf script: Fix LBR skid dump problems in
          brstackinsn https://github.com/torvalds/linux/commit
          /61f611593f2c90547cb09c0bf6977414454a27e6 *)
-      let dup =
-        prev.from_addr = cur.from_addr && prev.to_addr = cur.to_addr
-      in
-      let mis_prev = mispredicted prev.mispredict in
-      let mis_cur = mispredicted cur.mispredict in
-      let fallthrough_backwards = from_addr >= to_addr in
-      if dup then
-        if !verbose then
+    let dup = prev.from_addr = cur.from_addr && prev.to_addr = cur.to_addr in
+    let mis_prev = mispredicted prev.mispredict in
+    let mis_cur = mispredicted cur.mispredict in
+    let fallthrough_backwards = from_addr >= to_addr in
+    if dup
+    then
+      if !verbose
+      then
+        printf
+          "Duplicate entry in LBR: 0x%Lx->0x%Lx mis_prev=%b mis_cur=%b last=%b \
+           (from_addr >= to_addr)=%b\n"
+          prev.from_addr
+          prev.to_addr
+          mis_prev
+          mis_cur
+          is_last
+          fallthrough_backwards;
+    if dup && is_last
+    then (
+      if !verbose
+      then
+        printf "Duplicated last LBR entry is ignored: 0x%Lx->0x%Lx\n" from_addr to_addr;
+      if not fallthrough_backwards
+      then
+        if !verbose
+        then
           printf
-            "Duplicate entry in LBR: 0x%Lx->0x%Lx mis_prev=%b mis_cur=%b \
-             last=%b (from_addr >= to_addr)=%b\n"
-            prev.from_addr prev.to_addr mis_prev mis_cur is_last
-            fallthrough_backwards;
-
-      if dup && is_last then (
-        if !verbose then
-          printf "Duplicated last LBR entry is ignored: 0x%Lx->0x%Lx\n"
-            from_addr to_addr;
-        if not fallthrough_backwards then
-          if !verbose then
-            printf
-              "Duplicate last entry without fallthrough backwards is \
-               unexpected 0x%Lx->0x%Lx.\n"
-              from_addr to_addr )
+            "Duplicate last entry without fallthrough backwards is unexpected \
+             0x%Lx->0x%Lx.\n"
+            from_addr
+            to_addr)
+    else (
+      (* branches *)
+      add_br ();
+      (* fallthrough traces *)
+      if fallthrough_backwards
+      then (
+        if !verbose
+        then
+          printf
+            "Malformed trace 0x%Lx->0x%Lx (from_addr >= to_addr), it was not duplicated \
+             last entry.\n"
+            from_addr
+            to_addr)
       else (
-        (* branches *)
-        add_br ();
-
-        (* fallthrough traces *)
-        if fallthrough_backwards then (
-          if !verbose then
-            printf
-              "Malformed trace 0x%Lx->0x%Lx (from_addr >= to_addr), it was \
-               not duplicated last entry.\n"
-              from_addr to_addr )
-        else
-          let key = (from_addr, to_addr) in
-          inc aggregated.traces key )
+        let key = from_addr, to_addr in
+        inc aggregated.traces key))
+;;
 
 (* CR-soon gyorsh: aggregate during parsing of perf profile *)
 let rec aggregate_brstack prev brstack aggregated =
   match brstack with
   | [] -> ()
   | cur :: tl ->
-      let is_last = List.is_empty tl in
-      aggregate_br prev cur is_last aggregated;
-      aggregate_brstack (Some cur) tl aggregated
+    let is_last = List.is_empty tl in
+    aggregate_br prev cur is_last aggregated;
+    aggregate_brstack (Some cur) tl aggregated
+;;
 
 let aggregate sample (aggregated : Aggregated_perf_profile.t) =
   inc aggregated.instructions sample.ip;
   aggregate_brstack None sample.brstack aggregated
+;;
 
 let extract_pids data perf_data =
   (* find pids *)
@@ -299,55 +312,56 @@ let extract_pids data perf_data =
      without calling buildid-list before it, but while the call to
      buildid-list seems reasonable to keep long term, this function should be
      replaced. *)
-  perf_fold perf_data ["report"; "-F"; "dso,pid"; "--stdio"; "-v"]
-    ~init:Int.Set.empty ~f:(fun acc s ->
+  perf_fold
+    perf_data
+    [ "report"; "-F"; "dso,pid"; "--stdio"; "-v" ]
+    ~init:Int.Set.empty
+    ~f:(fun acc s ->
       if !verbose then Printf.printf "[find pids] %s\n" s;
-      if
-        String.equal s ""
-        || String.is_prefix s ~prefix:"build id event received for "
-        || String.is_prefix s ~prefix:"#"
-        || String.is_suffix s
-             ~suffix:" not found, continuing without symbols"
+      if String.equal s ""
+         || String.is_prefix s ~prefix:"build id event received for "
+         || String.is_prefix s ~prefix:"#"
+         || String.is_suffix s ~suffix:" not found, continuing without symbols"
       then acc
-      else
+      else (
         try
           let s = String.strip s in
           let dso = String.prefix s (String.index_exn s ' ') in
           if !verbose then Printf.printf "[find pids] dso=%s\n" dso;
           match List.find data ~f:(String.equal dso) with
           | None -> acc
-          | Some _ -> (
-              let pid_comm =
-                String.drop_prefix s (String.index_exn s ' ' + 1)
-                |> String.strip
-              in
-              if !verbose then
-                Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
-              match String.split ~on:':' pid_comm with
-              | [pid; _] ->
-                  if !verbose then Printf.printf "[find pids] pid=%s\n" pid;
-                  Int.Set.add acc (Int.of_string pid)
-              | _ ->
-                  Report.user_error
-                    "Cannot find pid. Unexpect output of perf report:%s\n" s
-                    () )
-        with _ ->
-          Report.user_error
-            "Cannot find pid. Unexpect output of perf report:%s\n" s ())
+          | Some _ ->
+            let pid_comm =
+              String.drop_prefix s (String.index_exn s ' ' + 1) |> String.strip
+            in
+            if !verbose then Printf.printf "[find pids] pid_comm=%s\n" pid_comm;
+            (match String.split ~on:':' pid_comm with
+            | [ pid; _ ] ->
+              if !verbose then Printf.printf "[find pids] pid=%s\n" pid;
+              Int.Set.add acc (Int.of_string pid)
+            | _ ->
+              Report.user_error
+                "Cannot find pid. Unexpect output of perf report:%s\n"
+                s
+                ())
+        with
+        | _ ->
+          Report.user_error "Cannot find pid. Unexpect output of perf report:%s\n" s ()))
+;;
 
 let check_buildid binary perf_data ignore_buildid =
   let binary_buildid =
-    perf_fold binary buildid ~init:[] ~f:(fun acc s -> s :: acc)
-    |> List.hd_exn
+    perf_fold binary buildid ~init:[] ~f:(fun acc s -> s :: acc) |> List.hd_exn
   in
   let parse row =
     match String.split ~on:' ' row with
-    | [buildid; dso] ->
-        if String.equal binary_buildid buildid then Some dso else None
+    | [ buildid; dso ] -> if String.equal binary_buildid buildid then Some dso else None
     | _ ->
-        Report.user_error "Unexpected output format of `perf %s -i %s`:\n%s"
-          (String.concat ~sep:" " buildid)
-          perf_data row
+      Report.user_error
+        "Unexpected output format of `perf %s -i %s`:\n%s"
+        (String.concat ~sep:" " buildid)
+        perf_data
+        row
   in
   let data =
     perf_fold perf_data buildid ~init:[] ~f:(fun acc s ->
@@ -355,63 +369,68 @@ let check_buildid binary perf_data ignore_buildid =
         | None -> acc
         | Some d -> d :: acc)
   in
-  ( match data with
-  | [dso] ->
-      if !verbose then
-        printf "Found comm for buildid %s: %s\n" binary_buildid dso
+  (match data with
+  | [ dso ] ->
+    if !verbose then printf "Found comm for buildid %s: %s\n" binary_buildid dso
   | [] ->
-      let msg () =
-        sprintf
-          "buildid mismatch: buildid %s of binary %s is not found in perf \
-           profile %s."
-          binary_buildid binary perf_data
-      in
-      if ignore_buildid then (
-        if !verbose then printf "%s\nbuildid mismatch ignored\n" (msg ()) )
-      else
-        Report.user_error
-          "%s\n\
-           To check, compare %s to output of `perf %s -i %s`\n\
-           To ignore, add -ignore-buildid option when calling `ocamlfdo \
-           decode`."
-          (msg ()) binary_buildid
-          (String.concat ~sep:"" buildid)
-          perf_data
-  | _ -> () );
-  if !verbose then (
-    printf "Found %d comms for buildid %s in %s.\n" (List.length data)
-      binary_buildid perf_data;
-    List.iter data ~f:(printf "%s\n") );
-  (Some binary_buildid, extract_pids data perf_data)
+    let msg () =
+      sprintf
+        "buildid mismatch: buildid %s of binary %s is not found in perf profile %s."
+        binary_buildid
+        binary
+        perf_data
+    in
+    if ignore_buildid
+    then (if !verbose then printf "%s\nbuildid mismatch ignored\n" (msg ()))
+    else
+      Report.user_error
+        "%s\n\
+         To check, compare %s to output of `perf %s -i %s`\n\
+         To ignore, add -ignore-buildid option when calling `ocamlfdo decode`."
+        (msg ())
+        binary_buildid
+        (String.concat ~sep:"" buildid)
+        perf_data
+  | _ -> ());
+  if !verbose
+  then (
+    printf
+      "Found %d comms for buildid %s in %s.\n"
+      (List.length data)
+      binary_buildid
+      perf_data;
+    List.iter data ~f:(printf "%s\n"));
+  Some binary_buildid, extract_pids data perf_data
+;;
 
 let pids_to_keep ~found_pids ~expected_pids =
   match expected_pids with
   | [] ->
-      if !verbose then
-        printf "ignoring empty expected_pids, using found pids\n";
-      found_pids
+    if !verbose then printf "ignoring empty expected_pids, using found pids\n";
+    found_pids
   | _ ->
-      let expected_pids = Int.Set.of_list expected_pids in
-      let is_subset = Int.Set.is_subset expected_pids ~of_:found_pids in
-      if !verbose then (
-        printf
-          "expected pids is %s subset of pids found in profile that match \
-           the buildid of the executable.\n"
-          (if is_subset then "a" else "not a");
-        printf !"user's expected pids = %{sexp:Int.Set.t}\n" expected_pids;
-        printf !"found pids = %{sexp:Int.Set.t}\n" found_pids );
-      if is_subset then expected_pids else found_pids
+    let expected_pids = Int.Set.of_list expected_pids in
+    let is_subset = Int.Set.is_subset expected_pids ~of_:found_pids in
+    if !verbose
+    then (
+      printf
+        "expected pids is %s subset of pids found in profile that match the buildid of \
+         the executable.\n"
+        (if is_subset then "a" else "not a");
+      printf !"user's expected pids = %{sexp:Int.Set.t}\n" expected_pids;
+      printf !"found pids = %{sexp:Int.Set.t}\n" found_pids);
+    if is_subset then expected_pids else found_pids
+;;
 
 let read_and_aggregate filename binary ignore_buildid expected_pids =
   if !verbose then printf "Aggregate perf profile from %s.\n" filename;
-
   (* check that buildid of the binary matches buildid of some dso sampled in
      the profile, and return the pids with which that dso appears in the
      profile. *)
   let buildid, found_pids =
-    if (not ignore_buildid) || !verbose then
-      check_buildid binary filename ignore_buildid
-    else (None, Int.Set.empty)
+    if not ignore_buildid || !verbose
+    then check_buildid binary filename ignore_buildid
+    else None, Int.Set.empty
   in
   let keep_pid =
     check_keep_pid ~ignore_buildid (pids_to_keep ~found_pids ~expected_pids)
@@ -421,14 +440,10 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
   let empty_stats = { ignored = 0; total = 0; lbr = 0 } in
   let f stats row =
     match row_to_sample ~keep_pid row with
-    | Unknown ->
-        { stats with ignored = stats.ignored + 1; total = stats.total + 1 }
+    | Unknown -> { stats with ignored = stats.ignored + 1; total = stats.total + 1 }
     | Sample sample ->
-        aggregate sample aggregated;
-        { stats with
-          total = stats.total + 1;
-          lbr = stats.lbr + List.length sample.brstack
-        }
+      aggregate sample aggregated;
+      { stats with total = stats.total + 1; lbr = stats.lbr + List.length sample.brstack }
     | Mmap _mmap -> stats
     (* CR-soon gyorsh: use memory map to translate ip addresses of samples
        (ip=instruction pointer is a virtual memory address) to offsets into
@@ -453,13 +468,13 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
        by the time of samples) or parse the time of the samples and map ip
        addresses accroding to their order relative to map events. *)
   in
-
   let stats = perf_fold filename script ~init:empty_stats ~f in
-  if !verbose then (
-    Printf.printf "Read %d samples with %d LBR entries\n" stats.total
-      stats.lbr;
+  if !verbose
+  then (
+    Printf.printf "Read %d samples with %d LBR entries\n" stats.total stats.lbr;
     let r = Report.percent stats.ignored stats.total in
     Printf.printf "Ignored %d samples (%.1f)\n" stats.ignored r;
     Printf.printf "Found pids:\n";
-    Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid) );
+    Int.Set.iter !pids ~f:(fun pid -> printf "%d\n" pid));
   aggregated
+;;

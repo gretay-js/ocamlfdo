@@ -2,13 +2,15 @@ open Core
 
 type t
 
+type function_sym = Local of string | Not_local of string
+
 val create : elf_executable:string -> t
 
 val resolve_range :
   t -> start:Raw_addr.t -> finish:Raw_addr.t -> with_inverse:bool -> unit
 
 val resolve_function_containing :
-  t -> program_counter:Raw_addr.t -> string Intervals.interval option
+  t -> program_counter:Raw_addr.t -> function_sym Intervals.interval option
 
 (* Resolves debug info in one pass and caches the results for addresses.
    Modifies the input hashtable inplace. *)

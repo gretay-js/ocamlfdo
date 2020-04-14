@@ -141,15 +141,25 @@ let get_func_id t ~name ~start ~finish =
 ;;
 
 let decode_addr t addr interval dbg =
-  let open Loc in
-  let loc =
-    match interval with
-    | None ->
-      if !verbose then printf "Cannot find function symbol containing 0x%Lx\n" addr;
-      { rel = None; dbg = None }
-    | Some interval ->
-      let open Intervals in
-      let name = interval.v in
+  (* let open Loc in *)
+  match interval with
+  | None -> if !verbose then printf "Cannot find function symbol containing 0x%Lx\n" addr
+  | Some interval ->
+    let module I = Intervals in
+    let module E = Elf_locations in
+    (match interval.I.v with
+    | E.Local name ->
+      (* All ocaml function symbols are global. Local symbols usually come from C code.
+         There may be more than one local symbol with the same name,
+         all of which will end up in the same function section, because
+         function section names are derived from function names by default
+         C compilers when -ffunction-sections.
+         We cannot reorder one local functions only at link time time.
+         BOLT can do this as post link. We ignore all samples in local functions. *)
+      if !verbose
+      then
+        printf "Ignoring sample in local function symbol %s at address 0x%Lx\n" name addr
+    | E.Not_local name ->
       let start = interval.l in
       let finish = interval.r in
       let offset =
@@ -178,9 +188,8 @@ let decode_addr t addr interval dbg =
           else None
       in
       if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
-      { rel; dbg }
-  in
-  if Option.is_some loc.rel then Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc
+      let loc = { rel; dbg } in
+      Raw_addr.Table.add_exn t.addr2loc ~key:addr ~data:loc)
 ;;
 
 let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
