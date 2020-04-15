@@ -58,3 +58,4 @@ val print_stats : t -> unit
 module Merge : Merge.Algo with type profile = t
 
 val verbose : bool ref
+val ignore_local_dup : bool ref

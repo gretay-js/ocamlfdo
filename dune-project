@@ -1,7 +1,7 @@
 (lang dune 1.10)
 (using fmt 1.1)
 (name ocamlfdo)
-(version 0.1.0)
+(version 0.1.1)
 
 (license MIT)
 (maintainers "Greta Yorsh <gyorsh@janestreet.com>")

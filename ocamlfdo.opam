@@ -11,7 +11,7 @@ authors: ["Greta Yorsh <gyorsh@janestreet.com>"]
 bug-reports: "https://github.com/gretay-js/ocamlfdo/issues"
 homepage: "https://github.com/gretay-js/ocamlfdo"
 license: "MIT"
-version: "0.1.0"
+version: "0.1.1"
 dev-repo: "git+https://github.com/gretay-js/ocamlfdo.git"
 synopsis: "Feedback-Directed Optimizer for OCaml"
 description: """

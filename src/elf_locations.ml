@@ -1,8 +1,9 @@
 open Core
 
 type function_sym =
-  | Local of string
-  | Not_local of string
+  { name : string
+  ; local : bool
+  }
 
 type t =
   { map : Owee_buf.t
@@ -287,11 +288,7 @@ let resolve_function_containing t ~program_counter =
     (match Intervals.enclosing t.resolved_fun_intervals program_counter with
     | Some fun_interval ->
       t.intervals_hits <- t.intervals_hits + 1;
-      let nm =
-        match fun_interval.Intervals.v with
-        | Local nm
-        | Not_local nm -> nm
-      in
+      let nm = fun_interval.Intervals.v.name in
       report "Found fun in interval cache" (Some nm) program_counter;
       Some fun_interval
     | None ->
@@ -367,12 +364,12 @@ let resolve_function_containing t ~program_counter =
               None
             | Some name ->
               let open Intervals in
-              let v =
+              let local =
                 match Owee_elf.Symbol_table.Symbol.binding_attribute sym with
-                | Local -> Local name
-                | Global | Weak | GNU_unique | Other _ -> Not_local name
+                | Local -> true
+                | Global | Weak | GNU_unique | Other _ -> false
               in
-              let fun_interval = { l = start; r = finish; v } in
+              let fun_interval = { l = start; r = finish; v = { name; local } } in
               report "Caching fun " (Some name) program_counter;
               (* Hashtbl.add t.resolved_fun program_counter (Some
                          name); *)

@@ -123,6 +123,14 @@ module Commonflag = struct
   ;;
 end
 
+let flag_ignore_local_dup =
+  Command.Param.(
+    flag
+      "-ignore-local-dup"
+      no_arg
+      ~doc:" ignore samples in local functions with the same name (non-ocaml)")
+;;
+
 let flag_ignore_overflow =
   Command.Param.(
     flag
@@ -453,6 +461,7 @@ let decode_command =
       and write_aggregated_profile = flag_write_aggregated_profile
       and read_aggregated_perf_profile = flag_read_aggregated_perf_profile
       and ignore_buildid = flag_ignore_buildid
+      and ignore_local_dup = flag_ignore_local_dup
       and expected_pids = flag_expected_pids
       and crc_config = flag_crc_config
       and report = flag_report
@@ -462,6 +471,7 @@ let decode_command =
       if v then set_verbose true;
       if q then set_verbose false;
       Execount.ignore_overflow := ignore_overflow;
+      Aggregated_decoded_profile.ignore_local_dup := ignore_local_dup;
       make_random_state seed [];
       if !Main_fdo.verbose
       then (
