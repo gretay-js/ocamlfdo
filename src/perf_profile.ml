@@ -172,7 +172,7 @@ let buildid = [ "buildid-list"; "-f" ]
 
 let perf_fold filename args ~init ~f =
   let args = List.concat [ [ "perf" ]; args; [ "-i"; filename ] ] in
-  if !verbose then Printf.printf "%s\n" (String.concat args);
+  if !verbose then Printf.printf "%s\n" (String.concat ~sep:" " args);
   let open Shexp_process in
   let open Shexp_process.Infix in
   let f x y = return (f x y) in
@@ -180,7 +180,7 @@ let perf_fold filename args ~init ~f =
   if !verbose then print_endline (Sexp.to_string_hum sexp);
   match t with
   | Ok t -> t
-  | _ -> Report.user_error "Unexpected output of %s" (String.concat args)
+  | _ -> Report.user_error "Unexpected output of %s" (String.concat ~sep:" " args)
 ;;
 
 let read filename =
@@ -389,7 +389,7 @@ let check_buildid binary perf_data ignore_buildid =
          To ignore, add -ignore-buildid option when calling `ocamlfdo decode`."
         (msg ())
         binary_buildid
-        (String.concat ~sep:"" buildid)
+        (String.concat ~sep:" " buildid)
         perf_data
   | _ -> ());
   if !verbose

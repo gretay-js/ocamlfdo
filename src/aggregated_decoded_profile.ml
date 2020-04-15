@@ -158,12 +158,10 @@ let decode_addr t addr interval dbg =
          C compilers when -ffunction-sections.
          We cannot reorder one local functions only at link time time.
          BOLT can do this as post link. We ignore all samples in local functions. *)
-      if !verbose
-      then
-        printf
-          "Ignoring samples in local function symbol %s at address 0x%Lx\n"
-          name
-          addr;
+      Report.logf
+        "Ignoring samples in local function symbol %s at address 0x%Lx\n"
+        name
+        addr;
       false
     | E.Not_local name ->
       let start = interval.l in
@@ -191,7 +189,9 @@ let decode_addr t addr interval dbg =
             let func = Int.Table.find_exn t.functions id in
             func.has_linearids <- true;
             Some dbg.line)
-          else None
+          else (
+            Report.logf "No linear ids in function %s from file %s\n" name dbg.file;
+            None)
       in
       if !verbose then printf "addr2loc adding addr=0x%Lx\n" addr;
       let loc = { rel; dbg } in
