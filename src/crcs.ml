@@ -41,8 +41,8 @@ module Crc = struct
     { kind = Kind.of_string_exn kind; crc }
 end
 
-type tbl = Crc.t String.Table.t [@@deriving sexp, bin_io]
 (** map name to the corresponding Crc *)
+type tbl = Crc.t String.Table.t [@@deriving sexp, bin_io]
 
 type action =
   | Create
@@ -345,9 +345,15 @@ let decode_and_add t s =
       (* CR-soon gyorsh: owee returns duplicate symbols, even though the
          symbol table has only one entry in the symbol table, because of the
          way owee iterates over symbols using interval tree. *)
-      assert (
-        check_and_add ~error_on_duplicate:false t ~name crc
-          ~file:"specified by -binary option" )
+      let keep =
+        match crc.kind with
+        | Func -> t.config.func.enabled
+        | Unit -> t.config.unit.enabled
+      in
+      if keep then
+        assert (
+          check_and_add ~error_on_duplicate:false t ~name crc
+            ~file:"specified by -binary option" )
 
 let merge_into ~src ~dst (config : Config.t) =
   let merge_crcs ~key (a : Crc.t) b =

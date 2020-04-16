@@ -242,8 +242,13 @@ let create locations (agg : Aggregated_perf_profile.t) ~crc_config =
   assert (len <= size);
   (* Resolve all addresses seen in samples in one pass over the binary. *)
   Elf_locations.resolve_all locations addresses;
-  (* set config to all true to decode all symbols from the binary and store
-     in the profile, even if the user chooses to ignore them later. *)
+  (* CR-someday gyorsh: set config to all true to decode all symbols from the
+     binary and store in the profile, even if the user chooses to ignore them
+     later. For now, we use crc_config from command line to control what kind
+     of crcs to save, with the default being only unit level, because (1) the
+     profile can be too big when all function crcs are included and this
+     slows down builds that use the profile, (2) reuse is still fragile due
+     to ppx and location information. *)
   let crcs = Crcs.(mk Create crc_config) in
   Elf_locations.iter_symbols locations ~func:false ~data:true
     ~f:(fun name _ -> Crcs.decode_and_add crcs name);
