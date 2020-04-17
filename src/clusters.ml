@@ -43,6 +43,8 @@ type 'd cluster =
     weight : weight;  (** weight *)
     items : 'd list;  (** data items represented by this cluster. *)
     mutable can_be_merged : bool
+        (** [a.can_be_merged] is [false] means that [a] cannot be placed in a
+            cluster _after_ another [b] **)
   }
 
 type edge =
@@ -149,6 +151,7 @@ let edge_compare e1 e2 =
 
 (* Merge two clusters, laying out their components in order as c1@c2. *)
 let merge t c1 c2 =
+  assert c2.can_be_merged;
   assert (c1.id <> c2.id);
   let id = t.next_id in
   let next_id = id + 1 in
