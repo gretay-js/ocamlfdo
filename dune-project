@@ -21,7 +21,7 @@ Copyright (c) 2019 Jane Street Group LLC.
 ")
 
  (depends
-  (ocaml (>= 4.08))
+  (ocaml (>= 4.11))
   (dune (>= 1.8))
   (ocamlcfg (>= 0.1.0))
   owee
