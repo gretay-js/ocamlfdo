@@ -41,7 +41,7 @@ For now, the process is:
 ```
 opam switch create fdo409 --empty
 opam pin add ocaml-variants https://github.com/gretay-js/ocaml.git#fdo409
-opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git
+opam pin add ocamlcfg https://github.com/gretay-js/ocamlcfg.git#409
 opam pin add owee https://github.com/let-def/owee.git
 opam pin add ocamlfdo https://github.com/gretay-js/ocamlfdo.git
 ```
