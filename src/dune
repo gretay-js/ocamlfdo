@@ -6,6 +6,7 @@
  (libraries
         owee
         core
+        core.bigstring_unix
         compiler-libs.optcomp
         parsexp_io
         shexp.process

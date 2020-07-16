@@ -356,7 +356,7 @@ let decode_and_add t s =
             ~file:"specified by -binary option" )
 
 let merge_into ~src ~dst (config : Config.t) =
-  let merge_crcs ~key (a : Crc.t) b =
+  let merge_crcs ~key (a : Crc.t) b : (_ Hashtbl.Merge_into_action.t) =
     match b with
     | None ->
         (* If one of the CRC is missing, we can't check it, so require
@@ -380,13 +380,13 @@ let merge_into ~src ~dst (config : Config.t) =
           | Fail -> Report.user_error "%s\n" msg
           | Skip ->
               if !verbose then print_endline msg;
-              Hashtbl.Remove
+              Remove
           | Use_anyway ->
               if !verbose then print_endline msg;
-              Hashtbl.Set_to a )
-        else Hashtbl.Set_to a
+              Set_to a )
+        else Set_to a
     | Some b -> (
-        if Crc.equal a b then Hashtbl.Set_to b
+        if Crc.equal a b then Set_to b
         else
           let msg =
             sprintf
@@ -410,13 +410,13 @@ let merge_into ~src ~dst (config : Config.t) =
               let enabled = e_a || e_b in
               (enabled, if enabled then o_a else Fail)
           in
-          if not enabled then Hashtbl.Remove
+          if not enabled then Remove
           else
             match on_mismatch with
             | Fail -> Report.user_error "%s\n" msg
             | Skip ->
                 if !verbose then print_endline msg;
-                Hashtbl.Remove
+                Remove
             | Use_anyway ->
                 if !verbose then (
                   print_endline msg;
@@ -424,7 +424,7 @@ let merge_into ~src ~dst (config : Config.t) =
                     "Removing anyway.\n\
                      Otherwise the result depends on the order in which \
                      profile files are given to merge." );
-                Hashtbl.Remove )
+                Remove )
   in
   Hashtbl.merge_into ~src ~dst ~f:merge_crcs
 

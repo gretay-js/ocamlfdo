@@ -3,6 +3,10 @@ lib: [
   "_build/install/default/lib/ocamlfdo/dune-package"
   "_build/install/default/lib/ocamlfdo/opam"
 ]
+bin: [
+  "_build/install/default/bin/ocamlfdo"
+  "_build/install/default/bin/ocamlfdo.exe"
+]
 etc: [
   "_build/install/default/etc/ocamlfdo/linker-script"
 ]

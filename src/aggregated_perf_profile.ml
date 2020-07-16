@@ -40,9 +40,10 @@ let write t filename =
 
 let merge_into ~src ~dst ~ignore_buildid =
   dst.buildid <- Merge.buildid src.buildid dst.buildid ~ignore_buildid;
-  let merge_execounts ~key:_ a = function
-    | None -> Hashtbl.Set_to a
-    | Some b -> Hashtbl.Set_to Execount.(a + b)
+  let merge_execounts ~key:_ a b : (_ Hashtbl.Merge_into_action.t) =
+    match b with
+    | None -> Set_to a
+    | Some b -> Set_to Execount.(a + b)
   in
   Hashtbl.merge_into ~src:src.instructions ~dst:dst.instructions
     ~f:merge_execounts;
