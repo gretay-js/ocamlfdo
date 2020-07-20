@@ -1,7 +1,7 @@
 (lang dune 1.10)
 (using fmt 1.1)
 (name ocamlfdo)
-(version 0.1.1)
+(version 0.1.2)
 
 (license MIT)
 (maintainers "Greta Yorsh <gyorsh@janestreet.com>")
@@ -25,11 +25,11 @@ Copyright (c) 2019 Jane Street Group LLC.
   (dune (>= 1.8))
   (ocamlcfg (>= 0.1.0))
   owee
-  core
+  (core (>= 0.14.0))
   ppx_jane
   dune-build-info
   re2
-;  (shexp  (>= v0.14-preview.122.11+261))
+  (shexp  (>= v0.14.0))
   shexp
   parsexp_io
  )

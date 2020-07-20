@@ -11,7 +11,7 @@ authors: ["Greta Yorsh <gyorsh@janestreet.com>"]
 bug-reports: "https://github.com/gretay-js/ocamlfdo/issues"
 homepage: "https://github.com/gretay-js/ocamlfdo"
 license: "MIT"
-version: "0.1.1"
+version: "0.1.2"
 dev-repo: "git+https://github.com/gretay-js/ocamlfdo.git"
 synopsis: "Feedback-Directed Optimizer for OCaml"
 description: """
@@ -28,10 +28,11 @@ depends: [
   "dune" {>= "1.8"}
   "ocamlcfg" {>= "0.1.0"}
   "owee"
-  "core"
+  "core" {>= "0.14.0"}
   "ppx_jane"
   "dune-build-info"
   "re2"
+  "shexp" {>= "v0.14.0"}
   "shexp"
   "parsexp_io"
 ]

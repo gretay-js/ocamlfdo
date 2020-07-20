@@ -4,6 +4,7 @@
  (package ocamlfdo)
  (ocamlopt_flags (:standard "-g"))
  (libraries
+        core.bigstring_unix
         owee
         core
         compiler-libs.optcomp

@@ -60,10 +60,10 @@ SECTIONS
     *(.text.startup .text.startup.*)
     *(.text.hot .text.hot.*)
     . = ALIGN(0x2000000);
-    *(.text.caml_hot__code_begin)
+    *(.text.caml.caml_hot__code_begin)
 	*(.text.caml.camlStd_exit__entry)
 	*(.text.caml.camlTest2__foo_10)
-    *(.text.caml_hot__code_end)
+    *(.text.caml.caml_hot__code_end)
     *(.text .stub .text.* .gnu.linkonce.t.*)
     /* .gnu.warning sections are handled specially by elf32.em.  */
     *(.gnu.warning)

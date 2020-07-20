@@ -313,7 +313,7 @@ let write_bin t filename =
     Out_channel.with_file filename ~f:(fun oc ->
         write_shape oc;
         let buf = Bin_prot.Utils.bin_dump ~header:true bin_writer_t t in
-        Bigstring.really_output oc buf)
+        Bigstring_unix.really_output oc buf)
   with e ->
     Report.user_error ~exn:(Some e) "Failed to write profile to %s" filename
 
@@ -321,7 +321,7 @@ let read_bin filename =
   try
     In_channel.with_file filename ~f:(fun ic ->
         read_and_check_shape ic;
-        let read buf ~pos ~len = Bigstring.really_input ic ~pos ~len buf in
+        let read buf ~pos ~len = Bigstring_unix.really_input ic ~pos ~len buf in
         Bin_prot.Utils.bin_read_stream ~read bin_reader_t)
   with e ->
     Report.user_error ~exn:(Some e) "Failed to read profile from %s" filename
@@ -528,7 +528,7 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
           b
     in
     Int.Table.set old2new ~key:a ~data:newid;
-    String.Table.Set_to newid
+    Hashtbl.Merge_into_action.Set_to newid
   in
   if !verbose then (
     Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
@@ -555,12 +555,12 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
     Printf.printf !"src:\n%{sexp:int String.Table.t}\n" src.name2id;
     Printf.printf !"dst:\n%{sexp:int String.Table.t}\n" dst.name2id );
   let merge_addr2loc ~key:_ a = function
-    | None -> Raw_addr.Table.Set_to a
-    | Some b -> Raw_addr.Table.Set_to (Loc.merge a b)
+    | None -> Hashtbl.Merge_into_action.Set_to a
+    | Some b -> Hashtbl.Merge_into_action.Set_to (Loc.merge a b)
   in
   let merge_functions ~key:_ a = function
-    | None -> Int.Table.Set_to a
-    | Some b -> Int.Table.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
+    | None -> Hashtbl.Merge_into_action.Set_to a
+    | Some b -> Hashtbl.Merge_into_action.Set_to (Func.merge a b ~crc_config ~ignore_buildid)
   in
   Raw_addr.Table.merge_into ~src:src.addr2loc ~dst:dst.addr2loc
     ~f:merge_addr2loc;

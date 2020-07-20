@@ -180,8 +180,8 @@ let merge t c1 c2 =
         let d = edge.dst in
         let src = if s = c1.id || s = c2.id then c.id else s in
         let dst = if d = c1.id || d = c2.id then c.id else d in
-        if src = edge.src && dst = edge.dst then `Snd edge
-        else `Fst { src; dst; weight = edge.weight })
+        if src = edge.src && dst = edge.dst then Second edge
+        else First { src; dst; weight = edge.weight })
   in
   (* Update the weights of the edges whose endpoints were updated. *)
   (* Preserve the invariant that the edges are unique pairs of (src,dst).
