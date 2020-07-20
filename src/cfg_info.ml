@@ -268,7 +268,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
         if !verbose
         then
           printf "Return from (label=%d) to (label=%d)" from_block_start to_block_start
-      (* CR-soon gyorsh: We could count the reverse of this edge as a call.
+      (* CR-someday gyorsh: We could count the reverse of this edge as a call.
            It's a bit tricky as we need to find the instruction right before
            the to_loc and that is the callsite, and we need to construct
            callee from the entry location of the current function

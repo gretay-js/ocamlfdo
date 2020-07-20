@@ -110,11 +110,11 @@ module Level = struct
 end
 
 module Config = struct
-  (* CR-soon gyorsh: separate on_mismatch to be per unit and per function?
+  (* CR-someday gyorsh: separate on_mismatch to be per unit and per function?
      Per function does not superceed per unit, if only data part of the unit
      changed, then unit crc will be different, all but func crc will be the
      same. *)
-  (* CR-soon gyorsh: this is ugly, everything appears twice, how to avoid it? *)
+  (* CR-someday gyorsh: this is ugly, everything appears twice, how to avoid it? *)
   type t =
     { unit : Level.t;
       func : Level.t;
@@ -269,7 +269,7 @@ let check_and_add ?error_on_duplicate t ~name crc ~file =
   | Create -> true
   | Compare tbl -> check tbl t.config ~name crc ~file
 
-(* CR-soon gyorsh: do we need crc of data? *)
+(* CR-someday gyorsh: do we need crc of data? *)
 let add_unit t (ui : Linear_format.linear_unit_info) ~hex ~file =
   if t.config.unit.enabled then
     let name = ui.unit_name in
@@ -342,7 +342,7 @@ let decode_and_add t s =
         printf "crc_symbol=%s\n" s;
         printf !"name=%s, crc=%{sexp:Crc.t}\n" name crc );
       (* check if the symbol has already been recorded *)
-      (* CR-soon gyorsh: owee returns duplicate symbols, even though the
+      (* CR-someday gyorsh: owee returns duplicate symbols, even though the
          symbol table has only one entry in the symbol table, because of the
          way owee iterates over symbols using interval tree. *)
       let keep =

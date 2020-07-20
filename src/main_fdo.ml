@@ -116,7 +116,7 @@ let decode files ~binary_filename ~reorder_functions
             Linker_script.write_hot filename agg_dec_profile
               ~reorder_functions ~check)
 
-(* CR-soon gyorsh: If we eliminate dead blocks before a transformation then
+(* CR-someday gyorsh: If we eliminate dead blocks before a transformation then
    some algorithms might not apply because they rely on perf data based on
    original instructions. On the other hand, for iterative fdo, if we don't
    have counters for an instruction, we don't know if it's because it is cold
@@ -207,7 +207,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
         | Some profile -> Reorder.Profile profile )
   in
   let process file =
-    (* CR-soon gyorsh: all crcs of previously processed files get printed for
+    (* CR-someday gyorsh: all crcs of previously processed files get printed for
        each file. *)
     let crcs =
       match profile with
@@ -332,7 +332,7 @@ let dump files ~dot ~show_instr =
   in
   List.iter files ~f:process
 
-(* CR-soon gyorsh: call emit directly after optimize, working on the IR in
+(* CR-someday gyorsh: call emit directly after optimize, working on the IR in
    memory instead of saving / restoring from file. The problem is set up
    global state (such as clflags) that were determined from command line and
    environment etc is currently very cumbersome and highly dependent on the

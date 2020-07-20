@@ -9,7 +9,7 @@ type t =
     agg : Aggregated_perf_profile.t
         (** Counters that refer to this function, uses raw addresses. *)
   }
-(* CR-soon gyorsh: agg can be dropped after cfg_count is constructed, to save
+(* CR-someday gyorsh: agg can be dropped after cfg_count is constructed, to save
    memory. *)
 [@@deriving sexp, bin_io]
 

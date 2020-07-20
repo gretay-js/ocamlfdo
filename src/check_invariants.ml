@@ -110,7 +110,7 @@ let rec simplify i =
           }
         else cont i
     | false, false, false ->
-        (* CR-soon gyorsh: this is very repetitive and can be simplified
+        (* CR-someday gyorsh: this is very repetitive and can be simplified
            using Linear.invert_test . *)
         if Label.equal l0 l1 && Label.equal l0 l2 then
           { i with desc = Lbranch l0; next = simplify i.next }

@@ -54,7 +54,7 @@ let parse_br index s =
       | "A" | "-" -> ()
       | _ -> Report.user_error "Cannot parse mispredict flag %s in %s" a s ()
       );
-      (* Parse and ignore cycles. CR-soon gyorsh: use for optimizations. *)
+      (* Parse and ignore cycles. CR-someday gyorsh: use for optimizations. *)
       let _cycles = Int.of_string c in
       { from_addr = Raw_addr.of_string from_addr;
         to_addr = Raw_addr.of_string to_addr;
@@ -91,7 +91,7 @@ type row =
   | Sample of sample
   | Mmap of mmap
 
-(* CR-soon gyorsh: this is just parsing a regexp like a monkey, and it is
+(* CR-someday gyorsh: this is just parsing a regexp like a monkey, and it is
    getting ugly and probably slow. use regexp parser? *)
 let row_to_sample ~keep_pid row =
   match split_on_whitespace row with
@@ -272,7 +272,7 @@ let aggregate_br prev cur is_last (aggregated : Aggregated_perf_profile.t) =
           let key = (from_addr, to_addr) in
           inc aggregated.traces key )
 
-(* CR-soon gyorsh: aggregate during parsing of perf profile *)
+(* CR-someday gyorsh: aggregate during parsing of perf profile *)
 let rec aggregate_brstack prev brstack aggregated =
   match brstack with
   | [] -> ()
@@ -291,7 +291,7 @@ let extract_pids data perf_data =
      the output of `perf script` to a particular dso. With `perf script`, dso
      appearing attached to every address in brstacks, which makes the output
      much bigger and longer to process. *)
-  (* CR-soon gyorsh: replace this hack with parsing the output of perf
+  (* CR-someday gyorsh: replace this hack with parsing the output of perf
      report, or a better way to extract pids. *)
   (* We could also extract buildid and dso association from this output,
      without calling buildid-list before it, but while the call to
@@ -427,7 +427,7 @@ let read_and_aggregate filename binary ignore_buildid expected_pids =
           lbr = stats.lbr + List.length sample.brstack
         }
     | Mmap _mmap -> stats
-    (* CR-soon gyorsh: use memory map to translate ip addresses of samples
+    (* CR-someday gyorsh: use memory map to translate ip addresses of samples
        (ip=instruction pointer is a virtual memory address) to offsets into
        the binary. If mmap is not available, warn the user and continue,
        assuming direct mapping.

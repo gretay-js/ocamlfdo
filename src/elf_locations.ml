@@ -60,7 +60,7 @@ let create ~elf_executable =
     }
 ;;
 
-(* CR-soon mshinwell: tidy all this up. Also, the pinpointing of which row is
+(* CR-someday mshinwell: tidy all this up. Also, the pinpointing of which row is
    the correct one isn't great. *)
 
 type l =

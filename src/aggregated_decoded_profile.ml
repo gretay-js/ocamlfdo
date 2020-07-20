@@ -146,7 +146,7 @@ let get_or_add_func_id t (i : Elf_locations.function_sym Intervals.interval)
         func.id = id && i.v.local
         && (!ignore_local_dup || String.is_prefix ~prefix:"_" name)
       then (
-        (* CR-soon gyorsh: which function is ignored depends on the order in
+        (* CR-someday gyorsh: which function is ignored depends on the order in
            which we encounter the local functions in the samples. If we
            remove the existing function, and encounter the name again, how do
            we know that it is a duplicate? *)
@@ -334,11 +334,11 @@ let of_sexp ~input_filename ~output_filename =
   let t = read input_filename in
   write_bin t output_filename
 
-(* CR-soon gyorsh: how often do we need to create it? is it worth storing it
+(* CR-someday gyorsh: how often do we need to create it? is it worth storing it
    as a field of [t]. It can be computed after the profile is decoded (i.e.,
    need not be on the fly).
 
-   CR-soon gyorsh: for partial profile reuse, we considered adding the new
+   CR-someday gyorsh: for partial profile reuse, we considered adding the new
    function names to name2id mapping, with the id of the old function. This
    can cause id2name become a multiset. Check that profile reuse does not
    confuse all uses of id2name in particular hot function list is generated
@@ -465,7 +465,7 @@ type patch =
   }
 [@@deriving sexp]
 
-(* CR-soon gyorsh: use information from t.crcs when merging functions.
+(* CR-someday gyorsh: use information from t.crcs when merging functions.
    WARNING: modifies the input profiles inplace in memory, to avoid
    allocations. Does not modify the files.
 
@@ -481,7 +481,7 @@ type patch =
    specified by the user (need extra argument).
 
    Current implementation is effectively (1), because CRC are not used when
-   merging the functions. CR-soon gyorsh: enable the above alternatives
+   merging the functions. CR-someday gyorsh: enable the above alternatives
    through a command line option, for experiments.
 
    When ignoring buildid and crcs, it is possible to merge profiles from
@@ -536,7 +536,7 @@ let merge_into ~src ~dst ~crc_config ~ignore_buildid =
   String.Table.merge_into ~src:src.name2id ~dst:dst.name2id ~f:merge_name2id;
   ( if not (List.is_empty !patches) then
       (* patch dst.name2id: needed if two names in src mapped to the same id. *)
-      (* CR-soon gyorsh: this is completely untested. *)
+      (* CR-someday gyorsh: this is completely untested. *)
       if !verbose then (
         Printf.printf !"patch:\n%{sexp:patch List.t}\n" !patches;
         Printf.printf

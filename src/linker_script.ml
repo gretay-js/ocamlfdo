@@ -62,7 +62,7 @@ let print_hot oc ~functions ~check =
     print_section name is_ocaml;
     if check then print_check name is_ocaml
   in
-  (* CR-soon gyorsh: It may be convenient to generate all asserts at the end
+  (* CR-someday gyorsh: It may be convenient to generate all asserts at the end
      of the hot section, instead of interleaved with layout, if users ever
      look at the layout. *)
   List.iter functions ~f:print

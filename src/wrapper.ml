@@ -1,4 +1,4 @@
-(* CR-soon gyorsh: Most of this messing with command line arguments wouldn't
+(* CR-someday gyorsh: Most of this messing with command line arguments wouldn't
    be needed if we could invoke the compiler directly, as a (reentrant)
    library, or as a hook installed into the compiler using pass manager. *)
 open Core
@@ -96,7 +96,7 @@ let phase_args t phase =
 
 let call_ocamlopt w phase =
   let args = phase_flags phase @ phase_args w phase in
-  (* CR-soon gyorsh: how to get the correct path to ocamlopt, there may be
+  (* CR-someday gyorsh: how to get the correct path to ocamlopt, there may be
      multiple? *)
   let ocamlopt = "ocamlopt" in
   if !verbose then (

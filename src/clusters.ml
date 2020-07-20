@@ -24,6 +24,12 @@
    Optimization (CGO '16). *)
 open Core
 
+(* CR-someday xclerc: the various operations in this files (sorting,
+   extracting the argmin/argmax, etc) seem to indicate that we might
+   want to switch from lists to e.g. heaps. However, the execution
+   profile shows that the tool does not spend much time in the clustering,
+   so this should be low-priority (or even just discarded). *)
+
 let verbose = ref true
 
 type clusterid = int [@@deriving compare]
@@ -110,7 +116,7 @@ let init_layout original_layout execounts =
               let dst = find_pos (Option.value_exn b.target_label) in
               let e =
                 mk_edge ~src ~dst ~weight:b.taken
-                (* CR-soon gyorsh: can we factor in mispredicted? *)
+                (* CR-someday gyorsh: can we factor in mispredicted? *)
               in
               e :: acc
             else acc))
@@ -125,17 +131,17 @@ let cluster_compare_frozen c1 c2 =
   if Bool.equal c1.can_be_merged c2.can_be_merged then
     let res = compare_weight c2.weight c1.weight in
     if res = 0 then
-      let res = compare c1.pos c2.pos in
-      if res = 0 then compare c1.id c2.id else res
+      let res = Int.compare c1.pos c2.pos in
+      if res = 0 then Int.compare c1.id c2.id else res
     else res
   else if c1.can_be_merged then -1
   else 1
 
 let cluster_compare_pos c1 c2 =
-  let res = compare c1.pos c2.pos in
+  let res = Int.compare c1.pos c2.pos in
   if res = 0 then
     let res = compare_weight c1.weight c2.weight in
-    if res = 0 then compare c1.id c2.id else res
+    if res = 0 then Int.compare c1.id c2.id else res
   else res
 
 let _get_cluster t id = List.find_exn t.clusters ~f:(fun c -> c.id = id)
@@ -245,6 +251,9 @@ let optimize_layout original_layout execounts =
        it is moved to the end. *)
     let clusters = List.sort t.clusters ~compare:cluster_compare_frozen in
     let t = { t with clusters } in
+    (* CR-someday xclerc: it might be slightly more efficient to keep two
+       collections here: the clusters that can be merged and those that
+       cannot. *)
     let rec loop t step =
       match t.clusters with
       | [] -> []

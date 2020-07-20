@@ -28,7 +28,7 @@ let check cl new_cfg_layout =
       !"Reordered %s\norig: %{sexp: int list}\nnew : %{sexp: int list}\n"
       (C.fun_name cfg) orig_cfg_layout new_cfg_layout;
     if !validate then
-      (* Make sure the new layout is just a permutation. CR-soon gyorsh: do
+      (* Make sure the new layout is just a permutation. CR-someday gyorsh: do
          we need to handle block duplication here? *)
       let compare = Int.compare in
       let orig_len = List.length orig_cfg_layout in
