@@ -25,7 +25,7 @@ Copyright (c) 2019 Jane Street Group LLC.
   (dune (>= 1.8))
   (ocamlcfg (>= 0.1.0))
   owee
-  core
+  (core (>= v0.14.0))
   ppx_jane
   dune-build-info
   re2

@@ -835,6 +835,19 @@ let misc_command =
       ("dump-ir", dump_command);
       ("bolt", bolt_command) ]
 
+let spill_score_command =
+  Command.basic
+    ~summary:"Analyse spill code placement efficiency"
+    Command.Let_syntax.(
+      let%map files = anon_files
+      and fdo_profile = Commonflag.(optional flag_profile_filename)
+      and timings = flag_timings in
+      fun () ->
+        Profile.record_call "spill_score" (fun () ->
+          Spill_score.score files ~fdo_profile);
+        if timings then
+          Profile.print Format.std_formatter Profile.all_columns)
+
 let main_command =
   Command.group ~summary:"Feedback-directed optimizer for Ocaml"
     ~readme:(fun () ->
@@ -850,7 +863,8 @@ let main_command =
       ("compile", compile_command);
       ("check", check_command);
       ("profile", profile_command);
-      ("misc", misc_command) ]
+      ("misc", misc_command);
+      ("spill-score", spill_score_command) ]
 
 let run ?version ?build_info () =
   set_verbose false;
