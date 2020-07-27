@@ -30,7 +30,7 @@ val malformed_traces : t -> Execount.t
 
 val dump : t -> unit
 
-val dump_dot : t -> string -> unit
+val dump_dot : t ->  ?show_instr:bool -> string -> unit
 
 val fold : t -> init:'a -> f:(key:int -> data:Block_info.t -> 'a -> 'a) -> 'a
 

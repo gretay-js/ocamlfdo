@@ -37,9 +37,9 @@ module Path_use = struct
        any of the exists. Carries the count of the most frequently
        executed user on the path. *)
     | Sometimes of Frequency.t * Frequency.t
-    (* Joins two paths, carrying the maximal execution count on a
-       path which never uses the value and the cout of the most
-       frequently executed user. *)
+    (* Joins two paths, carrying the maximal execution count of the
+       most frequent user and the maximal execution count
+       on a path which never uses the value. *)
     [@@deriving sexp, equal, compare]
 
   let lub a b =
@@ -497,6 +497,21 @@ module Spill_to_reload = struct
     [@@deriving sexp]
 end
 
+(*
+let get_block = function
+  | Cfg_inst_id.Term block -> block
+  | Cfg_inst_id.Inst(block, _) -> block
+
+let get_inst_id cfg = function
+  | Cfg_inst_id.Term block ->
+    let bb = Cfg.get_block_exn cfg block in
+    (BB.terminator bb).id
+  | Cfg_inst_id.Inst(block, n) ->
+    let bb = Cfg.get_block_exn cfg block in
+    let i = List.nth_exn (BB.body bb) n in
+    i.Cfg.id
+*)
+
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
   let reg_uses = Reg_use_classify.solve { cfg; cfg_info } in
@@ -511,28 +526,52 @@ let score cl ~cfg_info =
           let all_spill_uses_at, _ = Cfg_inst_id.Map.find cfg_spill_id spill_uses in
           let all_uses, reload_uses = Spill.Map.find_exn all_spill_uses_at s in
           let reloads =
-            Inst_id.Map.mapi reload_uses ~f:(fun ~key ~data ->
+            Inst_id.Map.filter_mapi reload_uses ~f:(fun ~key ~data ->
               let block, reload_id = key in
               let { Spill_use_class.Reload_class.path; pressure } = data in
-              let reload_bb = Cfg.get_block_exn cfg block in
-              let cfg_inst_idx, reload =
-                List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
-                  if i.Cfg.id = reload_id then Some (idx, i) else None)
-              in
-              let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
-              let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
-              let reload_reg =
-                match reload.Cfg.desc, reload.Cfg.res with
-                | Cfg.Op Cfg.Reload, [| { loc = Reg.Reg r; _ } |] -> r
-                | _ -> failwith "invalid reload"
-              in
-              let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
-              Spill_to_reload.Reload.({ path; pressure; reg_use }))
+              match path with
+              | Path_use.Never _ -> None
+              | _ ->
+                let reload_bb = Cfg.get_block_exn cfg block in
+                let cfg_inst_idx, reload =
+                  List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
+                    if i.Cfg.id = reload_id then Some (idx, i) else None)
+                in
+                let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
+                let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
+                let reload_reg =
+                  match reload.Cfg.desc, reload.Cfg.res with
+                  | Cfg.Op Cfg.Reload, [| { loc = Reg.Reg r; _ } |] -> r
+                  | _ -> failwith "invalid reload"
+                in
+                let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
+                Some (Spill_to_reload.Reload.({ path; pressure; reg_use })))
           in
           Spill_to_reload.Spill.(Inst_id.Map.set acc ~key:id ~data:{ all_uses; reloads })
         | _ -> acc))
   in
-  print_s [%message (spill_reloads : Spill_to_reload.t)]
+  (*
+  Cfg_inst_id.Map.iter
+    (fun id (use_in, use_out) ->
+      Printf.printf "> %d %d\n" (get_block id) (get_inst_id cfg id);
+      print_s [%message (use_in : Register_use_class.t)];
+      print_s [%message (use_out : Register_use_class.t)]
+    )
+    reg_uses;
+  *)
+  (*
+  Cfg_inst_id.Map.iter
+    (fun id (use_in, use_out) ->
+      Printf.printf "> %d %d\n" (get_block id) (get_inst_id cfg id);
+      print_s [%message (use_in : Spill_use_class.t)];
+      print_s [%message (use_out : Spill_use_class.t)]
+    )
+    spill_uses;
+  *)
+  print_endline (Cfg.fun_name cfg);
+  Option.iter cfg_info ~f:(fun t -> Cfg_info.dump_dot t "");
+  print_s [%message (spill_reloads : Spill_to_reload.t)];
+  Printf.printf "\n\n"
 
 let score files ~fdo_profile =
   let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in

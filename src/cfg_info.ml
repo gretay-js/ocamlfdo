@@ -657,7 +657,7 @@ let dump t =
   List.iter layout ~f:(dump_block t)
 ;;
 
-let dump_dot t msg =
+let dump_dot t ?show_instr msg =
   let annotate_block label =
     match get_block t label with
     | None -> ""
@@ -684,7 +684,7 @@ let dump_dot t msg =
           then sprintf "\\rmis:%Ld" b.mispredicts
           else ""))
   in
-  CL.save_as_dot t.cl ~show_instr:false ~annotate_block ~annotate_succ msg
+  CL.save_as_dot t.cl ?show_instr ~annotate_block ~annotate_succ msg
 ;;
 
 let fold t = Hashtbl.fold t.blocks
