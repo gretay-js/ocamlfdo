@@ -153,7 +153,7 @@ module Reg_use_classify_problem = struct
 
   let init { cfg; _ } block =
     let bb = Cfg.get_block_exn cfg block in
-    if Cfg.is_exit (BB.terminator bb).Cfg.desc then
+    if BB.is_exit bb then
       (Register_use_class.all_unused_registers, Register.Map.empty)
     else
       (Register.Map.empty, Register.Map.empty)
@@ -168,13 +168,13 @@ module Reg_use_classify_problem = struct
           | Reg n -> Register.Set.add acc n
           | _ -> acc)
       in
-      { K.kill =
+      let kill =
         Register.Set.union
           (regs_of_array (inst.Cfg.res))
           (Register.Set.of_array destroyed)
-      ; K.gen = regs_of_array (inst.Cfg.arg)
-      ; K.freq = Frequency.create cfg_info block
-      }
+      in
+      let gen = regs_of_array (inst.Cfg.arg) in
+      { K.kill; K.gen; K.freq = Frequency.create cfg_info block }
     in
     match inst with
     | Cfg_inst_id.Term _->
@@ -421,7 +421,7 @@ module Spill_use_classify_problem = struct
 
   let init { cfg; _ } block =
     let bb = Cfg.get_block_exn cfg block in
-    if Cfg.is_exit (BB.terminator bb).Cfg.desc then
+    if BB.is_exit bb then
       (Spill_use_class.all_unused_spills cfg, Spill.Map.empty)
     else
       (Spill.Map.empty, Spill.Map.empty)
@@ -516,39 +516,51 @@ let score cl ~cfg_info =
   let cfg = CL.cfg cl in
   let reg_uses = Reg_use_classify.solve { cfg; cfg_info } in
   let spill_uses = Spill_use_classify.solve { cfg; cfg_info } in
+
+  let reloads_of_spill reload_uses =
+    Inst_id.Map.filter_mapi reload_uses ~f:(fun ~key ~data ->
+      let block, reload_id = key in
+      let { Spill_use_class.Reload_class.path; pressure } = data in
+      match path with
+      | Path_use.Never _ -> None
+      | _ ->
+        let reload_bb = Cfg.get_block_exn cfg block in
+        let cfg_inst_idx, reload =
+          List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
+            if i.Cfg.id = reload_id then Some (idx, i) else None)
+        in
+        let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
+        let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
+        let reload_reg =
+          match reload.Cfg.desc, reload.Cfg.res with
+          | Cfg.Op Cfg.Reload, [| { loc = Reg.Reg r; _ } |] -> r
+          | _ -> failwith "invalid reload"
+        in
+        let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
+      Some (Spill_to_reload.Reload.({ path; pressure; reg_use })))
+  in
+
   let spill_reloads =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
       List.foldi (BB.body block) ~init:acc ~f:(fun idx acc i ->
-        match i.Cfg.desc, i.Cfg.res with
-        | Cfg.Op Cfg.Spill, [| { loc = Reg.Stack (Reg.Local s); _} |] ->
-          let id = BB.start block, i.Cfg.id in
-          let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
-          let all_spill_uses_at, _ = Cfg_inst_id.Map.find cfg_spill_id spill_uses in
-          let all_uses, reload_uses = Spill.Map.find_exn all_spill_uses_at s in
-          let reloads =
-            Inst_id.Map.filter_mapi reload_uses ~f:(fun ~key ~data ->
-              let block, reload_id = key in
-              let { Spill_use_class.Reload_class.path; pressure } = data in
-              match path with
-              | Path_use.Never _ -> None
-              | _ ->
-                let reload_bb = Cfg.get_block_exn cfg block in
-                let cfg_inst_idx, reload =
-                  List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
-                    if i.Cfg.id = reload_id then Some (idx, i) else None)
-                in
-                let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
-                let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
-                let reload_reg =
-                  match reload.Cfg.desc, reload.Cfg.res with
-                  | Cfg.Op Cfg.Reload, [| { loc = Reg.Reg r; _ } |] -> r
-                  | _ -> failwith "invalid reload"
-                in
-                let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
-                Some (Spill_to_reload.Reload.({ path; pressure; reg_use })))
+        Option.value ~default:acc (
+          let open Option.Let_syntax in
+          let%bind s =
+            match i.Cfg.desc, i.Cfg.res with
+            | Cfg.Op Cfg.Spill, [| { loc = Reg.Stack (Reg.Local s); _} |] -> Some s
+            | _ -> None
           in
-          Spill_to_reload.Spill.(Inst_id.Map.set acc ~key:id ~data:{ all_uses; reloads })
-        | _ -> acc))
+          let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
+          let%bind all_spill_uses_at, _ =
+            Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses
+          in
+          let%map all_uses, reload_uses =
+            Spill.Map.find all_spill_uses_at s
+          in
+          let reloads = reloads_of_spill reload_uses in
+          let key = BB.start block, i.Cfg.id in
+          let data = { Spill_to_reload.Spill.all_uses; reloads } in
+          Inst_id.Map.set acc ~key ~data)))
   in
   (*
   Cfg_inst_id.Map.iter
@@ -558,8 +570,6 @@ let score cl ~cfg_info =
       print_s [%message (use_out : Register_use_class.t)]
     )
     reg_uses;
-  *)
-  (*
   Cfg_inst_id.Map.iter
     (fun id (use_in, use_out) ->
       Printf.printf "> %d %d\n" (get_block id) (get_inst_id cfg id);
@@ -569,7 +579,8 @@ let score cl ~cfg_info =
     spill_uses;
   *)
   print_endline (Cfg.fun_name cfg);
-  Option.iter cfg_info ~f:(fun t -> Cfg_info.dump_dot t "");
+  (*Option.iter cfg_info ~f:(fun t -> Cfg_info.dump_dot t "");*)
+  CL.save_as_dot cl "";
   print_s [%message (spill_reloads : Spill_to_reload.t)];
   Printf.printf "\n\n"
 
