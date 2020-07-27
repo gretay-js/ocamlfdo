@@ -239,9 +239,9 @@ module Inst_id = struct
 end
 
 module Spill = struct
-  (* Wrapper around integers which identifies a spill slot *)
+  (* Wrapper around integers and classes which identifies a spill slot *)
   module T = struct
-    type t = int [@@deriving sexp, compare]
+    type t = int * int [@@deriving sexp, compare]
   end
 
   include T
@@ -256,11 +256,11 @@ module Spill = struct
         | Cfg.Op Cfg.Spill ->
           Array.fold inst.Cfg.res ~init:spills ~f:(fun spills reg ->
             match reg.Reg.loc with
-            | Reg.Stack (Local n) -> Set.add spills n
+            | Reg.Stack (Local n) -> Set.add spills (Proc.register_class reg, n)
             | _ -> spills)
         | _ -> spills))
 
-  let all_reloads cfg slot =
+  let all_reloads cfg (cls, slot) =
     (* Set of all reloads of a specific slot in a program. *)
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Set.empty ~f:(fun reloads block ->
       List.fold_left (BB.body block) ~init:reloads ~f:(fun reloads inst ->
@@ -268,7 +268,7 @@ module Spill = struct
         | Cfg.Op Cfg.Reload ->
           Array.fold inst.Cfg.arg ~init:reloads ~f:(fun reloads reg ->
             match reg.Reg.loc with
-            | Reg.Stack (Reg.Local s) when s = slot->
+            | Reg.Stack (Reg.Local s) when Proc.register_class reg = cls && s = slot->
               Inst_id.Set.add reloads (BB.start block, inst.Cfg.id)
             | _ -> reloads)
         | _ -> reloads))
@@ -448,12 +448,12 @@ module Spill_use_classify_problem = struct
       match i.Cfg.desc with
       | Cfg.Op Cfg.Spill ->
         (match i.Cfg.res with
-        | [| { loc = Reg.Stack (Reg.Local s); _} |] ->
-          { (nop pressure) with kills = Spill.Set.singleton s }
+        | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
+          { (nop pressure) with kills = Spill.Set.singleton (Proc.register_class reg, s) }
         | _ -> failwith "invalid spill")
       | Cfg.Op Cfg.Reload ->
         (match i.Cfg.arg with
-        | [| { loc = Reg.Stack (Reg.Local s); _} |] ->
+        | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
           let open Spill_use_class in
           let spill_use =
               { Reload_class.path = Path_use.Always freq
@@ -464,7 +464,11 @@ module Spill_use_classify_problem = struct
               }
           in
           let id = block, i.Cfg.id in
-          let gens = Spill.Map.singleton s (Inst_id.Map.singleton id spill_use) in
+          let gens =
+            Spill.Map.singleton
+              (Proc.register_class reg, s)
+              (Inst_id.Map.singleton id spill_use)
+          in
           { (nop pressure) with gens }
         | [| _ |] -> nop pressure
         | _ -> failwith "invalid reload")
@@ -547,7 +551,8 @@ let score cl ~cfg_info =
           let open Option.Let_syntax in
           let%bind s =
             match i.Cfg.desc, i.Cfg.res with
-            | Cfg.Op Cfg.Spill, [| { loc = Reg.Stack (Reg.Local s); _} |] -> Some s
+            | Cfg.Op Cfg.Spill, [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
+              Some (Proc.register_class reg, s)
             | _ -> None
           in
           let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
