@@ -70,6 +70,11 @@ let terminator_to_string cfg block =
   | Raise _ -> "Raise"
   | Tailcall (Self _) -> "Tailcall self"
   | Tailcall (Func _) -> "Tailcall"
+  | Call (P (External _), _) -> "Call external"
+  | Call (P (Alloc _), _) -> "Call alloc"
+  | Call (P (Checkbound _), _) -> "Call checkbound"
+  | Call (F (Direct _), _) -> "Call direct"
+  | Call (F (Indirect _), _) -> "Call indirect"
   | Never ->
     Report.user_error
       "Illegal cfg for %s: block %d terminator is Never"
@@ -123,7 +128,7 @@ let can_be_first_emitted_id id (block : BB.t) =
       else (
         match hd.desc with
         | Reloadretaddr | Prologue | Poptrap -> check_first tl
-        | Op _ | Call _ | Pushtrap _ -> false)
+        | Op _ | Pushtrap _ -> false)
   in
   check_first (BB.body block)
 ;;
@@ -145,6 +150,7 @@ let get_or_add_block t (block : BB.t) =
           | Int_test _
           | Switch _
           | Raise _
+          | Call _
           | Tailcall _ -> assert false);
           let last = List.last_exn (BB.body block) in
           last.id
@@ -300,6 +306,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
         (* target must be a handler block *)
         (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
         ()
+      | Call _ -> failwith "X"
       | Always _
       | Never
       | Parity_test _
@@ -349,6 +356,7 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count mispredicts =
             terminator.id;
         assert false
       | Tailcall (Func _)
+      | Call _ -> failwith "X"
       | Return | Raise _ ->
         (match to_loc with
         | None -> ()
@@ -457,6 +465,8 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
         Report.user_error
           "Illegal cfg for block %d: terminator is Never"
           (BB.start block)
+      | Call _ ->
+        failwith "X"
       | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _ | Switch _ ->
         if !verbose
         then (

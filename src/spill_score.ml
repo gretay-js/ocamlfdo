@@ -105,5 +105,4 @@ let score files ~fdo_profile =
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
-        if List.length (Cfg.blocks (CL.cfg cl)) > 16 then ()
-        else score cl ~cfg_info))
+        score cl ~cfg_info))
