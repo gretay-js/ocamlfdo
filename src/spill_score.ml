@@ -65,37 +65,39 @@ let score cl ~cfg_info =
         in
         let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
         let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
-        let reload_reg =
-          match reload.Cfg.desc, reload.Cfg.res with
-          | Cfg.Op (Cfg.Reload | Cfg.Move), [| { loc = Reg.Reg r; _ } |] -> r
-          | _ -> failwith "invalid reload"
+        let reg_use =
+          reload.Cfg.res
+            |> Array.to_list
+            |> List.filter_map ~f:(function
+              | { loc = Reg.Reg r; _ } ->
+                Some (Register.Map.find_exn all_reload_uses_at r)
+              | _ -> None)
+            |> List.fold_left ~init:Path_use.never ~f:Path_use.max
         in
-        let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
       Some (Spill_to_reload.Reload.({ path; pressure; reg_use })))
   in
 
   let spill_reloads =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
       List.foldi (BB.body block) ~init:acc ~f:(fun idx acc i ->
-        Option.value ~default:acc (
-          let open Option.Let_syntax in
-          let%bind s =
-            match i.Cfg.desc, i.Cfg.res with
-            | Cfg.Op Cfg.Spill, [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
-              Some (Proc.register_class reg, s)
-            | _ -> None
-          in
-          let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
-          let%bind all_spill_uses_at, _ =
-            Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses
-          in
-          let%map all_uses, reload_uses =
-            Spill.Map.find all_spill_uses_at s
-          in
-          let reloads = reloads_of_spill reload_uses in
-          let key = BB.start block, i.Cfg.id in
-          let data = { Spill_to_reload.Spill.all_uses; reloads } in
-          Inst_id.Map.set acc ~key ~data)))
+        Array.fold i.Cfg.res ~init:acc ~f:(fun acc reg ->
+          match reg with
+          | { loc = Reg.Stack (Reg.Local s); _} ->
+            Option.value ~default:acc (
+              let open Option.Let_syntax in
+              let s = Proc.register_class reg, s in
+              let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
+              let%bind all_spill_uses_at, _ =
+                Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses
+              in
+              let%map all_uses, reload_uses =
+                Spill.Map.find all_spill_uses_at s
+              in
+              let reloads = reloads_of_spill reload_uses in
+              let key = BB.start block, i.Cfg.id in
+              let data = { Spill_to_reload.Spill.all_uses; reloads } in
+              Inst_id.Map.set acc ~key ~data)
+          | _ -> acc)))
   in
   (*
   Cfg_inst_id.Map.iter

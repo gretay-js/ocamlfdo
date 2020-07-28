@@ -20,6 +20,8 @@ type t
 
 val lub : t -> t -> t
 
+val max : t -> t -> t
+
 val never : t
 
 val update_never : t -> Frequency.t -> t

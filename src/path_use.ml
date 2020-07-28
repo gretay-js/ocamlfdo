@@ -26,6 +26,16 @@ let lub a b =
   | Sometimes (faa, fan), Sometimes (fba, fbn) ->
     Sometimes (Frequency.lub faa fba, Frequency.lub fan fbn)
 
+let max a b =
+  match a, b with
+  | Always fa, Always fb -> Always (Frequency.max fa fb)
+  | Always _, _ -> a
+  | _, Always _ -> b
+  | Never _, _ -> b
+  | _, Never _ -> a
+  | Sometimes(aa, an), Sometimes(ba, bn) ->
+    Sometimes (Frequency.max aa ba, Frequency.max an bn)
+
 let never = Never Frequency.zero
 
 let update_never v freq =
