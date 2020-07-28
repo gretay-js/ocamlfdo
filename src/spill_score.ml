@@ -265,7 +265,7 @@ module Spill = struct
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Set.empty ~f:(fun reloads block ->
       List.fold_left (BB.body block) ~init:reloads ~f:(fun reloads inst ->
         match inst.desc with
-        | Cfg.Op Cfg.Reload ->
+        | Cfg.Op (Cfg.Reload | Cfg.Move) ->
           Array.fold inst.Cfg.arg ~init:reloads ~f:(fun reloads reg ->
             match reg.Reg.loc with
             | Reg.Stack (Reg.Local s) when Proc.register_class reg = cls && s = slot->
@@ -451,7 +451,7 @@ module Spill_use_classify_problem = struct
         | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
           { (nop pressure) with kills = Spill.Set.singleton (Proc.register_class reg, s) }
         | _ -> failwith "invalid spill")
-      | Cfg.Op Cfg.Reload ->
+      | Cfg.Op (Cfg.Reload | Cfg.Move) ->
         (match i.Cfg.arg with
         | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
           let open Spill_use_class in
@@ -537,7 +537,7 @@ let score cl ~cfg_info =
         let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
         let reload_reg =
           match reload.Cfg.desc, reload.Cfg.res with
-          | Cfg.Op Cfg.Reload, [| { loc = Reg.Reg r; _ } |] -> r
+          | Cfg.Op (Cfg.Reload | Cfg.Move), [| { loc = Reg.Reg r; _ } |] -> r
           | _ -> failwith "invalid reload"
         in
         let reg_use = Register.Map.find_exn all_reload_uses_at reload_reg in
