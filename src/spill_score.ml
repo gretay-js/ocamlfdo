@@ -98,6 +98,7 @@ module Register_use_class = struct
   let equal = Register.Map.equal Path_use.equal
 
   let lub =
+    (* For each register, join all paths from this program point *)
     Register.Map.merge ~f:(fun ~key:_ v ->
       match v with
       | `Both(a, b) -> Some (Path_use.lub a b)
@@ -105,6 +106,7 @@ module Register_use_class = struct
       | `Right b -> Some b)
 
   let all_unused_registers =
+    (* Build a map mapping never to all physical regs *)
     Register.Set.fold
       Register.all_registers
       ~init:Register.Map.empty
@@ -121,12 +123,19 @@ module Reg_use_classify_problem = struct
     module S = Register_use_class
 
     type t =
-      { kill: Register.Set.t
-      ; gen: Register.Set.t
-      ; freq: Frequency.t
+      { kill: Register.Set.t;
+        (* Set of registers written or implicitly destroyed at this instruction. *)
+        gen: Register.Set.t;
+        (* Registers used in this instruction *)
+        freq: Frequency.t
+        (* Frequency of the block containing the instruction. *)
       }
 
     let f s { kill; gen; freq } =
+      (* Removes the killed registers and adds the used registers to the map of
+       * live regsiters at this program point. If a register has no uses, the
+       * frequency of the 'Never' path is updated.
+       *)
       let open Path_use in
       let not_killed =
         Register.Map.mapi s ~f:(fun ~key ~data ->
@@ -138,9 +147,9 @@ module Reg_use_classify_problem = struct
         Register.Map.set acc ~key:reg ~data:(Always freq))
 
     let dot curr prev =
-      { kill = Register.Set.union curr.kill prev.kill
-      ; gen = Register.Set.union curr.gen (Register.Set.diff prev.gen curr.kill)
-      ; freq = Frequency.max curr.freq prev.freq
+      { kill = Register.Set.union curr.kill prev.kill;
+        gen = Register.Set.union curr.gen (Register.Set.diff prev.gen curr.kill);
+        freq = Frequency.max curr.freq prev.freq
       }
   end
 
@@ -152,6 +161,7 @@ module Reg_use_classify_problem = struct
   let cfg { cfg; _ } = cfg
 
   let init { cfg; _ } block =
+    (* Initialises program exit points, setting register paths to 'Never' *)
     let bb = Cfg.get_block_exn cfg block in
     if BB.is_exit bb then
       (Register_use_class.all_unused_registers, Register.Map.empty)
@@ -159,6 +169,7 @@ module Reg_use_classify_problem = struct
       (Register.Map.empty, Register.Map.empty)
 
   let kg { cfg; cfg_info } inst =
+    (* Finds the registers read, writted or implicitly destroyed at the node *)
     let block = Cfg_inst_id.parent inst in
     let bb = Cfg.get_block_exn cfg block in
     let kg inst destroyed =
@@ -198,6 +209,9 @@ let count_live_vars inst =
     Int.Map.empty
 
 let count_free_regs inst destroyed =
+  (* Counts the free registers at a program point.
+   * A register is free if it is not implicitly destroyed or live here.
+   *)
   let registers =
     Array.fold
       destroyed
@@ -217,6 +231,8 @@ let count_free_regs inst destroyed =
   Int.Map.mapi live_regs ~f:(fun ~key ~data -> Proc.num_available_registers.(key) - data)
 
 let has_pressure inst destroyed =
+  (* Determines if a program point has high register pressure: either there are
+     no free registers or the live varies greatly outnumber physical regs. *)
   let live_vars = count_live_vars inst in
   let free_regs = count_free_regs inst destroyed in
   let can_allocate = Int.Map.for_all free_regs ~f:(fun r -> r > 0) in
@@ -229,6 +245,7 @@ let has_pressure inst destroyed =
   not can_allocate || not low_pressure
 
 module Inst_id = struct
+  (* Identifies a block and an instruction in the block. *)
   module T = struct
     type t = int * int [@@deriving sexp, compare, equal]
   end
@@ -277,14 +294,14 @@ end
 module Spill_use_class = struct
   module Reload_class = struct
     type t =
-      { path: Path_use.t
-      ; pressure: Path_use.t
+      { path: Path_use.t;
+        pressure: Path_use.t
       }
       [@@deriving sexp, compare, equal]
 
     let lub a b =
-      { path = Path_use.lub a.path b.path
-      ; pressure = Path_use.lub a.pressure b.pressure
+      { path = Path_use.lub a.path b.path;
+        pressure = Path_use.lub a.pressure b.pressure
       }
   end
 
