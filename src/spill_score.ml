@@ -31,21 +31,6 @@ module Spill_to_reload = struct
     [@@deriving sexp]
 end
 
-(*
-let get_block = function
-  | Cfg_inst_id.Term block -> block
-  | Cfg_inst_id.Inst(block, _) -> block
-
-let get_inst_id cfg = function
-  | Cfg_inst_id.Term block ->
-    let bb = Cfg.get_block_exn cfg block in
-    (BB.terminator bb).id
-  | Cfg_inst_id.Inst(block, n) ->
-    let bb = Cfg.get_block_exn cfg block in
-    let i = List.nth_exn (BB.body bb) n in
-    i.Cfg.id
-*)
-
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
   let reg_uses = Register_use.Solver.solve (cfg, cfg_info) in
@@ -99,25 +84,10 @@ let score cl ~cfg_info =
               Inst_id.Map.set acc ~key ~data)
           | _ -> acc)))
   in
-  (*
-  Cfg_inst_id.Map.iter
-    (fun id (use_in, use_out) ->
-      Printf.printf "> %d %d\n" (get_block id) (get_inst_id cfg id);
-      print_s [%message (use_in : Register_use_class.t)];
-      print_s [%message (use_out : Register_use_class.t)]
-    )
-    reg_uses;
-  Cfg_inst_id.Map.iter
-    (fun id (use_in, use_out) ->
-      Printf.printf "> %d %d\n" (get_block id) (get_inst_id cfg id);
-      print_s [%message (use_in : Spill_use_class.t)];
-      print_s [%message (use_out : Spill_use_class.t)]
-    )
-    spill_uses;
-  *)
   print_endline (Cfg.fun_name cfg);
-  (*Option.iter cfg_info ~f:(fun t -> Cfg_info.dump_dot t "");*)
-  CL.save_as_dot cl "";
+  (match cfg_info with
+  | Some info -> Cfg_info.dump_dot info ""
+  | None -> CL.save_as_dot cl "");
   print_s [%message (spill_reloads : Spill_to_reload.t)];
   Printf.printf "\n\n"
 
