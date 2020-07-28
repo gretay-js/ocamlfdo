@@ -206,49 +206,44 @@ module Problem = struct
     let bb = Cfg.get_block_exn cfg block in
     let freq = Frequency.create cfg_info block in
     let open K in
-    let nop pressure =
-      { kills = Spill.Set.empty
-      ; gens = Spill.Map.empty
-      ; pressure
-      ; freq
-      }
-    in
     match inst with
     | Cfg_inst_id.Term _ ->
       let term = BB.terminator bb in
-      nop (has_pressure term (Cfg.destroyed_at_terminator term.desc))
+      { kills = Spill.Set.empty
+      ; gens = Spill.Map.empty
+      ; pressure = has_pressure term (Cfg.destroyed_at_terminator term.desc)
+      ; freq
+      }
     | Cfg_inst_id.Inst (_, n) ->
       let i = List.nth_exn (BB.body bb) n in
       let pressure = has_pressure i (Cfg.destroyed_at_instruction i.desc) in
-      match i.Cfg.desc with
-      | Cfg.Op Cfg.Spill ->
-        (match i.Cfg.res with
-        | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
-          { (nop pressure) with kills = Spill.Set.singleton (Proc.register_class reg, s) }
-        | _ -> failwith "invalid spill")
-      | Cfg.Op (Cfg.Reload | Cfg.Move) ->
-        (match i.Cfg.arg with
-        | [| { loc = Reg.Stack (Reg.Local s); _} as reg |] ->
-          let open Class in
-          let spill_use =
-              { Use.path = Path_use.Always freq
-              ; pressure =
-                if pressure
-                  then Path_use.Always freq
-                  else Path_use.Never freq
-              }
-          in
-          let id = block, i.Cfg.id in
-          let gens =
-            Spill.Map.singleton
-              (Proc.register_class reg, s)
-              (Inst_id.Map.singleton id spill_use)
-          in
-          { (nop pressure) with gens }
-        | [| _ |] -> nop pressure
-        | _ -> failwith "invalid reload")
-      | _ ->
-        nop pressure
+      let kills =
+        Array.fold i.Cfg.res ~init:Spill.Set.empty ~f:(fun kills reg ->
+          match reg with
+          | { loc = Reg.Stack (Reg.Local s); _} ->
+            Spill.Set.add kills (Proc.register_class reg, s)
+          | _ -> kills)
+      in
+      let gens =
+        Array.fold i.Cfg.arg ~init:Spill.Map.empty ~f:(fun gens reg ->
+          match reg with
+          | { loc = Reg.Stack (Reg.Local s); _} ->
+            let open Class in
+            let spill_use =
+                { Use.path = Path_use.Always freq
+                ; pressure =
+                  if pressure
+                    then Path_use.Always freq
+                    else Path_use.Never freq
+                }
+            in
+            let id = block, i.Cfg.id in
+            Spill.Map.set gens
+              ~key:(Proc.register_class reg, s)
+              ~data:(Inst_id.Map.singleton id spill_use)
+          | _ -> gens)
+      in
+      { kills; gens; pressure; freq }
 end
 
 module Solver = Analysis.Make_backward_cfg_solver(Problem)
