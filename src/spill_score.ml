@@ -85,9 +85,9 @@ let score cl ~cfg_info =
           | _ -> acc)))
   in
   print_endline (Cfg.fun_name cfg);
-  (match cfg_info with
+  (*(match cfg_info with
   | Some info -> Cfg_info.dump_dot info ""
-  | None -> CL.save_as_dot cl "");
+  | None -> CL.save_as_dot cl "");*)
   print_s [%message (spill_reloads : Spill_to_reload.t)];
   Printf.printf "\n\n"
 

@@ -306,7 +306,7 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
         (* target must be a handler block *)
         (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
         ()
-      | Call _ -> failwith "X"
+      | Call _
       | Always _
       | Never
       | Parity_test _
@@ -356,11 +356,11 @@ let record_exit t (from_loc : Loc.t) (to_loc : Loc.t option) count mispredicts =
             terminator.id;
         assert false
       | Tailcall (Func _)
-      | Call _ -> failwith "X"
-      | Return | Raise _ ->
+      | Return | Raise _ | Call _ ->
         (match to_loc with
         | None -> ()
         | Some _ ->
+          (* CR-someday: assert that to_loc is the exception successor *)
           let b =
             { Block_info.target = to_loc
             ; target_label = None
@@ -465,9 +465,9 @@ let compute_fallthrough_execounts t from_lbl to_lbl count =
         Report.user_error
           "Illegal cfg for block %d: terminator is Never"
           (BB.start block)
-      | Call _ ->
-        failwith "X"
-      | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _ | Switch _ ->
+      | Call _ | Always _
+      | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
+      | Switch _ ->
         if !verbose
         then (
           printf
