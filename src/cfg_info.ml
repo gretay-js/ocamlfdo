@@ -70,11 +70,11 @@ let terminator_to_string cfg block =
   | Raise _ -> "Raise"
   | Tailcall (Self _) -> "Tailcall self"
   | Tailcall (Func _) -> "Tailcall"
-  | Call (P (External _), _) -> "Call external"
-  | Call (P (Alloc _), _) -> "Call alloc"
-  | Call (P (Checkbound _), _) -> "Call checkbound"
-  | Call (F (Direct _), _) -> "Call direct"
-  | Call (F (Indirect _), _) -> "Call indirect"
+  | Call { call_operation = P (External _); _ } -> "Call external"
+  | Call { call_operation = P (Alloc _); _ } -> "Call alloc"
+  | Call { call_operation = P (Checkbound _); _ } -> "Call checkbound"
+  | Call { call_operation = F (Direct _); _ } -> "Call direct"
+  | Call { call_operation = F (Indirect _); _ } -> "Call indirect"
   | Never ->
     Report.user_error
       "Illegal cfg for %s: block %d terminator is Never"
