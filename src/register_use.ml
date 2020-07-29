@@ -67,11 +67,11 @@ module Problem = struct
       }
   end
 
-  type t = (Cfg.t * Cfg_info.t option)
+  type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option }
 
-  let cfg (cfg, _) = cfg
+  let cfg { cfg; _ } = cfg
 
-  let init (cfg, _) block =
+  let init { cfg; _ } block =
     (* Initialises program exit points, setting register paths to 'Never' *)
     let bb = Cfg.get_block_exn cfg block in
     if BB.is_exit bb then
@@ -79,7 +79,7 @@ module Problem = struct
     else
       (Register.Map.empty, Register.Map.empty)
 
-  let kg (cfg, cfg_info) inst =
+  let kg { cfg; cfg_info } inst =
     (* Finds the registers read, writted or implicitly destroyed at the node *)
     let block = Cfg_inst_id.parent inst in
     let bb = Cfg.get_block_exn cfg block in
@@ -107,4 +107,8 @@ module Problem = struct
       kg i (Cfg.destroyed_at_instruction i.Cfg.desc)
 end
 
-module Solver = Analysis.Make_backward_cfg_solver(Problem)
+module Solver = struct
+  let solve cfg cfg_info =
+    let module M = Analysis.Make_backward_cfg_solver(Problem) in
+    M.solve { cfg; cfg_info }
+end

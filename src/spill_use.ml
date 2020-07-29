@@ -190,18 +190,18 @@ module Problem = struct
       }
   end
 
-  type t = (Cfg.t * Cfg_info.t option)
+  type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option; all_unused: Class.t }
 
-  let cfg (cfg, _) = cfg
+  let cfg { cfg; _ } = cfg
 
-  let init (cfg, _) block =
+  let init { cfg; all_unused; _ } block =
     let bb = Cfg.get_block_exn cfg block in
     if BB.is_exit bb then
-      (Class.all_unused_spills cfg, Spill.Map.empty)
+      (all_unused, Spill.Map.empty)
     else
       (Spill.Map.empty, Spill.Map.empty)
 
-  let kg (cfg, cfg_info) inst =
+  let kg { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in
     let bb = Cfg.get_block_exn cfg block in
     let freq = Frequency.create cfg_info block in
@@ -246,4 +246,9 @@ module Problem = struct
       { kills; gens; pressure; freq }
 end
 
-module Solver = Analysis.Make_backward_cfg_solver(Problem)
+module Solver = struct
+  let solve cfg cfg_info =
+    let module M = Analysis.Make_backward_cfg_solver(Problem) in
+    let all_unused =  Class.all_unused_spills cfg in
+    M.solve { cfg; cfg_info; all_unused }
+end

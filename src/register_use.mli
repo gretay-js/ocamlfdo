@@ -12,6 +12,7 @@ end
 
 module Solver : sig
   val solve
-    :  (Ocamlcfg.Cfg.t * Cfg_info.t option)
+    :  Ocamlcfg.Cfg.t
+    -> Cfg_info.t option
     -> (Class.t * Class.t) Ocamlcfg.Analysis.Inst_id.Map.t
 end

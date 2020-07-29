@@ -33,8 +33,8 @@ end
 
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
-  let reg_uses = Register_use.Solver.solve (cfg, cfg_info) in
-  let spill_uses = Spill_use.Solver.solve (cfg, cfg_info) in
+  let reg_uses = Register_use.Solver.solve cfg cfg_info in
+  let spill_uses = Spill_use.Solver.solve cfg cfg_info in
 
   let reloads_of_spill reload_uses =
     Inst_id.Map.filter_mapi reload_uses ~f:(fun ~key ~data ->
@@ -84,7 +84,6 @@ let score cl ~cfg_info =
               Inst_id.Map.set acc ~key ~data)
           | _ -> acc)))
   in
-  print_endline (Cfg.fun_name cfg);
   (*(match cfg_info with
   | Some info -> Cfg_info.dump_dot info ""
   | None -> CL.save_as_dot cl "");*)
