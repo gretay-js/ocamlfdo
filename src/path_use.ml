@@ -1,12 +1,15 @@
 
 type t
-  = Never of Frequency.t
+  = Unknown
+  | Never of Frequency.t
   | Always of Frequency.t
   | Sometimes of Frequency.t * Frequency.t
   [@@deriving sexp, equal, compare]
 
 let lub a b =
   match a, b with
+  | Unknown, _ -> b
+  | _, Unknown -> a
   | Never fa, Never fb ->
     Never (Frequency.lub fa fb)
   | Never fa, Always fb->
@@ -28,6 +31,8 @@ let lub a b =
 
 let max a b =
   match a, b with
+  | Unknown, _ -> b
+  | _, Unknown -> a
   | Always fa, Always fb -> Always (Frequency.max fa fb)
   | Always _, _ -> a
   | _, Always _ -> b
@@ -37,6 +42,8 @@ let max a b =
     Sometimes (Frequency.max aa ba, Frequency.max an bn)
 
 let never = Never Frequency.zero
+
+let unknown = Unknown
 
 let update_never v freq =
   match v with

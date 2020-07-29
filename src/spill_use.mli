@@ -4,18 +4,21 @@ module Class : sig
     type t =
       { path: Path_use.t;
         pressure: Path_use.t
-      } [@@deriving sexp, compare, equal]
+      } [@@deriving sexp, equal]
 
     val lub : t -> t -> t
   end
 
   module Uses : sig
-    type t = Path_use.t * Use.t Inst_id.Map.t [@@deriving sexp, compare, equal]
+    type t =
+      { all_uses: Path_use.t;
+        reloads: Use.t Inst_id.Map_with_default.t
+      } [@@deriving sexp, equal]
+
+    val lub : t -> t -> t
   end
 
-  type t = Uses.t Spill.Map.t [@@deriving sexp]
-
-  val equal : t -> t -> bool
+  type t = Uses.t Spill.Map_with_default.t [@@deriving sexp, equal]
 
   val lub : t -> t -> t
 end

@@ -31,13 +31,22 @@ module Spill_to_reload = struct
     [@@deriving sexp]
 end
 
-let score cl ~cfg_info =
-  let cfg = CL.cfg cl in
-  let reg_uses = Register_use.Solver.solve cfg cfg_info in
-  let spill_uses = Spill_use.Solver.solve cfg cfg_info in
+let all_reloads cfg slot =
+  (* Set of all reloads of a specific slot in a program. *)
+  List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Set.empty ~f:(fun reloads block ->
+    List.fold_left (BB.body block) ~init:reloads ~f:(fun reloads inst ->
+      Array.fold inst.Cfg.arg ~init:reloads ~f:(fun reloads reg ->
+        match reg.Reg.loc with
+        | Reg.Stack (Reg.Local s) when Spill.equal (Proc.register_class reg, s) slot ->
+          Inst_id.Set.add reloads (BB.start block, inst.Cfg.id)
+        | _ ->
+          reloads)))
 
-  let reloads_of_spill reload_uses =
-    Inst_id.Map.filter_mapi reload_uses ~f:(fun ~key ~data ->
+let reloads_of_spill cfg slot ~reg_uses ~reloads =
+  all_reloads cfg slot
+    |> Inst_id.Set.to_list
+    |> List.filter_map ~f:(fun key ->
+      let data = Inst_id.Map_with_default.find reloads key in
       let block, reload_id = key in
       let { Spill_use.Class.Use.path; pressure } = data in
       match path with
@@ -59,8 +68,13 @@ let score cl ~cfg_info =
               | _ -> None)
             |> List.fold_left ~init:Path_use.never ~f:Path_use.max
         in
-      Some (Spill_to_reload.Reload.({ path; pressure; reg_use })))
-  in
+        Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use })))
+    |> Inst_id.Map.of_alist_exn
+
+let score cl ~cfg_info =
+  let cfg = CL.cfg cl in
+  let reg_uses = Register_use.Solver.solve cfg cfg_info in
+  let spill_uses = Spill_use.Solver.solve cfg cfg_info in
 
   let spill_reloads =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
@@ -68,20 +82,18 @@ let score cl ~cfg_info =
         Array.fold i.Cfg.res ~init:acc ~f:(fun acc reg ->
           match reg with
           | { loc = Reg.Stack (Reg.Local s); _} ->
-            Option.value ~default:acc (
-              let open Option.Let_syntax in
-              let s = Proc.register_class reg, s in
-              let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
-              let%bind all_spill_uses_at, _ =
-                Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses
+            let slot = Proc.register_class reg, s in
+            let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
+            (match Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses with
+            | Some (all_spill_uses_at, _) ->
+              let { Spill_use.Class.Uses.all_uses; reloads } =
+                Spill.Map_with_default.find all_spill_uses_at slot
               in
-              let%map all_uses, reload_uses =
-                Spill.Map.find all_spill_uses_at s
-              in
-              let reloads = reloads_of_spill reload_uses in
+              let reloads = reloads_of_spill cfg slot ~reg_uses ~reloads in
               let key = BB.start block, i.Cfg.id in
               let data = { Spill_to_reload.Spill.all_uses; reloads } in
-              Inst_id.Map.set acc ~key ~data)
+              Inst_id.Map.set acc ~key ~data
+            | None -> acc)
           | _ -> acc)))
   in
   (*(match cfg_info with

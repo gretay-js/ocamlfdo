@@ -57,61 +57,51 @@ module Class = struct
     type t =
       { path: Path_use.t;
         pressure: Path_use.t
-      }
-      [@@deriving sexp, compare, equal]
+      } [@@deriving sexp, equal]
 
     let lub a b =
       { path = Path_use.lub a.path b.path;
         pressure = Path_use.lub a.pressure b.pressure
       }
+
+      let never = { path = Path_use.never; pressure = Path_use.never }
+
+      let unknown = { path = Path_use.unknown; pressure = Path_use.unknown }
   end
 
   module Uses = struct
-    type t
-      = Path_use.t * Use.t Inst_id.Map.t
-      [@@deriving sexp, compare, equal]
+    type t =
+      { all_uses: Path_use.t;
+        reloads: Use.t Inst_id.Map_with_default.t
+      } [@@deriving sexp, equal]
+
+    let lub a b =
+      { all_uses = Path_use.lub a.all_uses b.all_uses;
+        reloads = Inst_id.Map_with_default.merge a.reloads b.reloads ~f:Use.lub
+      }
+
+    let never =
+      { all_uses = Path_use.never; reloads = Inst_id.Map_with_default.default Use.never }
+
+    let unknown =
+      { all_uses = Path_use.unknown; reloads = Inst_id.Map_with_default.default Use.unknown }
   end
 
-  type t = Uses.t Spill.Map.t [@@deriving sexp]
-
-  let equal = Spill.Map.equal Uses.equal
+  type t = Uses.t Spill.Map_with_default.t [@@deriving sexp, equal]
 
   let lub a b =
-    Spill.Map.merge a b ~f:(fun ~key:_ v ->
-      match v with
-      | `Both ((fa, ra), (fb, rb)) ->
-        let f = Path_use.lub fa fb in
-        let r =
-          Inst_id.Map.merge ra rb ~f:(fun ~key:_ v ->
-            match v with
-            | `Both(rca, rcb) ->
-              Some (Use.lub rca rcb)
-            | `Left a -> Some a
-            | `Right b -> Some b)
-        in
-        Some (f, r)
-      | `Left a -> Some a
-      | `Right b -> Some b)
+    Spill.Map_with_default.merge a b ~f:Uses.lub
 
-  let all_unused_reloads cfg slot =
-    Inst_id.Set.fold
-      (Spill.all_reloads cfg slot)
-      ~init:Inst_id.Map.empty
-      ~f:(fun acc key ->
-          let open Use in
-          let data = { path = Path_use.never; pressure = Path_use.never } in
-          Inst_id.Map.set acc ~key ~data)
+  let never = Spill.Map_with_default.default Uses.never
 
-  let all_unused_spills cfg =
-    Spill.Set.fold
-      (Spill.all_spills cfg)
-      ~init:Spill.Map.empty
-      ~f:(fun acc key ->
-          let data = Path_use.never, all_unused_reloads cfg key in
-          Spill.Map.set acc ~key ~data)
+  let unknown = Spill.Map_with_default.default Uses.unknown
 end
 
 module Problem = struct
+  open Class
+  open Uses
+  open Use
+
   module K = struct
     module S = Class
 
@@ -122,42 +112,28 @@ module Problem = struct
       ; freq: Frequency.t
       }
 
-    let f s { kills; gens; pressure; freq } =
-      let not_killed =
-        Spill.Map.mapi s ~f:(fun ~key ~data ->
-          let open Class.Use in
-          let use_freq, reloads = data in
-          if Spill.Set.mem kills key
-            then
-              let reloads' =
-                Inst_id.Map.map reloads ~f:(fun _ ->
-                    { path = Path_use.never; pressure = Path_use.never })
-              in
-              (Path_use.Never freq, reloads')
-            else
-              let reloads' =
-                Inst_id.Map.map reloads ~f:(fun p ->
-                  let spill_use =
-                    { path = Path_use.update_never p.path freq
-                    ; pressure = if pressure then Path_use.Always freq else p.pressure
-                    }
-                  in
-                  spill_use)
-              in
-              (Path_use.update_never use_freq freq, reloads'))
+    let f (s: Class.t) { kills; gens; pressure; freq } =
+      let after_kill =
+        Spill.Set.fold kills ~init:s ~f:(fun acc key ->
+          Spill.Map_with_default.set acc ~key ~data:Class.Uses.never)
       in
-      Spill.Map.fold gens ~init:not_killed ~f:(fun ~key ~data acc ->
-        Spill.Map.update acc key ~f:(function
-          | None -> (Path_use.Always freq, data)
-          | Some (_, reloads) ->
-            let reloads' =
-              Inst_id.Map.merge reloads data ~f:(fun ~key:_ v ->
-                match v with
-                | `Both(_, r) -> Some r
-                | `Left a -> Some a
-                | `Right b -> Some b)
-            in
-            (Path_use.Always freq, reloads')))
+      let after_pressure =
+        Spill.Map_with_default.map after_kill ~f:(fun { all_uses; reloads }->
+          let reloads =
+            Inst_id.Map_with_default.map reloads ~f:(fun p ->
+              { path = Path_use.update_never p.path freq
+              ; pressure = if pressure then Path_use.Always freq else p.pressure
+              })
+          in
+          { all_uses = Path_use.update_never all_uses freq; reloads })
+      in
+      Spill.Map.fold gens ~init:after_pressure ~f:(fun ~key ~data acc ->
+        Spill.Map_with_default.update acc key ~f:(fun { reloads; _ } ->
+          let reloads =
+            Inst_id.Map.fold data ~init:reloads ~f:(fun ~key ~data acc ->
+              Inst_id.Map_with_default.set acc ~key ~data)
+          in
+          { all_uses = Path_use.Always freq; reloads }))
 
     let dot curr prev =
       let prev_gens =
@@ -190,26 +166,22 @@ module Problem = struct
       }
   end
 
-  type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option; all_unused: Class.t }
+  type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option }
 
   let cfg { cfg; _ } = cfg
 
-  let init { cfg; all_unused; _ } block =
+  let init { cfg; _ } block =
     let bb = Cfg.get_block_exn cfg block in
-    if BB.is_exit bb then
-      (all_unused, Spill.Map.empty)
-    else
-      (Spill.Map.empty, Spill.Map.empty)
+    ((if BB.is_exit bb then Class.never else Class.unknown), Class.unknown)
 
   let kg { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in
     let bb = Cfg.get_block_exn cfg block in
     let freq = Frequency.create cfg_info block in
-    let open K in
     match inst with
     | Cfg_inst_id.Term _ ->
       let term = BB.terminator bb in
-      { kills = Spill.Set.empty
+      { K.kills = Spill.Set.empty
       ; gens = Spill.Map.empty
       ; pressure = has_pressure term (Cfg.destroyed_at_terminator term.desc)
       ; freq
@@ -228,7 +200,6 @@ module Problem = struct
         Array.fold i.Cfg.arg ~init:Spill.Map.empty ~f:(fun gens reg ->
           match reg with
           | { loc = Reg.Stack (Reg.Local s); _} ->
-            let open Class in
             let spill_use =
                 { Use.path = Path_use.Always freq
                 ; pressure =
@@ -249,6 +220,5 @@ end
 module Solver = struct
   let solve cfg cfg_info =
     let module M = Analysis.Make_backward_cfg_solver(Problem) in
-    let all_unused =  Class.all_unused_spills cfg in
-    M.solve { cfg; cfg_info; all_unused }
+    M.solve { cfg; cfg_info }
 end

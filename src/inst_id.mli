@@ -1,6 +1,6 @@
 open Core
 
-(* Wrapper around integers and classes which identifies a spill slot *)
+(* Identifies a block and an instruction in the block. *)
 type t = int * int [@@deriving sexp, compare, equal]
 
 module Set : Set.S with type Elt.t := t

@@ -1,10 +1,10 @@
 open Core
 
-(* Identifies a block and an instruction in the block. *)
 module T = struct
   type t = int * int [@@deriving sexp, compare, equal]
 end
 
-include T
 module Map = Map.Make(T)
 module Set = Set.Make(T)
+module Map_with_default = Map_with_default.Make(T)
+include T
