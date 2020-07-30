@@ -16,10 +16,10 @@ let count_live_vars inst =
     inst.Cfg.live
     Int.Map.empty
 
+(** Counts the free registers at a program point.
+  * A register is free if it is not implicitly destroyed or live.
+  *)
 let count_free_regs inst destroyed =
-  (* Counts the free registers at a program point.
-   * A register is free if it is not implicitly destroyed or live here.
-   *)
   let registers =
     Array.fold
       destroyed
@@ -29,18 +29,18 @@ let count_free_regs inst destroyed =
   let live_regs =
     Reg.Set.fold
       (fun reg acc ->
-        let cls = Proc.register_class reg in
         match reg.Reg.loc with
-        | Reg.Reg _ -> Int.Map.update acc cls ~f:increment
+        | Reg.Reg _ -> Int.Map.update acc (Proc.register_class reg) ~f:increment
         | _ -> acc)
       registers
       Int.Map.empty
   in
   Int.Map.mapi live_regs ~f:(fun ~key ~data -> Proc.num_available_registers.(key) - data)
 
+(** Determines if a program point has high register pressure: either there are
+  * no free registers or the live varies greatly outnumber physical regs.
+  *)
 let has_pressure inst destroyed =
-  (* Determines if a program point has high register pressure: either there are
-     no free registers or the live varies greatly outnumber physical regs. *)
   let live_vars = count_live_vars inst in
   let free_regs = count_free_regs inst destroyed in
   let can_allocate = Int.Map.for_all free_regs ~f:(fun r -> r > 0) in
@@ -96,6 +96,34 @@ module Class = struct
 
   let unknown = Spill.Map_with_default.default Uses.unknown
 end
+
+let get_kill_gen block i pressure freq =
+  let kills =
+    Array.fold i.Cfg.res ~init:Spill.Set.empty ~f:(fun kills reg ->
+      match reg with
+      | { loc = Reg.Stack (Reg.Local s); _} ->
+        Spill.Set.add kills (Proc.register_class reg, s)
+      | _ -> kills)
+  in
+  let gens =
+    Array.fold i.Cfg.arg ~init:Spill.Map.empty ~f:(fun gens reg ->
+      match reg with
+      | { loc = Reg.Stack (Reg.Local s); _} ->
+        let spill_use =
+            { Class.Use.path = Path_use.Always freq
+            ; pressure =
+              if pressure
+                then Path_use.Always freq
+                else Path_use.Never freq
+            }
+        in
+        let id = block, i.Cfg.id in
+        Spill.Map.set gens
+          ~key:(Proc.register_class reg, s)
+          ~data:(Inst_id.Map.singleton id spill_use)
+      | _ -> gens)
+  in
+  kills, gens
 
 module Problem = struct
   open Class
@@ -178,43 +206,19 @@ module Problem = struct
     let block = Cfg_inst_id.parent inst in
     let bb = Cfg.get_block_exn cfg block in
     let freq = Frequency.create cfg_info block in
-    match inst with
-    | Cfg_inst_id.Term _ ->
-      let term = BB.terminator bb in
-      { K.kills = Spill.Set.empty
-      ; gens = Spill.Map.empty
-      ; pressure = has_pressure term (Cfg.destroyed_at_terminator term.desc)
-      ; freq
-      }
-    | Cfg_inst_id.Inst (_, n) ->
-      let i = List.nth_exn (BB.body bb) n in
-      let pressure = has_pressure i (Cfg.destroyed_at_instruction i.desc) in
-      let kills =
-        Array.fold i.Cfg.res ~init:Spill.Set.empty ~f:(fun kills reg ->
-          match reg with
-          | { loc = Reg.Stack (Reg.Local s); _} ->
-            Spill.Set.add kills (Proc.register_class reg, s)
-          | _ -> kills)
-      in
-      let gens =
-        Array.fold i.Cfg.arg ~init:Spill.Map.empty ~f:(fun gens reg ->
-          match reg with
-          | { loc = Reg.Stack (Reg.Local s); _} ->
-            let spill_use =
-                { Use.path = Path_use.Always freq
-                ; pressure =
-                  if pressure
-                    then Path_use.Always freq
-                    else Path_use.Never freq
-                }
-            in
-            let id = block, i.Cfg.id in
-            Spill.Map.set gens
-              ~key:(Proc.register_class reg, s)
-              ~data:(Inst_id.Map.singleton id spill_use)
-          | _ -> gens)
-      in
-      { kills; gens; pressure; freq }
+    let pressure, (kills, gens) =
+      match inst with
+      | Cfg_inst_id.Term _ ->
+        let t = BB.terminator bb in
+        let pressure = has_pressure t (Cfg.destroyed_at_terminator t.desc) in
+        pressure, get_kill_gen block t pressure freq
+      | Cfg_inst_id.Inst (_, n) ->
+        let i = List.nth_exn (BB.body bb) n in
+        let pressure = has_pressure i (Cfg.destroyed_at_instruction i.desc) in
+        pressure, get_kill_gen block i pressure freq
+    in
+    K.{ kills; gens; pressure; freq }
+
 end
 
 module Solver = struct

@@ -29,18 +29,33 @@ module Spill_to_reload = struct
   type t
     = Spill.t Inst_id.Map.t
     [@@deriving sexp]
+
+  let is_empty = Inst_id.Map.is_empty
 end
+
+let inst_reloads arg slot =
+  Array.fold arg ~init:false ~f:(fun reloads reg ->
+    match reg.Reg.loc with
+    | Reg.Stack (Reg.Local s) when Spill.equal (Proc.register_class reg, s) slot ->
+      true
+    | _ ->
+      reloads)
 
 let all_reloads cfg slot =
   (* Set of all reloads of a specific slot in a program. *)
   List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Set.empty ~f:(fun reloads block ->
+    let start = BB.start block in
+    let term = BB.terminator block in
+    let reloads =
+      if inst_reloads term.Cfg.arg slot then
+        Inst_id.Set.add reloads (start, term.Cfg.id)
+      else
+        reloads
+    in
     List.fold_left (BB.body block) ~init:reloads ~f:(fun reloads inst ->
-      Array.fold inst.Cfg.arg ~init:reloads ~f:(fun reloads reg ->
-        match reg.Reg.loc with
-        | Reg.Stack (Reg.Local s) when Spill.equal (Proc.register_class reg, s) slot ->
-          Inst_id.Set.add reloads (BB.start block, inst.Cfg.id)
-        | _ ->
-          reloads)))
+      if inst_reloads inst.Cfg.arg slot
+        then Inst_id.Set.add reloads (BB.start block, inst.Cfg.id)
+        else reloads))
 
 let reloads_of_spill cfg slot ~reg_uses ~reloads =
   all_reloads cfg slot
@@ -53,14 +68,19 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
       | Path_use.Never _ -> None
       | _ ->
         let reload_bb = Cfg.get_block_exn cfg block in
-        let cfg_inst_idx, reload =
-          List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
-            if i.Cfg.id = reload_id then Some (idx, i) else None)
+        let term = BB.terminator reload_bb in
+        let cfg_reload_id, res =
+          if term.Cfg.id = reload_id
+            then Cfg_inst_id.Term block , term.Cfg.res
+            else
+              List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
+                if i.Cfg.id = reload_id
+                  then Some (Cfg_inst_id.Inst(block, idx), i.Cfg.res)
+                  else None)
         in
-        let cfg_reload_id = Cfg_inst_id.Inst(block, cfg_inst_idx) in
         let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
         let reg_use =
-          reload.Cfg.res
+          res
             |> Array.to_list
             |> List.filter_map ~f:(function
               | { loc = Reg.Reg r; _ } ->
@@ -96,11 +116,17 @@ let score cl ~cfg_info =
             | None -> acc)
           | _ -> acc)))
   in
-  (*(match cfg_info with
-  | Some info -> Cfg_info.dump_dot info ""
-  | None -> CL.save_as_dot cl "");*)
-  print_s [%message (spill_reloads : Spill_to_reload.t)];
-  Printf.printf "\n\n"
+  if Spill_to_reload.is_empty spill_reloads || (List.length (Cfg.blocks cfg)) > 100 then ()
+  else begin
+    (*
+    (match cfg_info with
+    | Some info -> Cfg_info.dump_dot info ""
+    | None -> CL.save_as_dot cl "");
+    *)
+    print_endline (Cfg.fun_name cfg);
+    print_s [%message (spill_reloads : Spill_to_reload.t)];
+    Printf.printf "\n\n"
+  end
 
 let score files ~fdo_profile =
   let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in
@@ -116,4 +142,5 @@ let score files ~fdo_profile =
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
-        score cl ~cfg_info))
+        if String.equal "camlPpx_string__create_2790" name then score cl ~cfg_info
+        else ()))

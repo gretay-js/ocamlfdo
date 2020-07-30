@@ -4,10 +4,6 @@ module Class : sig
     * describing their uses from a program point to any exit points.
     *)
   type t = Path_use.t Register.Map.t [@@deriving sexp]
-
-  val equal : t -> t -> bool
-
-  val lub : t -> t -> t
 end
 
 module Solver : sig
