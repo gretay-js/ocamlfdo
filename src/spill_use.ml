@@ -125,20 +125,27 @@ module Problem = struct
   module K = struct
     module S = Class
 
+    (** Kill-Gen information for individual instructions which can be aggregated
+      * to represent an entire basic block throug composition
+      *)
     type t =
       { kills: Spill.Set.t
+      (* Set of spill slots overwritten at any point. *)
       ; gens: bool Inst_id.Map.t Spill.Map.t
+      (** Set of spill slots read at any point which also reach the first instruction,
+        * i.e. are not overwritten by preceding instructions.
+        * The flag indicates whether there is register pressure between the first
+        * instruction and the instruction using the spill slot.
+        *)
       ; pressure: bool
+      (* Indicates whether there is register pressure at any of the aggregated points *)
       ; freq: Frequency.t
+      (* The execution frequency of the block or the instruction. *)
       }
 
     let f s { kills; gens; pressure; freq } =
-      let after_kill =
-        Spill.Set.fold kills ~init:s ~f:(fun acc key ->
-          Spill.Map_with_default.set acc ~key ~data:Class.Uses.never)
-      in
       let after_pressure =
-        Spill.Map_with_default.map after_kill ~f:(fun { all_uses; reloads }->
+        Spill.Map_with_default.map s ~f:(fun { all_uses; reloads }->
           let reloads =
             Inst_id.Map_with_default.map reloads ~f:(fun p ->
               { path = Path_use.update_never p.path freq
@@ -147,38 +154,45 @@ module Problem = struct
           in
           { all_uses = Path_use.update_never all_uses freq; reloads })
       in
-      Spill.Map.fold gens ~init:after_pressure ~f:(fun ~key ~data acc ->
-        Spill.Map_with_default.update acc key ~f:(fun { reloads; _ } ->
+      let after_kill =
+        Spill.Set.fold kills ~init:after_pressure ~f:(fun acc key ->
+          Spill.Map_with_default.set acc ~key ~data:Class.Uses.never)
+      in
+      Spill.Map.fold gens ~init:after_kill ~f:(fun ~key:spill_key ~data acc ->
+        Spill.Map_with_default.update acc spill_key ~f:(fun { reloads; _ } ->
           let reloads =
-            Inst_id.Map.fold data ~init:reloads ~f:(fun ~key ~data acc ->
-              Inst_id.Map_with_default.update acc key ~f:(fun prev ->
+            Inst_id.Map.fold data ~init:reloads ~f:(fun ~key:reload_key ~data acc ->
+              Inst_id.Map_with_default.update acc reload_key ~f:(fun prev ->
                 { path = Path_use.Always freq;
                   pressure =
+                    (* data indicates whether there is register pressure between
+                     * block entry and the program point where the spill slot is
+                     * used by the reload.
+                     * If there is register pressure, set the use to 'Always'.
+                     * If there is no pressure and the slot is not live-in to the
+                     * block, there is no pressure to combine with, so use 'Never'.
+                     * If the slot is live-in to the block without pressure, propagate.
+                     *)
                     if data then Path_use.Always freq
-                    else
-                      match prev.path with
-                      | Unknown | Never _ -> Path_use.Never freq
-                      | Sometimes _ | Always _ -> prev.pressure
+                    else if Spill.Set.mem kills spill_key then Path_use.Never freq
+                    else prev.pressure
                 }))
           in
           { all_uses = Path_use.Always freq; reloads }))
 
     let dot curr prev =
-      let prev_gens =
-        Spill.Map.filter_mapi prev.gens ~f:(fun ~key ~data ->
-          if Spill.Set.mem curr.kills key then None
-          else Some (Inst_id.Map.map data ~f:(fun pressure -> pressure || curr.pressure)))
-      in
       { kills = Spill.Set.union curr.kills prev.kills
       ; gens =
-        Spill.Map.merge prev_gens curr.gens ~f:(fun ~key:_ v->
+        Spill.Map.merge prev.gens curr.gens ~f:(fun ~key:_ v->
           match v with
           | `Both(prev_reloads, curr_reloads) ->
-            Some (Inst_id.Map.merge prev_reloads curr_reloads ~f:(fun ~key:_ v ->
-              match v with
-              | `Both(_prev, _curr) -> Some _curr
-              | `Left a -> Some a
-              | `Right b -> Some b))
+            Some (Inst_id.Map.merge prev_reloads curr_reloads ~f:(fun ~key v ->
+              if Spill.Set.mem curr.kills key then None
+              else
+                match v with
+                | `Both(_, curr) -> Some curr
+                | `Left a -> Some (a || curr.pressure)
+                | `Right b -> Some b))
           | `Left a -> Some a
           | `Right b -> Some b)
       ; pressure = curr.pressure || prev.pressure

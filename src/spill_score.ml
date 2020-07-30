@@ -29,8 +29,6 @@ module Spill_to_reload = struct
   type t
     = Spill.t Inst_id.Map.t
     [@@deriving sexp]
-
-  let is_empty = Inst_id.Map.is_empty
 end
 
 let inst_reloads arg slot =
@@ -116,17 +114,9 @@ let score cl ~cfg_info =
             | None -> acc)
           | _ -> acc)))
   in
-  if Spill_to_reload.is_empty spill_reloads || (List.length (Cfg.blocks cfg)) > 100 then ()
-  else begin
-    (*
-    (match cfg_info with
-    | Some info -> Cfg_info.dump_dot info ""
-    | None -> CL.save_as_dot cl "");
-    *)
-    print_endline (Cfg.fun_name cfg);
-    print_s [%message (spill_reloads : Spill_to_reload.t)];
-    Printf.printf "\n\n"
-  end
+  print_endline (Cfg.fun_name cfg);
+  print_s [%message (spill_reloads : Spill_to_reload.t)];
+  Printf.printf "\n\n"
 
 let score files ~fdo_profile =
   let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in
