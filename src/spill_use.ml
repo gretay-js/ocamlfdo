@@ -153,7 +153,12 @@ module Problem = struct
             Inst_id.Map.fold data ~init:reloads ~f:(fun ~key ~data acc ->
               Inst_id.Map_with_default.update acc key ~f:(fun prev ->
                 { path = Path_use.Always freq;
-                  pressure = if data then Path_use.Always freq else prev.pressure
+                  pressure =
+                    if data then Path_use.Always freq
+                    else
+                      match prev.path with
+                      | Unknown | Never _ -> Path_use.Never freq
+                      | Sometimes _ | Always _ -> prev.pressure
                 }))
           in
           { all_uses = Path_use.Always freq; reloads }))
