@@ -91,6 +91,7 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
         Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use })))
     |> Inst_id.Map.of_alist_exn
 
+
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
@@ -142,5 +143,4 @@ let score files ~fdo_profile =
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
-        if String.equal "camlPpx_string__create_2790" name then score cl ~cfg_info
-        else ()))
+        score cl ~cfg_info))

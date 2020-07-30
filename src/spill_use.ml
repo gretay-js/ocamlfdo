@@ -97,7 +97,7 @@ module Class = struct
   let unknown = Spill.Map_with_default.default Uses.unknown
 end
 
-let get_kill_gen block i pressure freq =
+let get_kill_gen block i pressure =
   let kills =
     Array.fold i.Cfg.res ~init:Spill.Set.empty ~f:(fun kills reg ->
       match reg with
@@ -109,18 +109,10 @@ let get_kill_gen block i pressure freq =
     Array.fold i.Cfg.arg ~init:Spill.Map.empty ~f:(fun gens reg ->
       match reg with
       | { loc = Reg.Stack (Reg.Local s); _} ->
-        let spill_use =
-            { Class.Use.path = Path_use.Always freq
-            ; pressure =
-              if pressure
-                then Path_use.Always freq
-                else Path_use.Never freq
-            }
-        in
         let id = block, i.Cfg.id in
         Spill.Map.set gens
           ~key:(Proc.register_class reg, s)
-          ~data:(Inst_id.Map.singleton id spill_use)
+          ~data:(Inst_id.Map.singleton id pressure)
       | _ -> gens)
   in
   kills, gens
@@ -135,12 +127,12 @@ module Problem = struct
 
     type t =
       { kills: Spill.Set.t
-      ; gens: Class.Use.t Inst_id.Map.t Spill.Map.t
+      ; gens: bool Inst_id.Map.t Spill.Map.t
       ; pressure: bool
       ; freq: Frequency.t
       }
 
-    let f (s: Class.t) { kills; gens; pressure; freq } =
+    let f s { kills; gens; pressure; freq } =
       let after_kill =
         Spill.Set.fold kills ~init:s ~f:(fun acc key ->
           Spill.Map_with_default.set acc ~key ~data:Class.Uses.never)
@@ -159,7 +151,10 @@ module Problem = struct
         Spill.Map_with_default.update acc key ~f:(fun { reloads; _ } ->
           let reloads =
             Inst_id.Map.fold data ~init:reloads ~f:(fun ~key ~data acc ->
-              Inst_id.Map_with_default.set acc ~key ~data)
+              Inst_id.Map_with_default.update acc key ~f:(fun prev ->
+                { path = Path_use.Always freq;
+                  pressure = if data then Path_use.Always freq else prev.pressure
+                }))
           in
           { all_uses = Path_use.Always freq; reloads }))
 
@@ -167,15 +162,7 @@ module Problem = struct
       let prev_gens =
         Spill.Map.filter_mapi prev.gens ~f:(fun ~key ~data ->
           if Spill.Set.mem curr.kills key then None
-          else
-            let open S.Use in
-            Some (Inst_id.Map.map data ~f:(fun p ->
-              let pressure =
-                if curr.pressure
-                  then Path_use.Always curr.freq
-                  else p.pressure
-              in
-              { p with pressure = pressure })))
+          else Some (Inst_id.Map.map data ~f:(fun pressure -> pressure || curr.pressure)))
       in
       { kills = Spill.Set.union curr.kills prev.kills
       ; gens =
@@ -211,11 +198,11 @@ module Problem = struct
       | Cfg_inst_id.Term _ ->
         let t = BB.terminator bb in
         let pressure = has_pressure t (Cfg.destroyed_at_terminator t.desc) in
-        pressure, get_kill_gen block t pressure freq
+        pressure, get_kill_gen block t pressure
       | Cfg_inst_id.Inst (_, n) ->
         let i = List.nth_exn (BB.body bb) n in
         let pressure = has_pressure i (Cfg.destroyed_at_instruction i.desc) in
-        pressure, get_kill_gen block i pressure freq
+        pressure, get_kill_gen block i pressure
     in
     K.{ kills; gens; pressure; freq }
 
