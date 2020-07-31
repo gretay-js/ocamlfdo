@@ -8,17 +8,6 @@ module Cfg_inst_id = Analysis.Inst_id
 
 
 module Class = struct
-  (** Mapping for all registers on the platform to the frequency structure
-    * describing their uses from a program point to any exit points.
-    *
-    *             mov  $1, %rax
-    *                  |
-    *             Sometimes
-    *            /         \
-    *           /          \
-    * add %rax, %rbx      mov $2, %rax
-    *    Always             Never
-    *)
   type t = Path_use.t Register.Map_with_default.t [@@deriving sexp, equal]
 
   (** For each register, join all paths from this program point *)
