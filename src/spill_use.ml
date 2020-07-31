@@ -170,12 +170,13 @@ module Problem = struct
                      * used by the reload.
                      * If there is register pressure, set the use to 'Always'.
                      * If there is no pressure and the slot is not live-in to the
-                     * block, there is no pressure to combine with, so use 'Never'.
-                     * If the slot is live-in to the block without pressure, propagate.
+                     * instruction generating the use, there is no pressure to combine
+                     * with, so use 'Never'.
+                     * If the slot is live-in to the block without pressure, combine.
                      *)
                     if data then Path_use.Always freq
                     else if Spill.Set.mem kills spill_key then Path_use.Never freq
-                    else prev.pressure
+                    else Path_use.lub (Path_use.Always freq) prev.pressure
                 }))
           in
           { all_uses = Path_use.Always freq; reloads }))
@@ -204,9 +205,8 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let init { cfg; _ } block =
-    let bb = Cfg.get_block_exn cfg block in
-    ((if BB.is_exit bb then Class.never else Class.unknown), Class.unknown)
+  let empty _ _ = Class.never
+  let entry _ _ = Class.unknown
 
   let kg { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in

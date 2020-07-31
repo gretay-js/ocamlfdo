@@ -71,13 +71,9 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let init { cfg; _ } block =
-    (* Initialises program exit points, setting register paths to 'Never' *)
-    let bb = Cfg.get_block_exn cfg block in
-    if BB.is_exit bb then
-      (all_unused_registers, Register.Map.empty)
-    else
-      (Register.Map.empty, Register.Map.empty)
+  let empty _ _ = Register.Map.empty
+
+  let entry _ _ = all_unused_registers
 
   let kg { cfg; cfg_info } inst =
     (* Finds the registers read, writted or implicitly destroyed at the node *)
