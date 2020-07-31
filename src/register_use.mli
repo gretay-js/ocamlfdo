@@ -3,7 +3,7 @@ module Class : sig
   (** Mapping for all registers on the platform to the frequency structure
     * describing their uses from a program point to any exit points.
     *)
-  type t = Path_use.t Register.Map.t [@@deriving sexp]
+  type t = Path_use.t Register.Map_with_default.t [@@deriving sexp]
 end
 
 module Solver : sig

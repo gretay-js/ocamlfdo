@@ -82,7 +82,7 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
             |> Array.to_list
             |> List.filter_map ~f:(function
               | { loc = Reg.Reg r; _ } ->
-                Some (Register.Map.find_exn all_reload_uses_at r)
+                Some (Register.Map_with_default.find all_reload_uses_at r)
               | _ -> None)
             |> List.fold_left ~init:Path_use.never ~f:Path_use.max
         in

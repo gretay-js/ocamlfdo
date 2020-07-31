@@ -10,27 +10,29 @@ module Cfg_inst_id = Analysis.Inst_id
 module Class = struct
   (** Mapping for all registers on the platform to the frequency structure
     * describing their uses from a program point to any exit points.
+    *
+    *             mov  $1, %rax
+    *                  |
+    *             Sometimes
+    *            /         \
+    *           /          \
+    * add %rax, %rbx      mov $2, %rax
+    *    Always             Never
     *)
-  type t = Path_use.t Register.Map.t [@@deriving sexp]
+  type t = Path_use.t Register.Map_with_default.t [@@deriving sexp, equal]
 
-  let equal = Register.Map.equal Path_use.equal
-
+  (** For each register, join all paths from this program point *)
   let lub =
-    (* For each register, join all paths from this program point *)
-    Register.Map.merge ~f:(fun ~key:_ v ->
-      match v with
-      | `Both(a, b) -> Some (Path_use.lub a b)
-      | `Left a -> Some a
-      | `Right b -> Some b)
-end
+    Register.Map_with_default.merge ~f:(fun a b -> Path_use.lub a b)
 
-let all_unused_registers =
-  (* Build a map mapping never to all physical regs *)
-  Register.Set.fold
-    Register.all_registers
-    ~init:Register.Map.empty
-    ~f:(fun acc reg ->
-        Register.Map.set acc ~key:reg ~data:(Path_use.Never Execount.zero))
+  (** There are no uses at program exit points. *)
+  let never =
+    Register.Map_with_default.default (Path_use.Never Frequency.zero)
+
+  (** Internal nodes are initialised to unknown. *)
+  let unknown =
+    Register.Map_with_default.default (Path_use.Unknown)
+end
 
 module Problem = struct
   module K = struct
@@ -45,20 +47,20 @@ module Problem = struct
         (* Frequency of the block containing the instruction. *)
       }
 
-    let f s { kill; gen; freq } =
+    let f (s: Class.t) { kill; gen; freq } =
       (* Removes the killed registers and adds the used registers to the map of
        * live regsiters at this program point. If a register has no uses, the
        * frequency of the 'Never' path is updated.
        *)
-      let open Path_use in
-      let not_killed =
-        Register.Map.mapi s ~f:(fun ~key ~data ->
-          if Register.Set.mem kill key
-            then Path_use.Never freq
-            else Path_use.update_never data freq)
+      let after_pressure =
+        Register.Map_with_default.map s ~f:(fun uses -> Path_use.update_never uses freq)
       in
-      Register.Set.fold gen ~init:not_killed ~f:(fun acc reg ->
-        Register.Map.set acc ~key:reg ~data:(Always freq))
+      let after_kill =
+        Register.Set.fold kill ~init:after_pressure ~f:(fun acc key ->
+          Register.Map_with_default.set acc ~key ~data:(Path_use.Never freq))
+      in
+      Register.Set.fold gen ~init:after_kill ~f:(fun acc reg ->
+        Register.Map_with_default.set acc ~key:reg ~data:(Path_use.Always freq))
 
     let dot curr prev =
       { kill = Register.Set.union curr.kill prev.kill;
@@ -71,9 +73,9 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let empty _ _ = Register.Map.empty
+  let empty _ _ = Class.unknown
 
-  let entry _ _ = all_unused_registers
+  let entry _ _ = Class.never
 
   let kg { cfg; cfg_info } inst =
     (* Finds the registers read, writted or implicitly destroyed at the node *)
