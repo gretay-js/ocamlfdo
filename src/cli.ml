@@ -841,10 +841,11 @@ let spill_score_command =
     Command.Let_syntax.(
       let%map files = anon_files
       and fdo_profile = Commonflag.(optional flag_profile_filename)
-      and timings = flag_timings in
+      and timings = flag_timings
+      and simplify_cfg = flag_simplify_cfg in
       fun () ->
         Profile.record_call "spill_score" (fun () ->
-          Spill_score.score files ~fdo_profile);
+          Spill_score.score files ~fdo_profile ~simplify_cfg);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 

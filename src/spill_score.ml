@@ -3,6 +3,7 @@ open Core
 module Label = Ocamlcfg.Label
 module Analysis = Ocamlcfg.Analysis
 module CL = Ocamlcfg.Cfg_with_layout
+module CP = Ocamlcfg.Passes
 module Cfg = Ocamlcfg.Cfg
 module BB = Cfg.Basic_block
 module AD = Aggregated_decoded_profile
@@ -91,8 +92,16 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
 
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
+
+  (match cfg_info with
+  | Some info -> Cfg_info.dump_dot info ""
+  | None -> CL.save_as_dot cl "");
+  let cfg_info = None in
+  Printf.printf "%s %d\n" (Cfg.fun_name cfg) (List.length (Cfg.blocks cfg));
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
+  print_endline "X";
   let spill_uses = Spill_use.Solver.solve cfg cfg_info in
+  print_endline "Y";
 
   let spill_reloads =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
@@ -114,11 +123,10 @@ let score cl ~cfg_info =
             | None -> acc)
           | _ -> acc)))
   in
-  print_endline (Cfg.fun_name cfg);
   print_s [%message (spill_reloads : Spill_to_reload.t)];
   Printf.printf "\n\n"
 
-let score files ~fdo_profile =
+let score files ~fdo_profile ~simplify_cfg =
   let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in
   List.iter files ~f:(fun file ->
     let open Linear_format in
@@ -127,8 +135,12 @@ let score files ~fdo_profile =
       match item with
       | Data _ -> ()
       | Func f ->
-        let cl = CL.of_linear f ~preserve_orig_labels:false in
+        let cl = CL.of_linear f ~preserve_orig_labels:(not simplify_cfg) in
         let name = Cfg.fun_name (CL.cfg cl) in
+        if simplify_cfg then begin
+          CL.eliminate_fallthrough_blocks cl;
+          CP.simplify_terminators (CL.cfg cl);
+        end;
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in

@@ -301,12 +301,17 @@ let record_intra t ~from_loc ~to_loc ~count ~mispredicts =
         (* CR-someday gyorsh: count calls *)
         (* Block_info.add_call bi ~callsite:from_loc ~callee:b; *)
         Block_info.add_branch bi b
+      | Call { successor; _ } ->
+        (* This call is either a call to the function itself or a jump to a successor
+           other than a fallthrough. *)
+        assert (
+            Cfg.entry_label (CL.cfg t.cl) = to_block_start || successor = to_block_start);
+        Block_info.add_branch bi b
       | Tailcall (Func _) -> assert false
       | Raise _ ->
         (* target must be a handler block *)
         (* assert (Cfg_builder.is_trap_handler cfg to_block.start) *)
         ()
-      | Call _
       | Always _
       | Never
       | Parity_test _
