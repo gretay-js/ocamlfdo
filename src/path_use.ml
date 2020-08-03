@@ -10,24 +10,24 @@ let lub a b =
   match a, b with
   | Unknown, _ -> b
   | _, Unknown -> a
-  | Never fa, Never fb ->
-    Never (Frequency.lub fa fb)
-  | Never fa, Always fb->
-    Sometimes (fb, fa)
-  | Never fa, Sometimes (fba, fbn) ->
-    Sometimes (fba, Frequency.lub fa fbn)
-  | Always fa, Never fb ->
-    Sometimes (fa, fb)
-  | Always fa, Always fb->
-    Always (Frequency.lub fa fb)
-  | Always fa, Sometimes (fba, fbn) ->
-    Sometimes (Frequency.lub fa fba, fbn)
-  | Sometimes (faa, fan), Never fb ->
-    Sometimes (faa, Frequency.lub fan fb)
-  | Sometimes (faa, fan), Always fb->
-    Sometimes (Frequency.lub faa fb, fan)
-  | Sometimes (faa, fan), Sometimes (fba, fbn) ->
-    Sometimes (Frequency.lub faa fba, Frequency.lub fan fbn)
+  | Never never_a, Never never_b ->
+    Never (Frequency.lub never_a never_b)
+  | Never never, Always always->
+    Sometimes (always, never)
+  | Never never, Sometimes (always_b, never_b) ->
+    Sometimes (always_b, Frequency.lub never never_b)
+  | Always always, Never never ->
+    Sometimes (always, never)
+  | Always always_a, Always always_b->
+    Always (Frequency.lub always_a always_b)
+  | Always always, Sometimes (always_a, never_b) ->
+    Sometimes (Frequency.lub always always_a, never_b)
+  | Sometimes (always_a, never_a), Never never_b ->
+    Sometimes (always_a, Frequency.lub never_a never_b)
+  | Sometimes (always_a, never_a), Always always_b->
+    Sometimes (Frequency.lub always_a always_b, never_a)
+  | Sometimes (always_a, never_a), Sometimes (always_b, never_b) ->
+    Sometimes (Frequency.lub always_a always_b, Frequency.lub never_a never_b)
 
 let max a b =
   match a, b with
@@ -36,9 +36,10 @@ let max a b =
   | Always fa, Always fb -> Always (Frequency.max fa fb)
   | Always _, _ -> a
   | _, Always _ -> b
+  | Never fa, Never fb -> Never (Frequency.max fa fb)
   | Never _, _ -> b
   | _, Never _ -> a
-  | Sometimes(aa, an), Sometimes(ba, bn) ->
+  | Sometimes (aa, an), Sometimes(ba, bn) ->
     Sometimes (Frequency.max aa ba, Frequency.max an bn)
 
 let never = Never Frequency.zero
@@ -48,5 +49,6 @@ let unknown = Unknown
 let update_never v freq =
   match v with
   | Never f -> Never (Frequency.lub f freq)
+  | Sometimes (always, never) -> Sometimes (always, Frequency.lub never freq)
   | _ -> v
 

@@ -188,16 +188,15 @@ module Problem = struct
           match v with
           | `Both(prev_reloads, curr_reloads) ->
             Some (Inst_id.Map.merge prev_reloads curr_reloads ~f:(fun ~key v ->
-              if Spill.Set.mem curr.kills key then None
-              else
-                match v with
-                | `Both(_, curr) -> Some curr
-                | `Left a -> Some (a || curr.pressure)
-                | `Right b -> Some b))
+              match v with
+              | `Both(_, curr) -> Some curr
+              | `Left _ when Spill.Set.mem curr.kills key -> None
+              | `Left a -> Some (a || curr.pressure)
+              | `Right b -> Some b))
           | `Left a -> Some a
           | `Right b -> Some b)
       ; pressure = curr.pressure || prev.pressure
-      ; freq = curr.freq
+      ; freq = Frequency.max curr.freq prev.freq
       }
   end
 
@@ -205,8 +204,8 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let empty _ _ = Class.never
-  let entry _ _ = Class.unknown
+  let empty _ _ = Class.unknown
+  let entry _ _ = Class.never
 
   let kg { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in

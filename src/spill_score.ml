@@ -96,12 +96,10 @@ let score cl ~cfg_info =
   (match cfg_info with
   | Some info -> Cfg_info.dump_dot info ""
   | None -> CL.save_as_dot cl "");
-  let cfg_info = None in
+
   Printf.printf "%s %d\n" (Cfg.fun_name cfg) (List.length (Cfg.blocks cfg));
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
-  print_endline "X";
   let spill_uses = Spill_use.Solver.solve cfg cfg_info in
-  print_endline "Y";
 
   let spill_reloads =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
@@ -144,4 +142,4 @@ let score files ~fdo_profile ~simplify_cfg =
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
-        score cl ~cfg_info))
+      score cl ~cfg_info))
