@@ -231,6 +231,24 @@ let flag_auto =
          splitting it into phases (ignore phase-specific ocamlfdo \
          arguments).")
 
+let flag_score_all =
+  let name = "-score-all" in
+  let doc = "score functions without profile info" in
+  Command.Param.(
+    let flag_yes =
+      flag name no_arg ~doc
+      |> map ~f:(function
+           | false -> None
+           | true -> Some true)
+    in
+    let flag_no =
+      flag ("-no" ^ name) no_arg ~doc:(" do not" ^ doc)
+      |> map ~f:(function
+           | false -> None
+           | true -> Some false)
+    in
+    choose_one [flag_yes; flag_no] ~if_nothing_chosen:(Default_to false))
+
 let flag_get_config =
   let open Command.Param in
   (* CR-someday gyorsh: this is just boolean combination of func and unit. Is
@@ -842,10 +860,12 @@ let spill_score_command =
       let%map files = anon_files
       and fdo_profile = Commonflag.(optional flag_profile_filename)
       and timings = flag_timings
-      and simplify_cfg = flag_simplify_cfg in
+      and simplify_cfg = flag_simplify_cfg
+      and score_all = flag_score_all
+      in
       fun () ->
         Profile.record_call "spill_score" (fun () ->
-          Spill_score.score files ~fdo_profile ~simplify_cfg);
+          Spill_score.score files ~fdo_profile ~simplify_cfg ~score_all);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 

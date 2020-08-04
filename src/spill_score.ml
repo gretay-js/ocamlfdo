@@ -25,11 +25,18 @@ module Spill_to_reload = struct
       ; reloads: Reload.t Inst_id.Map.t
       }
       [@@deriving sexp]
+
+    let is_unavoidable { all_uses; reloads } =
+      Path_use.is_always all_uses && Inst_id.Map.for_all reloads
+        ~f:(fun { path = _; pressure; reg_use } ->
+          Path_use.is_always pressure && Path_use.is_always reg_use)
   end
 
   type t
     = Spill.t Inst_id.Map.t
     [@@deriving sexp]
+
+  let is_empty = Inst_id.Map.is_empty
 end
 
 let inst_reloads arg slot =
@@ -56,7 +63,7 @@ let all_reloads cfg slot =
         then Inst_id.Set.add reloads (BB.start block, inst.Cfg.id)
         else reloads))
 
-let reloads_of_spill cfg slot ~reg_uses ~reloads =
+let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
   all_reloads cfg slot
     |> Inst_id.Set.to_list
     |> List.filter_map ~f:(fun key ->
@@ -68,17 +75,27 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
       | _ ->
         let reload_bb = Cfg.get_block_exn cfg block in
         let term = BB.terminator reload_bb in
-        let cfg_reload_id, res =
+        (* Determine the ID and registers of the instruction and also identify
+           instructions which use the value themselves, without having to pass it on
+           to other users, such as terminators (through the control dependency) or
+           stores and other instructions with side effects *)
+        let cfg_reload_id, res, always_uses =
           if term.Cfg.id = reload_id
-            then Cfg_inst_id.Term block , term.Cfg.res
+            then Cfg_inst_id.Term block , term.Cfg.res, true
             else
               List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
-                if i.Cfg.id = reload_id
-                  then Some (Cfg_inst_id.Inst(block, idx), i.Cfg.res)
-                  else None)
+                if i.Cfg.id <> reload_id then None
+                else
+                  let open Cfg in
+                  let always_uses =
+                    match i.desc with
+                    | Op (Store _) -> true
+                    | _ -> false
+                  in
+                  Some (Cfg_inst_id.Inst(block, idx), i.Cfg.res, always_uses))
         in
         let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
-        let reg_use =
+        let reg_other_use =
           res
             |> Array.to_list
             |> List.filter_map ~f:(function
@@ -87,21 +104,21 @@ let reloads_of_spill cfg slot ~reg_uses ~reloads =
               | _ -> None)
             |> List.fold_left ~init:Path_use.never ~f:Path_use.max
         in
+        let reg_use =
+          if always_uses
+            then Path_use.(max (Always (Frequency.create cfg_info block)) reg_other_use)
+            else reg_other_use
+        in
         Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use })))
     |> Inst_id.Map.of_alist_exn
 
 let score cl ~cfg_info =
   let cfg = CL.cfg cl in
-
-  (match cfg_info with
-  | Some info -> Cfg_info.dump_dot info ""
-  | None -> CL.save_as_dot cl "");
-
-  Printf.printf "%s %d\n" (Cfg.fun_name cfg) (List.length (Cfg.blocks cfg));
+  (* Run the data flow analyses to find register and spill slot users. *)
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
   let spill_uses = Spill_use.Solver.solve cfg cfg_info in
-
-  let spill_reloads =
+  (* Map all reloads to the spills they read from. *)
+  let spills =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
       List.foldi (BB.body block) ~init:acc ~f:(fun idx acc i ->
         Array.fold i.Cfg.res ~init:acc ~f:(fun acc reg ->
@@ -114,17 +131,22 @@ let score cl ~cfg_info =
               let { Spill_use.Class.Uses.all_uses; reloads } =
                 Spill.Map_with_default.find all_spill_uses_at slot
               in
-              let reloads = reloads_of_spill cfg slot ~reg_uses ~reloads in
+              let reloads = reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads in
               let key = BB.start block, i.Cfg.id in
-              let data = { Spill_to_reload.Spill.all_uses; reloads } in
-              Inst_id.Map.set acc ~key ~data
+              let open Spill_to_reload in
+              let data = { Spill.all_uses; reloads } in
+              if Spill.is_unavoidable data then acc else Inst_id.Map.set acc ~key ~data
             | None -> acc)
           | _ -> acc)))
   in
-  print_s [%message (spill_reloads : Spill_to_reload.t)];
-  Printf.printf "\n\n"
+  (* Filter out some reloads which are unavoidable. *)
+  if not (Spill_to_reload.is_empty spills) then begin
+    Printf.printf "%s %d\n" (Cfg.fun_name cfg) (List.length (Cfg.blocks cfg));
+    print_s [%message (spills : Spill_to_reload.t)];
+    Printf.printf "\n\n"
+  end
 
-let score files ~fdo_profile ~simplify_cfg =
+let score files ~fdo_profile ~simplify_cfg ~score_all =
   let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in
   List.iter files ~f:(fun file ->
     let open Linear_format in
@@ -142,4 +164,6 @@ let score files ~fdo_profile ~simplify_cfg =
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
-      score cl ~cfg_info))
+        if Option.is_none cfg_info && not score_all
+          then ()
+          else score cl ~cfg_info))

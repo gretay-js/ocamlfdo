@@ -42,6 +42,10 @@ let max a b =
   | Sometimes (aa, an), Sometimes(ba, bn) ->
     Sometimes (Frequency.max aa ba, Frequency.max an bn)
 
+let is_always = function
+  | Always _ -> true
+  | _ -> false
+
 let never = Never Frequency.zero
 
 let unknown = Unknown
