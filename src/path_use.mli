@@ -35,6 +35,9 @@ val max : t -> t -> t
 (* Checks if the path_use is an Always. *)
 val is_always : t -> bool
 
+(* Checks if the path is more biased to the never component. *)
+val is_less_frequent : t -> bool
+
 (* No use with no frequency count *)
 val never : t
 

@@ -46,6 +46,12 @@ let is_always = function
   | Always _ -> true
   | _ -> false
 
+let is_less_frequent = function
+  | Unknown -> false
+  | Never _ -> true
+  | Sometimes (always, never) -> Frequency.(never > always)
+  | Always _ -> false
+
 let never = Never Frequency.zero
 
 let unknown = Unknown

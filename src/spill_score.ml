@@ -12,24 +12,25 @@ module Cfg_inst_id = Analysis.Inst_id
 module Spill_to_reload = struct
   module Reload = struct
     type t =
-      { path: Path_use.t
-      ; pressure: Path_use.t
-      ; reg_use: Path_use.t
+      { freq: Frequency.t;
+        path: Path_use.t;
+        pressure: Path_use.t;
+        reg_use: Path_use.t;
       }
       [@@deriving sexp]
   end
 
   module Spill = struct
     type t =
-      { all_uses: Path_use.t
-      ; reloads: Reload.t Inst_id.Map.t
+      { freq: Frequency.t;
+        all_uses: Path_use.t;
+        reloads: Reload.t Inst_id.Map.t;
       }
       [@@deriving sexp]
 
-    let is_unavoidable { all_uses; reloads } =
-      Path_use.is_always all_uses && Inst_id.Map.for_all reloads
-        ~f:(fun { path = _; pressure; reg_use } ->
-          Path_use.is_always pressure && Path_use.is_always reg_use)
+    let is_unavoidable { reloads; _ } =
+      (* A spill is unavoidable if there is pressure to all reloads. *)
+      Inst_id.Map.for_all reloads ~f:(fun { pressure; _ } -> Path_use.is_always pressure)
   end
 
   type t
@@ -109,10 +110,11 @@ let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
             then Path_use.(max (Always (Frequency.create cfg_info block)) reg_other_use)
             else reg_other_use
         in
-        Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use })))
+        let freq =  Frequency.create cfg_info block in
+        Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use; freq })))
     |> Inst_id.Map.of_alist_exn
 
-let score cl ~cfg_info =
+let score cl ~cfg_info ~score_all =
   let cfg = CL.cfg cl in
   (* Run the data flow analyses to find register and spill slot users. *)
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
@@ -120,29 +122,41 @@ let score cl ~cfg_info =
   (* Map all reloads to the spills they read from. *)
   let spills =
     List.fold_left (Cfg.blocks cfg) ~init:Inst_id.Map.empty ~f:(fun acc block ->
+      let start = BB.start block in
+      let freq = Frequency.create cfg_info start in
       List.foldi (BB.body block) ~init:acc ~f:(fun idx acc i ->
         Array.fold i.Cfg.res ~init:acc ~f:(fun acc reg ->
           match reg with
           | { loc = Reg.Stack (Reg.Local s); _} ->
             let slot = Proc.register_class reg, s in
-            let cfg_spill_id = Cfg_inst_id.Inst (BB.start block, idx) in
+            let cfg_spill_id = Cfg_inst_id.Inst (start, idx) in
             (match Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses with
             | Some (all_spill_uses_at, _) ->
               let { Spill_use.Class.Uses.all_uses; reloads } =
                 Spill.Map_with_default.find all_spill_uses_at slot
               in
               let reloads = reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads in
-              let key = BB.start block, i.Cfg.id in
+              let key = start, i.Cfg.id in
               let open Spill_to_reload in
-              let data = { Spill.all_uses; reloads } in
-              if Spill.is_unavoidable data then acc else Inst_id.Map.set acc ~key ~data
+              let data = { Spill.freq; all_uses; reloads } in
+              if Spill.is_unavoidable data || (not score_all && Int64.(freq < of_int 5))
+                then acc
+                else Inst_id.Map.set acc ~key ~data
             | None -> acc)
           | _ -> acc)))
   in
-  (* Filter out some reloads which are unavoidable. *)
+  (* Print information about the spills *)
   if not (Spill_to_reload.is_empty spills) then begin
     Printf.printf "%s %d\n" (Cfg.fun_name cfg) (List.length (Cfg.blocks cfg));
-    print_s [%message (spills : Spill_to_reload.t)];
+    Inst_id.Map.iteri spills ~f:(fun ~key:spill_id ~data:spill ->
+      let open Spill_to_reload in
+      Inst_id.Map.iteri spill.reloads ~f:(fun ~key:reload_id ~data:reload ->
+        if Path_use.is_less_frequent reload.pressure then
+          print_s [%message
+            (spill_id: Inst_id.t)
+            (reload_id : Inst_id.t)
+            (reload : Reload.t)])
+    );
     Printf.printf "\n\n"
   end
 
@@ -166,4 +180,4 @@ let score files ~fdo_profile ~simplify_cfg ~score_all =
         in
         if Option.is_none cfg_info && not score_all
           then ()
-          else score cl ~cfg_info))
+          else score cl ~cfg_info ~score_all))
