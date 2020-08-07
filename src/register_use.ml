@@ -4,7 +4,7 @@ module Label = Ocamlcfg.Label
 module Analysis = Ocamlcfg.Analysis
 module Cfg = Ocamlcfg.Cfg
 module BB = Cfg.Basic_block
-module Cfg_inst_id = Analysis.Inst_id
+module Cfg_inst_id = Ocamlcfg.Inst_id
 
 
 module Class = struct
@@ -69,7 +69,6 @@ module Problem = struct
   let kg { cfg; cfg_info } inst =
     (* Finds the registers read, writted or implicitly destroyed at the node *)
     let block = Cfg_inst_id.parent inst in
-    let bb = Cfg.get_block_exn cfg block in
     let kg inst destroyed =
       let regs_of_array =
         Array.fold ~init:Register.Set.empty ~f:(fun acc reg ->
@@ -85,13 +84,9 @@ module Problem = struct
       let gen = regs_of_array (inst.Cfg.arg) in
       { K.kill; K.gen; K.freq = Frequency.create cfg_info block }
     in
-    match inst with
-    | Cfg_inst_id.Term _->
-      let t = BB.terminator bb in
-      kg t (Cfg.destroyed_at_terminator t.Cfg.desc)
-    | Cfg_inst_id.Inst (_, n) ->
-      let i = List.nth_exn (BB.body bb) n in
-      kg i (Cfg.destroyed_at_instruction i.Cfg.desc)
+    match Cfg_inst_id.get_inst cfg inst with
+    | `Term t -> kg t (Cfg.destroyed_at_terminator t.Cfg.desc)
+    | `Basic i -> kg i (Cfg.destroyed_at_basic i.Cfg.desc)
 end
 
 module Solver = struct

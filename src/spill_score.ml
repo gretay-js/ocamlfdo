@@ -7,7 +7,7 @@ module CP = Ocamlcfg.Passes
 module Cfg = Ocamlcfg.Cfg
 module BB = Cfg.Basic_block
 module AD = Aggregated_decoded_profile
-module Cfg_inst_id = Analysis.Inst_id
+module Cfg_inst_id = Ocamlcfg.Inst_id
 
 module Spill_to_reload = struct
   module Reload = struct
@@ -82,7 +82,7 @@ let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
            stores and other instructions with side effects *)
         let cfg_reload_id, res, always_uses =
           if term.Cfg.id = reload_id
-            then Cfg_inst_id.Term block , term.Cfg.res, true
+            then Cfg_inst_id.at_terminator block, term.Cfg.res, true
             else
               List.find_mapi_exn (BB.body reload_bb) ~f:(fun idx i ->
                 if i.Cfg.id <> reload_id then None
@@ -93,7 +93,7 @@ let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
                     | Op (Store _) -> true
                     | _ -> false
                   in
-                  Some (Cfg_inst_id.Inst(block, idx), i.Cfg.res, always_uses))
+                  Some (Cfg_inst_id.at_instruction block idx, i.Cfg.res, always_uses))
         in
         let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
         let reg_other_use =
@@ -114,7 +114,7 @@ let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
         Some (key, Spill_to_reload.Reload.({ path; pressure; reg_use; freq })))
     |> Inst_id.Map.of_alist_exn
 
-let score cl ~cfg_info ~score_all =
+let _score cl ~cfg_info ~score_all =
   let cfg = CL.cfg cl in
   (* Run the data flow analyses to find register and spill slot users. *)
   let reg_uses = Register_use.Solver.solve cfg cfg_info in
@@ -129,7 +129,7 @@ let score cl ~cfg_info ~score_all =
           match reg with
           | { loc = Reg.Stack (Reg.Local s); _} ->
             let slot = Proc.register_class reg, s in
-            let cfg_spill_id = Cfg_inst_id.Inst (start, idx) in
+            let cfg_spill_id = Cfg_inst_id.at_instruction start idx in
             (match Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses with
             | Some (all_spill_uses_at, _) ->
               let { Spill_use.Class.Uses.all_uses; reloads } =
@@ -160,8 +160,8 @@ let score cl ~cfg_info ~score_all =
     Printf.printf "\n\n"
   end
 
-let score files ~fdo_profile ~simplify_cfg ~score_all =
-  let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in
+let score files ~fdo_profile:_ ~simplify_cfg ~score_all:_ =
+  (*let profile = Option.map fdo_profile ~f:Aggregated_decoded_profile.read_bin in*)
   List.iter files ~f:(fun file ->
     let open Linear_format in
     let ui, _ = restore file in
@@ -170,14 +170,16 @@ let score files ~fdo_profile ~simplify_cfg ~score_all =
       | Data _ -> ()
       | Func f ->
         let cl = CL.of_linear f ~preserve_orig_labels:(not simplify_cfg) in
-        let name = Cfg.fun_name (CL.cfg cl) in
+        (*let name = Cfg.fun_name (CL.cfg cl) in*)
         if simplify_cfg then begin
           CL.eliminate_fallthrough_blocks cl;
           CP.simplify_terminators (CL.cfg cl);
         end;
+        CP.slot_to_register (CL.cfg cl);
+        (*
         let cfg_info = Option.bind profile ~f:(fun p ->
           Linearid_profile.create_cfg_info p name cl ~alternatives:[])
         in
         if Option.is_none cfg_info && not score_all
           then ()
-          else score cl ~cfg_info ~score_all))
+          else score cl ~cfg_info ~score_all*)))

@@ -4,7 +4,7 @@ module Label = Ocamlcfg.Label
 module Analysis = Ocamlcfg.Analysis
 module Cfg = Ocamlcfg.Cfg
 module BB = Cfg.Basic_block
-module Cfg_inst_id = Analysis.Inst_id
+module Cfg_inst_id = Ocamlcfg.Inst_id
 
 let increment = function
   | None -> 1
@@ -209,17 +209,14 @@ module Problem = struct
 
   let kg { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in
-    let bb = Cfg.get_block_exn cfg block in
     let freq = Frequency.create cfg_info block in
     let pressure, (kills, gens) =
-      match inst with
-      | Cfg_inst_id.Term _ ->
-        let t = BB.terminator bb in
+      match Cfg_inst_id.get_inst cfg inst with
+      | `Term t ->
         let pressure = has_pressure t (Cfg.destroyed_at_terminator t.desc) in
         pressure, get_kill_gen block t pressure
-      | Cfg_inst_id.Inst (_, n) ->
-        let i = List.nth_exn (BB.body bb) n in
-        let pressure = has_pressure i (Cfg.destroyed_at_instruction i.desc) in
+      | `Basic i ->
+        let pressure = has_pressure i (Cfg.destroyed_at_basic i.desc) in
         pressure, get_kill_gen block i pressure
     in
     K.{ kills; gens; pressure; freq }
