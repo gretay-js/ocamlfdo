@@ -311,12 +311,12 @@ let dump files ~dot ~show_instr =
     | Func f -> Printlinear.fundecl ppf f
     | Data dl -> Printcmm.data ppf dl
   in
-  let dump_cfg oc _ppf = function
+  let dump_cfg _oc ppf = function
     | Data _ -> ()
     | Func f ->
         let cl = CL.of_linear f ~preserve_orig_labels:false in
         if dot then CL.save_as_dot ~show_instr cl "";
-        CL.print cl oc ""
+        CL.print cl ppf ""
   in
   let process file =
     printf "Dumping %s...\n" file;
