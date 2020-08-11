@@ -6,6 +6,8 @@ val optimize
   -> crc_config:Crcs.Config.t
   -> report:bool
   -> simplify_cfg:bool
+  -> simplify_spills:bool
+  -> verify:bool
   -> unit
 
 val compile
@@ -16,6 +18,8 @@ val compile
   -> crc_config:Crcs.Config.t
   -> report:bool
   -> simplify_cfg:bool
+  -> simplify_spills:bool
+  -> verify:bool
   -> unit
 
 val check : string list -> input:string option -> unit

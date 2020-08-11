@@ -124,7 +124,7 @@ let decode files ~binary_filename ~reorder_functions
    dce. It probably doesn't matter for the final layout, if the heuristics
    are reasonable w.r.t. cold code, then dead is just very cold, but having
    less code to deal with when computing layout will be more efficient. *)
-let transform f ~algo ~extra_debug ~simplify_cfg ~alternatives =
+let transform f ~algo ~extra_debug ~simplify_cfg ~simplify_spills ~verify ~alternatives =
   print_linear "Before" f;
   let cl =
     Profile.record_call ~accumulate:true "linear_to_cfg" (fun () ->
@@ -135,6 +135,10 @@ let transform f ~algo ~extra_debug ~simplify_cfg ~alternatives =
     Profile.record_call ~accumulate:true "eliminate_fallthrough" (fun () ->
         CL.eliminate_fallthrough_blocks cl;
         CP.simplify_terminators (CL.cfg cl));
+  if simplify_spills then
+    Profile.record_call ~accumulate:true "simplify" (fun () ->
+        CP.slot_to_register (CL.cfg cl);
+        if verify then CP.verify_liveness (CL.cfg cl));
   ( if extra_debug then
     let file = Filenames.(to_symbol f.fun_name |> make Linear) in
     Profile.record_call ~accumulate:true "extra_debug" (fun () ->
@@ -170,7 +174,7 @@ let emit_crcs ui crcs =
   ui.items <- ui.items @ [Data dl]
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report ~simplify_cfg =
+    ~report ~simplify_cfg ~simplify_spills ~verify =
   if report then (
     Report.start ();
     Report.logf
@@ -234,7 +238,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
                 incr total;
                 let transform ~alternatives =
                   Func
-                    (transform f ~algo ~extra_debug ~simplify_cfg
+                    (transform f ~algo ~extra_debug ~simplify_cfg ~simplify_spills ~verify
                        ~alternatives)
                 in
                 match Crcs.add_fun crcs f ~file with
@@ -339,7 +343,7 @@ let dump files ~dot ~show_instr =
    compiler internals. There are multiple ways in which they can be set
    (e.g., from cmd line or from env or config), order matters, etc. *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report ~simplify_cfg =
+    ~report ~simplify_cfg ~simplify_spills ~verify =
   let open Wrapper in
   let w = wrap args in
   if can_split_compile w then (
@@ -348,7 +352,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let files = artifacts w Filenames.Linear in
     Profile.record_call ~accumulate:true "opt" (fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-          ~report ~simplify_cfg);
+          ~report ~simplify_cfg ~simplify_spills ~verify);
     Profile.record_call ~accumulate:true "phase II:emit" (fun () ->
         call_ocamlopt w Emit) )
   else (

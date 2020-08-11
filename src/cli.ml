@@ -138,12 +138,7 @@ let flag_report =
       ~doc:
         " emit .fdo.org files showing FDO decisions (e.g., blocks reordered)")
 
-let flag_simplify_cfg =
-  let name = "-simplify-cfg" in
-  let doc =
-    " eliminate fallthrough and dead blocks, merge terminators (does not \
-     preserve original labels)"
-  in
+let flag_yes_no name ~default ~doc =
   Command.Param.(
     let flag_yes =
       flag name no_arg ~doc
@@ -157,7 +152,24 @@ let flag_simplify_cfg =
            | false -> None
            | true -> Some false)
     in
-    choose_one [flag_yes; flag_no] ~if_nothing_chosen:(Default_to true))
+    choose_one [flag_yes; flag_no] ~if_nothing_chosen:(Default_to default))
+
+let flag_simplify_cfg =
+  flag_yes_no "-simplify-cfg"
+    ~doc:
+      " eliminate fallthrough and dead blocks, merge terminators (does not \
+       preserve original labels)"
+    ~default:true
+
+let flag_simplify_spills =
+  flag_yes_no "-simplify-spills"
+    ~doc:" replaces spill slot reads which spilled registers if they are still live"
+    ~default:true
+
+let flag_verify =
+  flag_yes_no "-verify"
+    ~doc:" checks if the live sets of instructions are a superset of all live locations"
+    ~default:true
 
 let flag_dot =
   Command.Param.(
@@ -489,6 +501,8 @@ let opt_command =
       and crc_config = flag_crc_config
       and files = anon_files
       and simplify_cfg = flag_simplify_cfg
+      and simplify_spills = flag_simplify_spills
+      and verify = flag_verify
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
@@ -496,7 +510,7 @@ let opt_command =
       fun () ->
         Profile.record_call "opt" (fun () ->
             Main_fdo.optimize files ~fdo_profile ~reorder_blocks ~extra_debug
-              ~crc_config ~report ~simplify_cfg);
+              ~crc_config ~report ~simplify_cfg ~simplify_spills ~verify);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
@@ -569,6 +583,8 @@ let compile_command =
       and reorder_blocks = flag_reorder_blocks
       and report = flag_report
       and simplify_cfg = flag_simplify_cfg
+      and simplify_spills = flag_simplify_spills
+      and verify = flag_verify
       and crc_config = flag_crc_config
       and args =
         Command.Param.(
@@ -612,7 +628,7 @@ let compile_command =
         | Some (fdo_profile, extra_debug) ->
             Profile.record_call "compile" (fun () ->
                 Main_fdo.compile args ~fdo_profile ~reorder_blocks
-                  ~extra_debug ~crc_config ~report ~simplify_cfg;
+                  ~extra_debug ~crc_config ~report ~simplify_cfg ~simplify_spills ~verify;
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 
