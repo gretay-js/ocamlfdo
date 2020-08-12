@@ -22,5 +22,5 @@ module Solver : sig
   val solve
     :  Ocamlcfg.Cfg.t
     -> Cfg_info.t option
-    -> (Class.t * Class.t) Ocamlcfg.Inst_id.Map.t
+    -> Class.t Ocamlcfg.Analysis.solution Ocamlcfg.Inst_id.Map.t
 end

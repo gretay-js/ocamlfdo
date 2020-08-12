@@ -122,28 +122,48 @@ module Problem = struct
   open Uses
   open Use
 
-  module K = struct
+  module A = struct
     module S = Class
 
-    (** Kill-Gen information for individual instructions which can be aggregated
-      * to represent an entire basic block throug composition
-      *)
-    type t =
-      { kills: Spill.Set.t
-      (* Set of spill slots overwritten at any point. *)
-      ; gens: bool Inst_id.Map.t Spill.Map.t
-      (** Set of spill slots read at any point which also reach the first instruction,
-        * i.e. are not overwritten by preceding instructions.
-        * The flag indicates whether there is register pressure between the first
-        * instruction and the instruction using the spill slot.
+    module G = struct
+      (** Kill-Gen information for individual instructions which can be aggregated
+        * to represent an entire basic block throug composition
         *)
-      ; pressure: bool
-      (* Indicates whether there is register pressure at any of the aggregated points *)
-      ; freq: Frequency.t
-      (* The execution frequency of the block or the instruction. *)
-      }
+      type t =
+        { kills: Spill.Set.t
+        (* Set of spill slots overwritten at any point. *)
+        ; gens: bool Inst_id.Map.t Spill.Map.t
+        (** Set of spill slots read at any point which also reach the first instruction,
+          * i.e. are not overwritten by preceding instructions.
+          * The flag indicates whether there is register pressure between the first
+          * instruction and the instruction using the spill slot.
+          *)
+        ; pressure: bool
+        (* Indicates whether there is register pressure at any of the aggregated points *)
+        ; freq: Frequency.t
+        (* The execution frequency of the block or the instruction. *)
+        }
 
-    let f s { kills; gens; pressure; freq } =
+      let dot curr prev =
+        { kills = Spill.Set.union curr.kills prev.kills
+        ; gens =
+          Spill.Map.merge prev.gens curr.gens ~f:(fun ~key:_ v->
+            match v with
+            | `Both(prev_reloads, curr_reloads) ->
+              Some (Inst_id.Map.merge prev_reloads curr_reloads ~f:(fun ~key v ->
+                match v with
+                | `Both(_, curr) -> Some curr
+                | `Left _ when Spill.Set.mem curr.kills key -> None
+                | `Left a -> Some (a || curr.pressure)
+                | `Right b -> Some b))
+            | `Left a -> Some a
+            | `Right b -> Some b)
+        ; pressure = curr.pressure || prev.pressure
+        ; freq = Frequency.max curr.freq prev.freq
+        }
+    end
+
+    let f s { G.kills; gens; pressure; freq } =
       let after_pressure =
         Spill.Map_with_default.map s ~f:(fun { all_uses; reloads }->
           let reloads =
@@ -181,23 +201,6 @@ module Problem = struct
           in
           { all_uses = Path_use.Always freq; reloads }))
 
-    let dot curr prev =
-      { kills = Spill.Set.union curr.kills prev.kills
-      ; gens =
-        Spill.Map.merge prev.gens curr.gens ~f:(fun ~key:_ v->
-          match v with
-          | `Both(prev_reloads, curr_reloads) ->
-            Some (Inst_id.Map.merge prev_reloads curr_reloads ~f:(fun ~key v ->
-              match v with
-              | `Both(_, curr) -> Some curr
-              | `Left _ when Spill.Set.mem curr.kills key -> None
-              | `Left a -> Some (a || curr.pressure)
-              | `Right b -> Some b))
-          | `Left a -> Some a
-          | `Right b -> Some b)
-      ; pressure = curr.pressure || prev.pressure
-      ; freq = Frequency.max curr.freq prev.freq
-      }
   end
 
   type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option }
@@ -219,7 +222,7 @@ module Problem = struct
         let pressure = has_pressure i (Cfg.destroyed_at_basic i.desc) in
         pressure, get_kill_gen block i pressure
     in
-    K.{ kills; gens; pressure; freq }
+    A.G.{ kills; gens; pressure; freq }
 
 end
 

@@ -24,19 +24,26 @@ module Class = struct
 end
 
 module Problem = struct
-  module K = struct
+  module A = struct
     module S = Class
 
-    type t =
-      { kill: Register.Set.t;
-        (* Set of registers written or implicitly destroyed at this instruction. *)
-        gen: Register.Set.t;
-        (* Registers used in this instruction *)
-        freq: Frequency.t
-        (* Frequency of the block containing the instruction. *)
-      }
+    module G = struct
+      type t =
+        { kill: Register.Set.t;
+          (* Set of registers written or implicitly destroyed at this instruction. *)
+          gen: Register.Set.t;
+          (* Registers used in this instruction *)
+          freq: Frequency.t
+          (* Frequency of the block containing the instruction. *)
+        }
+      let dot curr prev =
+        { kill = Register.Set.union curr.kill prev.kill;
+          gen = Register.Set.union curr.gen (Register.Set.diff prev.gen curr.kill);
+          freq = Frequency.max curr.freq prev.freq
+        }
+    end
 
-    let f (s: Class.t) { kill; gen; freq } =
+    let f (s: Class.t) { G.kill; gen; freq } =
       (* Removes the killed registers and adds the used registers to the map of
        * live regsiters at this program point. If a register has no uses, the
        * frequency of the 'Never' path is updated.
@@ -51,11 +58,6 @@ module Problem = struct
       Register.Set.fold gen ~init:after_kill ~f:(fun acc reg ->
         Register.Map_with_default.set acc ~key:reg ~data:(Path_use.Always freq))
 
-    let dot curr prev =
-      { kill = Register.Set.union curr.kill prev.kill;
-        gen = Register.Set.union curr.gen (Register.Set.diff prev.gen curr.kill);
-        freq = Frequency.max curr.freq prev.freq
-      }
   end
 
   type t = { cfg: Cfg.t; cfg_info: Cfg_info.t option }
@@ -82,7 +84,7 @@ module Problem = struct
           (Register.Set.of_array destroyed)
       in
       let gen = regs_of_array (inst.Cfg.arg) in
-      { K.kill; K.gen; K.freq = Frequency.create cfg_info block }
+      { A.G.kill; gen; freq = Frequency.create cfg_info block }
     in
     match Cfg_inst_id.get_inst cfg inst with
     | `Term t -> kg t (Cfg.destroyed_at_terminator t.Cfg.desc)

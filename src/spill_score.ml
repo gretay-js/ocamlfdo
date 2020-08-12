@@ -95,7 +95,9 @@ let reloads_of_spill cfg slot ~cfg_info ~reg_uses ~reloads =
                   in
                   Some (Cfg_inst_id.at_instruction block idx, i.Cfg.res, always_uses))
         in
-        let all_reload_uses_at, _ = Cfg_inst_id.Map.find cfg_reload_id reg_uses in
+        let { Analysis.sol_in = all_reload_uses_at; _ } =
+          Cfg_inst_id.Map.find cfg_reload_id reg_uses
+        in
         let reg_other_use =
           res
             |> Array.to_list
@@ -131,7 +133,7 @@ let score cl ~cfg_info ~score_all =
             let slot = Proc.register_class reg, s in
             let cfg_spill_id = Cfg_inst_id.at_instruction start idx in
             (match Cfg_inst_id.Map.find_opt cfg_spill_id spill_uses with
-            | Some (all_spill_uses_at, _) ->
+            | Some { Analysis.sol_in = all_spill_uses_at; _ }->
               let { Spill_use.Class.Uses.all_uses; reloads } =
                 Spill.Map_with_default.find all_spill_uses_at slot
               in
