@@ -46,9 +46,9 @@ let has_pressure inst destroyed =
   let can_allocate = Int.Map.for_all free_regs ~f:(fun r -> r > 0) in
   let low_pressure =
     Int.Map.for_alli
-    live_vars
-    ~f:(fun ~key ~data ->
-        data < int_of_float (float_of_int Proc.num_available_registers.(key) *. 1.2))
+      live_vars
+      ~f:(fun ~key ~data ->
+          data < int_of_float (float_of_int Proc.num_available_registers.(key) *. 1.2))
   in
   not can_allocate || not low_pressure
 
@@ -64,9 +64,9 @@ module Class = struct
         pressure = Path_use.lub a.pressure b.pressure
       }
 
-      let never = { path = Path_use.never; pressure = Path_use.never }
+    let never = { path = Path_use.never; pressure = Path_use.never }
 
-      let bot = { path = Path_use.bot; pressure = Path_use.bot }
+    let bot = { path = Path_use.bot; pressure = Path_use.bot }
   end
 
   module Uses = struct

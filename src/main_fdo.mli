@@ -8,6 +8,7 @@ val optimize
   -> simplify_cfg:bool
   -> simplify_spills:bool
   -> verify:bool
+  -> stats:bool
   -> unit
 
 val compile
@@ -20,6 +21,7 @@ val compile
   -> simplify_cfg:bool
   -> simplify_spills:bool
   -> verify:bool
+  -> stats:bool
   -> unit
 
 val check : string list -> input:string option -> unit

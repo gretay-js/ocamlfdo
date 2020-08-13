@@ -175,7 +175,7 @@ let emit_crcs ui crcs =
   ui.items <- ui.items @ [Data dl]
 
 let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report ~simplify_cfg ~simplify_spills ~verify =
+    ~report ~simplify_cfg ~simplify_spills ~verify ~stats =
   if report then (
     Report.start ();
     Report.logf
@@ -261,12 +261,14 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     if extra_debug then emit_crcs ui crcs;
     save out_filename ui
   in
-  let process_and_profile file =
-    Statistics.record ~file:(Filenames.make_stat file)
-    @@ fun () -> Profile.record_call ~accumulate:true "process"
-    @@ fun () -> process file
+  let process_and_measure file =
+    Profile.record_call ~accumulate:true "process" (fun () ->
+      if stats then
+        Statistics.record ~file:(Filenames.make_stat file) (fun () -> process file)
+      else
+        process file)
   in
-  List.iter files ~f:process_and_profile;
+  List.iter files ~f:process_and_measure;
   Crcs.Config.report crc_config;
   ()
 
@@ -348,7 +350,7 @@ let dump files ~dot ~show_instr =
    compiler internals. There are multiple ways in which they can be set
    (e.g., from cmd line or from env or config), order matters, etc. *)
 let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-    ~report ~simplify_cfg ~simplify_spills ~verify =
+    ~report ~simplify_cfg ~simplify_spills ~verify ~stats =
   let open Wrapper in
   let w = wrap args in
   if can_split_compile w then (
@@ -357,7 +359,7 @@ let compile args ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     let files = artifacts w Filenames.Linear in
     Profile.record_call ~accumulate:true "opt" (fun () ->
         optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
-          ~report ~simplify_cfg ~simplify_spills ~verify);
+          ~report ~simplify_cfg ~simplify_spills ~verify ~stats);
     Profile.record_call ~accumulate:true "phase II:emit" (fun () ->
         call_ocamlopt w Emit) )
   else (

@@ -164,12 +164,17 @@ let flag_simplify_cfg =
 let flag_simplify_spills =
   flag_yes_no "-simplify-spills"
     ~doc:" replaces spill slot reads which spilled registers if they are still live"
-    ~default:true
+    ~default:false
 
 let flag_verify =
   flag_yes_no "-verify"
     ~doc:" checks if the live sets of instructions are a superset of all live locations"
-    ~default:true
+    ~default:false
+
+let flag_stats =
+  flag_yes_no "-stats"
+    ~doc:" print out statistics collected by transformations"
+    ~default:false
 
 let flag_dot =
   Command.Param.(
@@ -503,6 +508,7 @@ let opt_command =
       and simplify_cfg = flag_simplify_cfg
       and simplify_spills = flag_simplify_spills
       and verify = flag_verify
+      and stats = flag_stats
       and timings = flag_timings in
       if v then set_verbose true;
       if q then set_verbose false;
@@ -510,7 +516,7 @@ let opt_command =
       fun () ->
         Profile.record_call "opt" (fun () ->
             Main_fdo.optimize files ~fdo_profile ~reorder_blocks ~extra_debug
-              ~crc_config ~report ~simplify_cfg ~simplify_spills ~verify);
+              ~crc_config ~report ~simplify_cfg ~simplify_spills ~verify ~stats);
         if timings then
           Profile.print Format.std_formatter Profile.all_columns)
 
@@ -585,6 +591,7 @@ let compile_command =
       and simplify_cfg = flag_simplify_cfg
       and simplify_spills = flag_simplify_spills
       and verify = flag_verify
+      and stats = flag_stats
       and crc_config = flag_crc_config
       and args =
         Command.Param.(
@@ -628,7 +635,8 @@ let compile_command =
         | Some (fdo_profile, extra_debug) ->
             Profile.record_call "compile" (fun () ->
                 Main_fdo.compile args ~fdo_profile ~reorder_blocks
-                  ~extra_debug ~crc_config ~report ~simplify_cfg ~simplify_spills ~verify;
+                  ~extra_debug ~crc_config ~report ~simplify_cfg ~simplify_spills
+                  ~verify ~stats;
                 if timings then
                   Profile.print Format.std_formatter Profile.all_columns))
 
