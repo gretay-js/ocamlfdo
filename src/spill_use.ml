@@ -66,7 +66,7 @@ module Class = struct
 
       let never = { path = Path_use.never; pressure = Path_use.never }
 
-      let unknown = { path = Path_use.unknown; pressure = Path_use.unknown }
+      let bot = { path = Path_use.bot; pressure = Path_use.bot }
   end
 
   module Uses = struct
@@ -83,8 +83,8 @@ module Class = struct
     let never =
       { all_uses = Path_use.never; reloads = Inst_id.Map_with_default.default Use.never }
 
-    let unknown =
-      { all_uses = Path_use.unknown; reloads = Inst_id.Map_with_default.default Use.unknown }
+    let bot =
+      { all_uses = Path_use.bot; reloads = Inst_id.Map_with_default.default Use.bot }
   end
 
   type t = Uses.t Spill.Map_with_default.t [@@deriving sexp, equal]
@@ -94,7 +94,7 @@ module Class = struct
 
   let never = Spill.Map_with_default.default Uses.never
 
-  let unknown = Spill.Map_with_default.default Uses.unknown
+  let bot = Spill.Map_with_default.default Uses.bot
 end
 
 let get_kill_gen block i pressure =
@@ -163,7 +163,7 @@ module Problem = struct
         }
     end
 
-    let f s { G.kills; gens; pressure; freq } =
+    let apply s { G.kills; gens; pressure; freq } =
       let after_pressure =
         Spill.Map_with_default.map s ~f:(fun { all_uses; reloads }->
           let reloads =
@@ -207,10 +207,9 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let empty _ _ = Class.unknown
   let entry _ _ = Class.never
 
-  let kg { cfg; cfg_info; _ } inst =
+  let action { cfg; cfg_info; _ } inst =
     let block = Cfg_inst_id.parent inst in
     let freq = Frequency.create cfg_info block in
     let pressure, (kills, gens) =

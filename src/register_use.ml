@@ -19,7 +19,7 @@ module Class = struct
     Register.Map_with_default.default (Path_use.Never Frequency.zero)
 
   (** Internal nodes are initialised to unknown. *)
-  let unknown =
+  let bot =
     Register.Map_with_default.default (Path_use.Unknown)
 end
 
@@ -43,7 +43,7 @@ module Problem = struct
         }
     end
 
-    let f (s: Class.t) { G.kill; gen; freq } =
+    let apply (s: Class.t) { G.kill; gen; freq } =
       (* Removes the killed registers and adds the used registers to the map of
        * live regsiters at this program point. If a register has no uses, the
        * frequency of the 'Never' path is updated.
@@ -64,14 +64,12 @@ module Problem = struct
 
   let cfg { cfg; _ } = cfg
 
-  let empty _ _ = Class.unknown
-
   let entry _ _ = Class.never
 
-  let kg { cfg; cfg_info } inst =
+  let action { cfg; cfg_info } inst =
     (* Finds the registers read, writted or implicitly destroyed at the node *)
     let block = Cfg_inst_id.parent inst in
-    let kg inst destroyed =
+    let action inst destroyed =
       let regs_of_array =
         Array.fold ~init:Register.Set.empty ~f:(fun acc reg ->
           match reg.Reg.loc with
@@ -87,8 +85,8 @@ module Problem = struct
       { A.G.kill; gen; freq = Frequency.create cfg_info block }
     in
     match Cfg_inst_id.get_inst cfg inst with
-    | `Term t -> kg t (Cfg.destroyed_at_terminator t.Cfg.desc)
-    | `Basic i -> kg i (Cfg.destroyed_at_basic i.Cfg.desc)
+    | `Term t -> action t (Cfg.destroyed_at_terminator t.Cfg.desc)
+    | `Basic i -> action i (Cfg.destroyed_at_basic i.Cfg.desc)
 end
 
 module Solver = struct

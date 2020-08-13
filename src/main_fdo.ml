@@ -231,7 +231,8 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
       let skipped = ref 0 in
       let total = ref 0 in
       let new_items =
-        List.map ui.items ~f:(fun item ->
+        ui.items
+        |> List.rev_map ~f:(fun item ->
             match item with
             | Data dl -> Data dl
             | Func f -> (
@@ -248,6 +249,7 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
                 | true -> transform ~alternatives:[]
                 | exception Crcs.Near_match alternatives ->
                     transform ~alternatives ))
+        |> List.rev
       in
       if !skipped > 0 then
         Report.logf

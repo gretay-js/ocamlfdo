@@ -29,6 +29,8 @@ let lub a b =
   | Sometimes (always_a, never_a), Sometimes (always_b, never_b) ->
     Sometimes (Frequency.lub always_a always_b, Frequency.lub never_a never_b)
 
+let bot = Unknown
+
 let max a b =
   match a, b with
   | Unknown, _ -> b
@@ -54,7 +56,6 @@ let is_less_frequent = function
 
 let never = Never Frequency.zero
 
-let unknown = Unknown
 
 let update_never v freq =
   match v with

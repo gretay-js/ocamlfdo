@@ -28,6 +28,9 @@ type t
 (* Least Upper Bound of two lattice elements. *)
 val lub : t -> t -> t
 
+(* Bottom value of the lattice - unknown *)
+val bot : t
+
 (** Picks the most frequently used path from the uses of multiple
   * values over overlapping paths. *)
 val max : t -> t -> t
@@ -40,9 +43,6 @@ val is_less_frequent : t -> bool
 
 (* No use with no frequency count *)
 val never : t
-
-(* Unknown value *)
-val unknown : t
 
 (* If the value is Never, updates the frequency if it is higher *)
 val update_never : t -> Frequency.t -> t
