@@ -2,6 +2,7 @@ open Core
 open Core.Poly
 module CL = Ocamlcfg.Cfg_with_layout
 module CP = Ocamlcfg.Passes
+module Statistics = Ocamlcfg.Statistics
 module AD = Aggregated_decoded_profile
 module A = Aggregated_perf_profile
 
@@ -260,10 +261,12 @@ let optimize files ~fdo_profile ~reorder_blocks ~extra_debug ~crc_config
     if extra_debug then emit_crcs ui crcs;
     save out_filename ui
   in
-  let process file =
-    Profile.record_call ~accumulate:true "process" (fun () -> process file)
+  let process_and_profile file =
+    Statistics.record ~file:(Filenames.make_stat file)
+    @@ fun () -> Profile.record_call ~accumulate:true "process"
+    @@ fun () -> process file
   in
-  List.iter files ~f:process;
+  List.iter files ~f:process_and_profile;
   Crcs.Config.report crc_config;
   ()
 

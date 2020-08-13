@@ -22,6 +22,8 @@ let suffix = function
 
 let make_fdo file = file ^ "-fdo"
 
+let make_stat file = file ^ "-stat"
+
 (* does s end with one of the extensions of t *)
 let is_legal t s = List.exists (suffix t) ~f:(fun suffix -> String.is_suffix s ~suffix)
 

@@ -17,6 +17,8 @@ val make : t -> string -> string
 
 val make_fdo : string -> string
 
+val make_stat : string -> string
+
 val verbose : bool ref
 
 val to_symbol : string -> string
