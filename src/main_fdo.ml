@@ -138,6 +138,7 @@ let transform f ~algo ~extra_debug ~simplify_cfg ~simplify_spills ~verify ~alter
         CP.simplify_terminators (CL.cfg cl));
   if simplify_spills then
     Profile.record_call ~accumulate:true "simplify" (fun () ->
+        CP.spill_reload_sink (CL.cfg cl);
         CP.slot_to_register (CL.cfg cl);
         if verify then CP.verify_liveness (CL.cfg cl));
   ( if extra_debug then
