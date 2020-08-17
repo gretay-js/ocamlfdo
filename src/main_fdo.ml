@@ -319,8 +319,10 @@ let check files ~input =
 let dump files ~dot ~show_instr =
   let open Linear_format in
   let dump_linear _oc ppf = function
-    | Func f -> Printlinear.fundecl ppf f
-    | Data dl -> Printcmm.data ppf dl
+    | Func f -> Printlinear.fundecl ppf f;
+      Format.fprintf ppf "@."
+    | Data dl -> Printcmm.data ppf dl;
+      Format.fprintf ppf "@."
   in
   let dump_cfg _oc ppf = function
     | Data _ -> ()
