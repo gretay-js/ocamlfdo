@@ -139,6 +139,7 @@ let transform f ~algo ~extra_debug ~simplify_cfg ~simplify_spills ~verify ~alter
   if simplify_spills then
     Profile.record_call ~accumulate:true "simplify" (fun () ->
         CP.slot_to_register (CL.cfg cl);
+        CP.spill_reload_sink cl;
         if verify then CP.verify_liveness (CL.cfg cl));
   ( if extra_debug then
     let file = Filenames.(to_symbol f.fun_name |> make Linear) in
