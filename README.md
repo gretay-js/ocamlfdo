@@ -127,7 +127,7 @@ compiler in build 2, and the linker will find
 ## Integration with dune
 
 A new version of dune, with [support for
-FDO](https://github/gretay-js/dune) is under review.
+FDO](https://github.com/gretay-js/dune) is under review.
 ```
 opam pin add dune https://github.com/gretay-js/dune.git#fdo-decode
 ```
